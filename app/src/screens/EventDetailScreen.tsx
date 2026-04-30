@@ -365,7 +365,19 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const participantCount = participants.length;
   const myColors = myParticipantId ? participantColors[myParticipantId] ?? [] : [];
   const hasDeclaredColors = myColors.length > 0;
-  const startDraftDisabled = !event?.cube_id || !event?.venue_id || participantCount < 1;
+  const missingCube = !event?.cube_id;
+  const missingVenue = !event?.venue_id;
+  const missingParticipants = participantCount < 1;
+  const startDraftDisabled = missingCube || missingVenue || missingParticipants;
+  const missingStartRequirements: string[] = [];
+  if (missingCube) missingStartRequirements.push('seleccionar el cubo');
+  if (missingVenue) missingStartRequirements.push('seleccionar la sede');
+  if (missingParticipants) {
+    missingStartRequirements.push('que se inscriba al menos un jugador');
+  }
+  const startDraftDisabledHint = missingStartRequirements.length
+    ? `Falta ${missingStartRequirements.join(', ')}`
+    : '';
 
   const canOpenMatchups =
     event?.status === 'playing' || event?.status === 'completed'
@@ -491,7 +503,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           ) : null}
           {event.status === 'scheduled' && startDraftDisabled ? (
             <Text style={styles.disabledHint}>
-              Falta seleccionar cubo, sede, o que se inscriba al menos un jugador
+              {startDraftDisabledHint}
             </Text>
           ) : null}
           {event.draft_started_at && !event.draft_ended_at ? (
@@ -514,12 +526,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               <Text style={styles.secondaryBtnTxt}>Marcar fin del draft</Text>
             </TouchableOpacity>
           ) : null}
-          {(event.status === 'scheduled' || event.status === 'drafting') ? (
+          {(event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id ? (
             <TouchableOpacity
               style={styles.secondaryBtn}
               onPress={() => navigation.navigate('CubeRoulette', { eventId: event.id })}
             >
-              <Text style={styles.secondaryBtnTxt}>Tirar ruleta de cubos</Text>
+              <Text style={styles.secondaryBtnTxt}>Ruleta</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
@@ -624,16 +636,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <TouchableOpacity style={styles.placeholderBtn} onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en Sprint 3B.')}>
           <Text style={styles.placeholderTxt}>Bitácora digital</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.placeholderBtn}
-          onPress={() =>
-            isOrganizer && (event.status === 'scheduled' || event.status === 'drafting')
-              ? navigation.navigate('CubeRoulette', { eventId: event.id })
-              : Alert.alert('Ruleta de cubos', 'Solo disponible para organizadores en eventos programados o drafteando.')
-          }
-        >
-          <Text style={styles.placeholderTxt}>Ruleta de cubos</Text>
-        </TouchableOpacity>
+        {((event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id) ? (
+          <TouchableOpacity
+            style={styles.placeholderBtn}
+            onPress={() =>
+              isOrganizer
+                ? navigation.navigate('CubeRoulette', { eventId: event.id })
+                : Alert.alert('Ruleta', 'Solo disponible para organizadores.')
+            }
+          >
+            <Text style={styles.placeholderTxt}>Ruleta</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </ScrollView>
   );
