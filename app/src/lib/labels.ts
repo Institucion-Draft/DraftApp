@@ -33,3 +33,18 @@ export function getEventTypeLabel(eventType: EventType): string {
 export function getPairingsLabel(): string {
   return 'Enfrentamientos';
 }
+
+export function getPairingStatusLabel(
+  status: 'in_progress' | 'scheduled' | 'completed'
+): string {
+  switch (status) {
+    case 'in_progress':
+      return 'En vivo';
+    case 'scheduled':
+      return 'Por venir';
+    case 'completed':
+      return 'Terminado';
+    default:
+      return status;
+  }
+}

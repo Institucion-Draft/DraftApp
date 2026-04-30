@@ -19,4 +19,7 @@ export type MainStackParamList = {
   EventDetail: { eventId: string };
   EditEvent: { eventId: string };
   EventCheckIn: { eventId: string };
+  PairingsList: { eventId: string };
+  PairingDetail: { pairingId: string };
+  CubeRoulette: { eventId: string };
 };

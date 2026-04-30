@@ -22,6 +22,9 @@ import CreateEventScreen from '../screens/CreateEventScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import EventCheckInScreen from '../screens/EventCheckInScreen';
+import PairingsListScreen from '../screens/PairingsListScreen';
+import PairingDetailScreen from '../screens/PairingDetailScreen';
+import CubeRouletteScreen from '../screens/CubeRouletteScreen';
 import type { MainStackParamList } from './mainStackParams';
 
 export type { MainStackParamList } from './mainStackParams';
@@ -119,6 +122,9 @@ export default function MainNavigator() {
         <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Check-in', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="PairingsList" component={PairingsListScreen} options={{ title: 'Enfrentamientos', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="PairingDetail" component={PairingDetailScreen} options={{ title: 'Enfrentamiento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CubeRoulette" component={CubeRouletteScreen} options={{ title: 'Ruleta de cubos', headerBackTitle: 'Atrás' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

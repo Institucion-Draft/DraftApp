@@ -108,3 +108,27 @@ export type ParticipantColor = {
   participant_id: string;
   color: MtgColor;
 };
+
+export type Pairing = {
+  id: string;
+  event_id: string;
+  participant_a_id: string;
+  participant_b_id: string;
+  official_winner_participant_id: string | null;
+  super_cup_winner_participant_id: string | null;
+  data_source: 'app' | 'imported_notebook' | 'manual_entry';
+  created_at: string;
+};
+
+export type Match = {
+  id: string;
+  pairing_id: string;
+  match_number: number;
+  match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant';
+  winner_participant_id: string | null;
+  life_tracker_user_id: string | null;
+  status: 'in_progress' | 'completed' | 'aborted';
+  started_at: string;
+  ended_at: string | null;
+  data_source: 'app' | 'imported_notebook' | 'manual_entry';
+};

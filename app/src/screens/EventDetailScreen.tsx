@@ -55,6 +55,13 @@ type ParticipantView = {
     | null;
 };
 
+type PairingInsert = {
+  event_id: string;
+  participant_a_id: string;
+  participant_b_id: string;
+  data_source: 'app';
+};
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -192,6 +199,165 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     if (error) {
       Alert.alert('Error', error.message ?? 'No se pudo actualizar el evento.');
       return;
+    }
+    await load();
+  };
+
+  const finishDraftAndGeneratePairings = async () => {
+    if (!event) return;
+
+    const toPlaying = await supabase
+      .from('draft_events')
+      .update({ draft_ended_at: new Date().toISOString(), status: 'playing' })
+      .eq('id', event.id);
+    if (toPlaying.error) {
+      if (__DEV__) {
+        console.error('[finishDraft] Error actualizando evento a playing', toPlaying.error);
+      }
+      Alert.alert('Error', toPlaying.error.message ?? 'No se pudo marcar fin del draft.');
+      return;
+    }
+
+    const partsRes = await supabase
+      .from('event_participants')
+      .select(
+        `
+        id,
+        users!event_participants_user_id_fkey (
+          display_name,
+          username
+        )
+      `
+      )
+      .eq('event_id', event.id)
+      .eq('role', 'player');
+
+    if (partsRes.error) {
+      if (__DEV__) {
+        console.error('[finishDraft] Error cargando participantes', partsRes.error);
+      }
+      await supabase
+        .from('draft_events')
+        .update({ status: 'drafting', draft_ended_at: null })
+        .eq('id', event.id);
+      Alert.alert('Error', partsRes.error.message ?? 'No se pudieron generar los enfrentamientos.');
+      await load();
+      return;
+    }
+
+    const players = ((partsRes.data ?? []) as Array<{ id: string; users: any }>).map((p) => {
+      const u = relationOne(p.users) as { display_name?: string; username?: string } | null;
+      const name = (u?.display_name || u?.username || '').trim();
+      return { id: p.id, sortName: name.toLocaleLowerCase('es-AR') };
+    });
+
+    if (players.length < 2) {
+      if (__DEV__) {
+        console.error('[finishDraft] Jugadores insuficientes para generar pairings', {
+          eventId: event.id,
+          playersLength: players.length,
+        });
+      }
+      await supabase
+        .from('draft_events')
+        .update({ status: 'drafting', draft_ended_at: null })
+        .eq('id', event.id);
+      Alert.alert('Error', 'Se necesitan al menos 2 jugadores para generar enfrentamientos.');
+      await load();
+      return;
+    }
+
+    players.sort((a, b) => a.sortName.localeCompare(b.sortName, 'es', { sensitivity: 'base' }));
+
+    const inserts: PairingInsert[] = [];
+    for (let i = 0; i < players.length; i += 1) {
+      for (let j = i + 1; j < players.length; j += 1) {
+        const aId = players[i]?.id ?? '';
+        const bId = players[j]?.id ?? '';
+        if (!aId || !bId || aId === bId) continue;
+        const participant_a_id = aId < bId ? aId : bId;
+        const participant_b_id = aId < bId ? bId : aId;
+        inserts.push({
+          event_id: event.id,
+          participant_a_id,
+          participant_b_id,
+          data_source: 'app',
+        });
+      }
+    }
+
+    if (inserts.length === 0) {
+      if (__DEV__) {
+        console.error('[finishDraft] inserts vacío con jugadores suficientes', {
+          eventId: event.id,
+          playersLength: players.length,
+          playerIds: players.map((p) => p.id),
+        });
+      }
+      await supabase
+        .from('draft_events')
+        .update({ status: 'drafting', draft_ended_at: null })
+        .eq('id', event.id);
+      Alert.alert('Error', 'No se pudieron generar enfrentamientos. Probá de nuevo.');
+      await load();
+      return;
+    }
+
+    if (inserts.length > 0) {
+      const insertRes = await supabase.from('pairings').upsert(inserts, {
+        onConflict: 'event_id,participant_a_id,participant_b_id',
+        ignoreDuplicates: true,
+      });
+      if (insertRes.error) {
+        if (__DEV__) {
+          console.error('[finishDraft] Error insertando/upsert pairings', insertRes.error);
+        }
+        await supabase
+          .from('draft_events')
+          .update({ status: 'drafting', draft_ended_at: null })
+          .eq('id', event.id);
+        Alert.alert('Error', insertRes.error.message ?? 'No se pudieron crear los enfrentamientos.');
+        await load();
+        return;
+      }
+    }
+
+    const verifyRes = await supabase
+      .from('pairings')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', event.id);
+    if (verifyRes.error) {
+      if (__DEV__) {
+        console.error('[finishDraft] Error verificando pairings insertados', verifyRes.error);
+      }
+      await supabase
+        .from('draft_events')
+        .update({ status: 'drafting', draft_ended_at: null })
+        .eq('id', event.id);
+      Alert.alert('Error', verifyRes.error.message ?? 'No se pudieron verificar los enfrentamientos generados.');
+      await load();
+      return;
+    }
+    const totalInDb = verifyRes.count ?? 0;
+    if (totalInDb !== inserts.length) {
+      if (__DEV__) {
+        console.error('[finishDraft] Verificación inconsistente de pairings', {
+          eventId: event.id,
+          expected: inserts.length,
+          actual: totalInDb,
+        });
+      }
+      await supabase
+        .from('draft_events')
+        .update({ status: 'drafting', draft_ended_at: null })
+        .eq('id', event.id);
+      Alert.alert('Error', 'No se pudieron generar enfrentamientos. Probá de nuevo.');
+      await load();
+      return;
+    }
+
+    if (inserts.length > 0) {
+      Alert.alert('Listo', `Se generaron ${inserts.length} enfrentamientos`);
     }
     await load();
   };
@@ -339,13 +505,21 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                     { text: 'Volver', style: 'cancel' },
                     {
                       text: 'Marcar fin',
-                      onPress: () => void patchEvent({ draft_ended_at: new Date().toISOString(), status: 'playing' }),
+                      onPress: () => void finishDraftAndGeneratePairings(),
                     },
                   ]
                 )
               }
             >
               <Text style={styles.secondaryBtnTxt}>Marcar fin del draft</Text>
+            </TouchableOpacity>
+          ) : null}
+          {(event.status === 'scheduled' || event.status === 'drafting') ? (
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => navigation.navigate('CubeRoulette', { eventId: event.id })}
+            >
+              <Text style={styles.secondaryBtnTxt}>Tirar ruleta de cubos</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity
@@ -441,7 +615,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           style={styles.placeholderBtn}
           onPress={() =>
             canOpenMatchups
-              ? Alert.alert('Próximamente', 'Enfrentamientos llegará en Sprint 3B.')
+              ? navigation.navigate('PairingsList', { eventId: event.id })
               : Alert.alert('Enfrentamientos', 'Los enfrentamientos se habilitan después del draft.')
           }
         >
@@ -450,7 +624,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <TouchableOpacity style={styles.placeholderBtn} onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en Sprint 3B.')}>
           <Text style={styles.placeholderTxt}>Bitácora digital</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.placeholderBtn} onPress={() => Alert.alert('Próximamente', 'Ruleta de cubos llegará en Sprint 3B.')}>
+        <TouchableOpacity
+          style={styles.placeholderBtn}
+          onPress={() =>
+            isOrganizer && (event.status === 'scheduled' || event.status === 'drafting')
+              ? navigation.navigate('CubeRoulette', { eventId: event.id })
+              : Alert.alert('Ruleta de cubos', 'Solo disponible para organizadores en eventos programados o drafteando.')
+          }
+        >
           <Text style={styles.placeholderTxt}>Ruleta de cubos</Text>
         </TouchableOpacity>
       </View>
