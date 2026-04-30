@@ -34,8 +34,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const [rouletteType, setRouletteType] = useState<RouletteType>('cubes');
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [lastMessage, setLastMessage] = useState<string | null>(null);
-  const [showRepeat, setShowRepeat] = useState(false);
+  const [resultCubeName, setResultCubeName] = useState<string | null>(null);
   const [manualCubePickerForUserId, setManualCubePickerForUserId] = useState<string | null>(null);
   const [selectedCubeId, setSelectedCubeId] = useState<string | null>(null);
   const pulse = useRef(new Animated.Value(1)).current;
@@ -153,8 +152,6 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const spin = async () => {
     if (spinning || options.length === 0) return;
     setSpinning(true);
-    setShowRepeat(false);
-    setLastMessage(null);
     setManualCubePickerForUserId(null);
     setSelectedCubeId(null);
 
@@ -188,14 +185,12 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
           setSpinning(false);
           return;
         }
-        setLastMessage(`Cubo seleccionado: ${result.label}`);
+        setResultCubeName(result.label);
       } else if (result.kind === 'player_chooses') {
         await saveSpin({ roulette_type: 'cubes', result_type: 'player_chooses' });
         setRouletteType('players');
-        setLastMessage('Jugador elige: ahora tirá la ruleta de jugadores.');
       } else {
         await saveSpin({ roulette_type: 'cubes', result_type: 'everyone_smokes' });
-        setLastMessage('Todos fuman, repetir tirada.');
       }
     } else {
       if (result.kind === 'player') {
@@ -205,18 +200,14 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
           selected_player_user_id: result.key,
         });
         setManualCubePickerForUserId(result.key);
-        setLastMessage(`${result.label} elige el cubo. Seleccionalo abajo.`);
       } else if (result.kind === 'roulette_chooses') {
         await saveSpin({ roulette_type: 'players', result_type: 'roulette_chooses' });
         setRouletteType('cubes');
-        setLastMessage('Ruleta elige: volvés a la ruleta de cubos.');
       } else {
         await saveSpin({ roulette_type: 'players', result_type: 'everyone_smokes' });
-        setLastMessage('Todos fuman, repetir tirada.');
       }
     }
 
-    setShowRepeat(true);
     setSpinning(false);
   };
 
@@ -234,7 +225,16 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     if (!okUpdate) return;
     setManualCubePickerForUserId(null);
     setSelectedCubeId(null);
-    setLastMessage(`Cubo seleccionado: ${chosen?.name ?? 'Sin nombre'}`);
+    setResultCubeName(chosen?.name ?? 'Sin nombre');
+  };
+
+  const resetToInitial = () => {
+    setRouletteType('cubes');
+    setHighlightIndex(null);
+    setSpinning(false);
+    setResultCubeName(null);
+    setManualCubePickerForUserId(null);
+    setSelectedCubeId(null);
   };
 
   if (loading) {
@@ -260,38 +260,45 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       <Text style={styles.title}>
         {rouletteType === 'cubes' ? 'Ruleta de cubos' : 'Ruleta de jugadores'}
       </Text>
-      <Text style={styles.subtitle}>
-        {rouletteType === 'cubes'
-          ? 'Opciones: cubos del workspace + Jugador elige + Todos fuman.'
-          : 'Opciones: jugadores + Ruleta elige + Todos fuman.'}
-      </Text>
+      {resultCubeName ? (
+        <View style={styles.resultBlock}>
+          <Text style={styles.result}>Cubo seleccionado: {resultCubeName}</Text>
+          <TouchableOpacity
+            style={styles.spinBtn}
+            onPress={() => navigation.navigate('EventDetail', { eventId })}
+          >
+            <Text style={styles.spinTxt}>Volver al evento</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.repeatBtn} onPress={resetToInitial}>
+            <Text style={styles.repeatTxt}>Repetir ruleteada</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          {options.map((o, idx) => (
+            <Animated.View
+              key={o.key}
+              style={[
+                styles.option,
+                highlightIndex === idx && styles.optionActive,
+                highlightIndex === idx ? { transform: [{ scale: pulse }] } : null,
+              ]}
+            >
+              <Text style={styles.optionTxt}>{o.label}</Text>
+            </Animated.View>
+          ))}
 
-      {options.map((o, idx) => (
-        <Animated.View
-          key={o.key}
-          style={[
-            styles.option,
-            highlightIndex === idx && styles.optionActive,
-            highlightIndex === idx ? { transform: [{ scale: pulse }] } : null,
-          ]}
-        >
-          <Text style={styles.optionTxt}>{o.label}</Text>
-        </Animated.View>
-      ))}
+          <TouchableOpacity
+            style={[styles.spinBtn, spinning && styles.spinDisabled]}
+            onPress={() => void spin()}
+            disabled={spinning}
+          >
+            <Text style={styles.spinTxt}>{spinning ? 'Girando...' : 'Tirar ruleta'}</Text>
+          </TouchableOpacity>
+        </>
+      )}
 
-      <TouchableOpacity style={[styles.spinBtn, spinning && styles.spinDisabled]} onPress={() => void spin()} disabled={spinning}>
-        <Text style={styles.spinTxt}>{spinning ? 'Girando...' : 'Tirar ruleta'}</Text>
-      </TouchableOpacity>
-
-      {showRepeat ? (
-        <TouchableOpacity style={styles.repeatBtn} onPress={() => void spin()}>
-          <Text style={styles.repeatTxt}>Repetir ruleteada</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {lastMessage ? <Text style={styles.result}>{lastMessage}</Text> : null}
-
-      {manualCubePickerForUserId ? (
+      {manualCubePickerForUserId && !resultCubeName ? (
         <View style={styles.manualBlock}>
           <Text style={styles.manualTitle}>Seleccionar cubo manualmente</Text>
           {cubes.map((c) => (
@@ -313,9 +320,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-        <Text style={styles.backTxt}>Volver</Text>
-      </TouchableOpacity>
+      {!resultCubeName ? (
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('EventDetail', { eventId })}>
+          <Text style={styles.backTxt}>Volver</Text>
+        </TouchableOpacity>
+      ) : null}
     </ScrollView>
   );
 }
@@ -325,8 +334,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 24, paddingBottom: 34 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', padding: 24 },
   denied: { color: '#666', fontSize: 15, textAlign: 'center' },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 8 },
-  subtitle: { color: '#666', marginBottom: 14 },
+  title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 14 },
   option: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: '#fafafa' },
   optionActive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
   optionTxt: { color: '#111', fontWeight: '600' },
@@ -335,6 +343,7 @@ const styles = StyleSheet.create({
   spinTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
   repeatBtn: { marginTop: 10, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   repeatTxt: { color: '#3B82F6', fontWeight: '700' },
+  resultBlock: { marginTop: 6 },
   result: { marginTop: 12, color: '#166534', fontWeight: '600' },
   manualBlock: { marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#eee', paddingTop: 12 },
   manualTitle: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 8 },
