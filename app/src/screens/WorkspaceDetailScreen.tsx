@@ -107,7 +107,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         `
         role,
         user_id,
-        users (
+        users!workspace_members_user_id_fkey (
           username,
           display_name,
           custom_avatar_path,
@@ -126,7 +126,13 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     }
 
     if (memError) {
-      Alert.alert('Error', 'No se pudieron cargar los miembros.');
+      if (__DEV__) {
+        console.error('Error cargando miembros del workspace:', memError);
+      }
+      Alert.alert(
+        'Error',
+        memError.message ?? 'No se pudieron cargar los miembros.'
+      );
       setMembers([]);
       return;
     }
@@ -212,6 +218,27 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         )}
       </View>
 
+      <View style={styles.memberActions}>
+        <TouchableOpacity
+          style={styles.memberBtn}
+          onPress={() => navigation.navigate('EventsList', { workspaceId })}
+        >
+          <Text style={styles.memberBtnText}>Ver eventos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.memberBtn}
+          onPress={() => navigation.navigate('CubesList', { workspaceId })}
+        >
+          <Text style={styles.memberBtnText}>Ver cubos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.memberBtn}
+          onPress={() => navigation.navigate('VenuesList', { workspaceId })}
+        >
+          <Text style={styles.memberBtnText}>Ver sedes</Text>
+        </TouchableOpacity>
+      </View>
+
       {isOrganizer ? (
         <View style={styles.orgSection}>
           <Text style={styles.sectionTitle}>Acciones de organizador</Text>
@@ -240,7 +267,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.orgBtn}
-            onPress={() => placeholder('Crear evento')}
+            onPress={() => navigation.navigate('CreateEvent', { workspaceId })}
           >
             <Text style={styles.orgBtnText}>Crear evento</Text>
           </TouchableOpacity>
@@ -327,6 +354,25 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 22,
+  },
+  memberActions: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  memberBtn: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  memberBtnText: {
+    color: '#374151',
+    fontSize: 15,
+    fontWeight: '600',
   },
   muted: {
     fontSize: 15,

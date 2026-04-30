@@ -10,6 +10,18 @@ import MyJoinRequestsScreen from '../screens/MyJoinRequestsScreen';
 import IncomingJoinRequestsScreen from '../screens/IncomingJoinRequestsScreen';
 import GenerateInviteScreen from '../screens/GenerateInviteScreen';
 import JoinByCodeScreen from '../screens/JoinByCodeScreen';
+import CubesListScreen from '../screens/CubesListScreen';
+import CreateCubeScreen from '../screens/CreateCubeScreen';
+import CubeDetailScreen from '../screens/CubeDetailScreen';
+import EditCubeScreen from '../screens/EditCubeScreen';
+import VenuesListScreen from '../screens/VenuesListScreen';
+import CreateVenueScreen from '../screens/CreateVenueScreen';
+import EditVenueScreen from '../screens/EditVenueScreen';
+import EventsListScreen from '../screens/EventsListScreen';
+import CreateEventScreen from '../screens/CreateEventScreen';
+import EventDetailScreen from '../screens/EventDetailScreen';
+import EditEventScreen from '../screens/EditEventScreen';
+import EventCheckInScreen from '../screens/EventCheckInScreen';
 import type { MainStackParamList } from './mainStackParams';
 
 export type { MainStackParamList } from './mainStackParams';
@@ -95,6 +107,18 @@ export default function MainNavigator() {
             headerBackTitle: 'Atrás',
           }}
         />
+        <Stack.Screen name="CubesList" component={CubesListScreen} options={{ title: 'Cubos', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CreateCube" component={CreateCubeScreen} options={{ title: 'Nuevo cubo', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CubeDetail" component={CubeDetailScreen} options={{ title: 'Cubo', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EditCube" component={EditCubeScreen} options={{ title: 'Editar cubo', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="VenuesList" component={VenuesListScreen} options={{ title: 'Sedes', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CreateVenue" component={CreateVenueScreen} options={{ title: 'Nueva sede', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EditVenue" component={EditVenueScreen} options={{ title: 'Editar sede', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: 'Eventos', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CreateEvent" component={CreateEventScreen} options={{ title: 'Nuevo evento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Check-in', headerBackTitle: 'Atrás' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

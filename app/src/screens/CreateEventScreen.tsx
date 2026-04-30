@@ -1,0 +1,272 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import type { EventType } from '../lib/database.types';
+import type { MainStackParamList } from '../navigation/mainStackParams';
+import { getEventTypeLabel } from '../lib/labels';
+
+type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
+type SimpleOption = { id: string; name: string };
+
+const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
+  { value: 'draft', label: getEventTypeLabel('draft') },
+  { value: 'tournament', label: getEventTypeLabel('tournament') },
+  { value: 'pepidraft', label: getEventTypeLabel('pepidraft') },
+];
+
+function pickFromOptions(
+  title: string,
+  options: { id: string; label: string; onPress: () => void }[]
+) {
+  Alert.alert(title, undefined, [
+    ...options.map((o) => ({ text: o.label, onPress: o.onPress })),
+    { text: 'Cancelar', style: 'cancel' },
+  ]);
+}
+
+export default function CreateEventScreen({ route, navigation }: Props) {
+  const { workspaceId } = route.params;
+  const { user } = useAuth();
+  const [name, setName] = useState('');
+  const [eventType, setEventType] = useState<EventType>('draft');
+  const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
+  const [showIosPicker, setShowIosPicker] = useState(false);
+  const [cubeId, setCubeId] = useState<string | null>(null);
+  const [venueId, setVenueId] = useState<string | null>(null);
+  const [notes, setNotes] = useState('');
+  const [cubes, setCubes] = useState<SimpleOption[]>([]);
+  const [venues, setVenues] = useState<SimpleOption[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      const [countRes, cubesRes, venuesRes] = await Promise.all([
+        supabase
+          .from('draft_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspaceId),
+        supabase.from('cubes').select('id, name').eq('workspace_id', workspaceId).order('name', { ascending: true }),
+        supabase.from('venues').select('id, name').eq('workspace_id', workspaceId).order('name', { ascending: true }),
+      ]);
+      setLoadingOptions(false);
+
+      if (!countRes.error) {
+        setName(`Draft ${(countRes.count ?? 0) + 1}`);
+      } else {
+        setName('Draft');
+      }
+
+      if (cubesRes.error || venuesRes.error) {
+        Alert.alert('Error', 'No se pudieron cargar cubos/sedes.');
+      }
+      setCubes(((cubesRes.data ?? []) as SimpleOption[]).map((c) => ({ id: c.id, name: c.name })));
+      setVenues(((venuesRes.data ?? []) as SimpleOption[]).map((v) => ({ id: v.id, name: v.name })));
+    })();
+  }, [workspaceId]);
+
+  const cubeLabel = useMemo(() => cubes.find((c) => c.id === cubeId)?.name ?? 'Sin definir', [cubeId, cubes]);
+  const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
+  const typeLabel = EVENT_TYPE_OPTIONS.find((t) => t.value === eventType)?.label ?? eventType;
+
+  const validate = (): string | null => {
+    const n = name.trim();
+    if (n.length < 1 || n.length > 80) return 'El nombre debe tener entre 1 y 80 caracteres.';
+    if (notes.length > 2000) return 'Las notas no pueden superar 2000 caracteres.';
+    return null;
+  };
+
+  const onCreate = async () => {
+    const err = validate();
+    if (err) return Alert.alert('Revisá los datos', err);
+    if (!user?.id) return Alert.alert('Error', 'No hay sesión activa.');
+
+    setSubmitting(true);
+    const { data, error } = await supabase
+      .from('draft_events')
+      .insert({
+        workspace_id: workspaceId,
+        name: name.trim(),
+        event_type: eventType,
+        scheduled_for: scheduledFor.toISOString(),
+        cube_id: cubeId,
+        venue_id: venueId,
+        notes: notes.trim() || null,
+        created_by: user.id,
+        status: 'scheduled',
+      })
+      .select('id')
+      .maybeSingle();
+    setSubmitting(false);
+
+    if (error || !data) {
+      Alert.alert('Error', error?.message ?? 'No se pudo crear el evento.');
+      return;
+    }
+    navigation.replace('EventDetail', { eventId: data.id as string });
+  };
+
+  const openEventTypePicker = () =>
+    pickFromOptions(
+      'Tipo de evento',
+      EVENT_TYPE_OPTIONS.map((opt) => ({
+        id: opt.value,
+        label: opt.label,
+        onPress: () => setEventType(opt.value),
+      }))
+    );
+
+  const openCubePicker = () =>
+    pickFromOptions('Seleccionar cubo', [
+      { id: 'none', label: 'Sin definir', onPress: () => setCubeId(null) },
+      ...cubes.map((c) => ({ id: c.id, label: c.name, onPress: () => setCubeId(c.id) })),
+    ]);
+
+  const openVenuePicker = () =>
+    pickFromOptions('Seleccionar sede', [
+      { id: 'none', label: 'Sin definir', onPress: () => setVenueId(null) },
+      ...venues.map((v) => ({ id: v.id, label: v.name, onPress: () => setVenueId(v.id) })),
+    ]);
+
+  const openDatePicker = () => {
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: scheduledFor,
+        mode: 'date',
+        onChange: (_, date) => {
+          if (!date) return;
+          const withDate = new Date(scheduledFor);
+          withDate.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+          setScheduledFor(withDate);
+          DateTimePickerAndroid.open({
+            value: withDate,
+            mode: 'time',
+            is24Hour: true,
+            onChange: (__2, time) => {
+              if (!time) return;
+              const done = new Date(withDate);
+              done.setHours(time.getHours(), time.getMinutes(), 0, 0);
+              setScheduledFor(done);
+            },
+          });
+        },
+      });
+    } else {
+      setShowIosPicker(true);
+    }
+  };
+
+  if (loadingOptions) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#3B82F6" />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      <Text style={styles.label}>Nombre</Text>
+      <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
+
+      <Text style={styles.label}>Tipo de evento</Text>
+      <TouchableOpacity style={styles.pickerBtn} onPress={openEventTypePicker}>
+        <Text style={styles.pickerTxt}>{typeLabel}</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.label}>Fecha y hora</Text>
+      <TouchableOpacity style={styles.pickerBtn} onPress={openDatePicker}>
+        <Text style={styles.pickerTxt}>
+          {scheduledFor.toLocaleString('es-AR', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </Text>
+      </TouchableOpacity>
+
+      {Platform.OS === 'ios' && showIosPicker ? (
+        <View style={styles.iosPickerWrap}>
+          <DateTimePicker
+            value={scheduledFor}
+            mode="datetime"
+            onChange={(_, d) => {
+              if (d) setScheduledFor(d);
+            }}
+          />
+          <TouchableOpacity onPress={() => setShowIosPicker(false)} style={styles.iosDone}>
+            <Text style={styles.iosDoneTxt}>Listo</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <Text style={styles.label}>Cubo</Text>
+      <TouchableOpacity style={styles.pickerBtn} onPress={openCubePicker}>
+        <Text style={styles.pickerTxt}>{cubeLabel}</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.label}>Sede</Text>
+      <TouchableOpacity style={styles.pickerBtn} onPress={openVenuePicker}>
+        <Text style={styles.pickerTxt}>{venueLabel}</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.label}>Notas (opcional)</Text>
+      <TextInput style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={2000} />
+      <Text style={styles.counter}>{notes.length}/2000</Text>
+
+      <TouchableOpacity style={[styles.primaryBtn, submitting && styles.primaryBtnDisabled]} onPress={() => void onCreate()} disabled={submitting}>
+        {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnTxt}>Crear</Text>}
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
+  scroll: { padding: 24, paddingBottom: 38 },
+  label: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fafafa',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  pickerBtn: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#fafafa',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  pickerTxt: { fontSize: 16, color: '#111' },
+  notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
+  counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
+  iosPickerWrap: { marginBottom: 12 },
+  iosDone: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 },
+  iosDoneTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 16 },
+  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
+  primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
+  primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
+});
