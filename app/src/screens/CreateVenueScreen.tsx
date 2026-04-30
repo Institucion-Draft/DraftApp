@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,17 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateVenue'>;
 
 export default function CreateVenueScreen({ route, navigation }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'VenuesList', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');

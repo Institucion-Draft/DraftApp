@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'VenuesList'>;
 
@@ -25,6 +26,11 @@ type VenueRow = {
 
 export default function VenuesListScreen({ navigation, route }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const [items, setItems] = useState<VenueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

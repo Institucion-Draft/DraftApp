@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditVenue'>;
 
@@ -26,6 +27,7 @@ type VenueRow = {
 
 export default function EditVenueScreen({ route, navigation }: Props) {
   const { venueId } = route.params;
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [name, setName] = useState('');
@@ -36,7 +38,7 @@ export default function EditVenueScreen({ route, navigation }: Props) {
     void (async () => {
       const { data, error } = await supabase
         .from('venues')
-        .select('id, name, address, notes')
+        .select('id, workspace_id, name, address, notes')
         .eq('id', venueId)
         .maybeSingle();
       setLoading(false);
@@ -45,12 +47,20 @@ export default function EditVenueScreen({ route, navigation }: Props) {
         navigation.goBack();
         return;
       }
-      const row = data as VenueRow;
+      const row = data as VenueRow & { workspace_id: string };
+      setWorkspaceId(row.workspace_id);
       setName(row.name);
       setAddress(row.address ?? '');
       setNotes(row.notes ?? '');
     })();
   }, [navigation, venueId]);
+
+  useLayoutEffect(() => {
+    if (!workspaceId) return;
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'VenuesList', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
 
   const validate = (): string | null => {
     const n = name.trim();

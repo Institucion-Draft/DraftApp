@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import type { EventStatus, EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
@@ -33,6 +34,11 @@ function pick(title: string, opts: { label: string; onPress: () => void }[]) {
 
 export default function EditEventScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
+    });
+  }, [navigation, eventId]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);

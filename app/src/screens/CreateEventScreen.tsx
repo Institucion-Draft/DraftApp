@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventTypeLabel } from '../lib/labels';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
@@ -39,6 +40,11 @@ function pickFromOptions(
 
 export default function CreateEventScreen({ route, navigation }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'EventsList', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [eventType, setEventType] = useState<EventType>('draft');

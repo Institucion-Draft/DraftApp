@@ -127,8 +127,22 @@ export type Match = {
   match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant';
   winner_participant_id: string | null;
   life_tracker_user_id: string | null;
+  ended_by_surrender: boolean;
   status: 'in_progress' | 'completed' | 'aborted';
+  starting_life_a: number;
+  starting_life_b: number;
   started_at: string;
   ended_at: string | null;
   data_source: 'app' | 'imported_notebook' | 'manual_entry';
+};
+
+export type LifeEvent = {
+  id: string;
+  match_id: string;
+  participant_id: string;
+  delta: number;
+  resulting_life: number;
+  occurred_at: string;
+  is_undo: boolean;
+  undoes_event_id: string | null;
 };

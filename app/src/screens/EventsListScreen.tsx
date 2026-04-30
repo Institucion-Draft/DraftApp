@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { EventType, EventStatus } from '../lib/database.types';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventsList'>;
 
@@ -35,6 +36,11 @@ type EventRow = {
 
 export default function EventsListScreen({ navigation, route }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const [items, setItems] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

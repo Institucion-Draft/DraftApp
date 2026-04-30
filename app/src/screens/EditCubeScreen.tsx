@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditCube'>;
 
@@ -27,6 +28,7 @@ type CubeRow = {
 
 export default function EditCubeScreen({ navigation, route }: Props) {
   const { cubeId } = route.params;
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [name, setName] = useState('');
@@ -38,7 +40,7 @@ export default function EditCubeScreen({ navigation, route }: Props) {
     void (async () => {
       const { data, error } = await supabase
         .from('cubes')
-        .select('id, name, card_count, cubecobra_url, notes')
+        .select('id, workspace_id, name, card_count, cubecobra_url, notes')
         .eq('id', cubeId)
         .maybeSingle();
       setLoading(false);
@@ -49,13 +51,21 @@ export default function EditCubeScreen({ navigation, route }: Props) {
         return;
       }
 
-      const row = data as CubeRow;
+      const row = data as CubeRow & { workspace_id: string };
+      setWorkspaceId(row.workspace_id);
       setName(row.name);
       setCardCount(row.card_count ? String(row.card_count) : '');
       setCubeCobraUrl(row.cubecobra_url ?? '');
       setNotes(row.notes ?? '');
     })();
   }, [cubeId, navigation]);
+
+  useLayoutEffect(() => {
+    if (!workspaceId) return;
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'CubesList', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
 
   const validate = (): string | null => {
     const n = name.trim();

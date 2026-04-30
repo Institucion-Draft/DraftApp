@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'GenerateInvite'>;
 
@@ -50,8 +51,13 @@ type InviteRow = {
   created_at: string;
 };
 
-export default function GenerateInviteScreen({ route }: Props) {
+export default function GenerateInviteScreen({ route, navigation }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const { user } = useAuth();
   const [maxUsesText, setMaxUsesText] = useState('');
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
