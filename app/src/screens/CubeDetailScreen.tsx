@@ -15,6 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeDetail'>;
@@ -86,6 +87,9 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: row?.name ?? 'Cubo',
+      headerLeft: row
+        ? hierarchicalHeaderBack(navigation, 'CubesList', { workspaceId: row.workspace_id })
+        : undefined,
       headerRight: isOrganizer
         ? () => (
             <TouchableOpacity onPress={() => row && navigation.navigate('EditCube', { cubeId: row.id })}>

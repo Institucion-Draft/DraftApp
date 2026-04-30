@@ -41,7 +41,7 @@ export function getPairingStatusLabel(
     case 'in_progress':
       return 'En vivo';
     case 'scheduled':
-      return 'Por venir';
+      return 'Por definirse';
     case 'completed':
       return 'Terminado';
     default:

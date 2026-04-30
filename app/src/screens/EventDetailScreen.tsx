@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import type { MtgColor } from '../lib/database.types';
 import { getEventStatusLabel, getEventTypeLabel, getPairingsLabel } from '../lib/labels';
@@ -38,7 +39,6 @@ type EventRow = {
 type ParticipantView = {
   id: string;
   user_id: string;
-  self_evaluation: number | null;
   users:
     | {
         username: string;
@@ -68,10 +68,10 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function EventDetailScreen({ route, navigation }: Props) {
+  const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
   const { eventId } = route.params;
   const [event, setEvent] = useState<EventRow | null>(null);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
-  const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOrganizer, setIsOrganizer] = useState(false);
@@ -108,7 +108,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
-          self_evaluation,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -182,10 +181,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   );
 
   useLayoutEffect(() => {
+    const wsId = event?.workspace_id;
     navigation.setOptions({
       title: event?.name ?? 'Evento',
+      headerLeft: wsId
+        ? hierarchicalHeaderBack(navigation, 'EventsList', { workspaceId: wsId })
+        : undefined,
     });
-  }, [event?.name, navigation]);
+  }, [event?.name, event?.workspace_id, navigation]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -555,8 +558,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           const u = relationOne(p.users);
           const da = relationOne(u?.default_avatars);
           const uri = u ? avatarPublicUrl(u.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null) : null;
-          const uname = u?.username ?? u?.display_name ?? 'Usuario';
-          const colors = participantColors[p.id] ?? [];
+          const uname = u?.display_name || u?.username || 'sin nombre';
           return (
             <View key={p.id} style={styles.participantRow}>
               {uri ? (
@@ -568,10 +570,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               )}
               <View style={styles.participantBody}>
                 <Text style={styles.participantName}>{uname}</Text>
-                <Text style={styles.metaSmall}>
-                  Colores: {colors.length ? colors.join(', ') : '—'} · Valoración:{' '}
-                  {p.self_evaluation != null ? `${'★'.repeat(p.self_evaluation)} (${p.self_evaluation})` : '—'}
-                </Text>
               </View>
             </View>
           );
@@ -614,7 +612,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             ) : null}
             {myParticipantId && hasDeclaredColors ? (
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventCheckIn', { eventId: event.id })}>
-                <Text style={styles.secondaryBtnTxt}>Editar mis colores y valoración</Text>
+                <Text style={styles.secondaryBtnTxt}>Editar mis colores</Text>
               </TouchableOpacity>
             ) : null}
           </>
@@ -635,6 +633,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </TouchableOpacity>
         <TouchableOpacity style={styles.placeholderBtn} onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en Sprint 3B.')}>
           <Text style={styles.placeholderTxt}>Bitácora digital</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.placeholderBtn}
+          onPress={() => navigation.navigate('Standings', { eventId: event.id })}
+        >
+          <Text style={styles.placeholderTxt}>Tabla de posiciones</Text>
         </TouchableOpacity>
         {((event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id) ? (
           <TouchableOpacity

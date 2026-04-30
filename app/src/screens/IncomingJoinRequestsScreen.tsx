@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'IncomingJoinRequests'>;
 
@@ -48,8 +49,13 @@ function applicantAvatarUri(applicant: UserEmbed | null): string | null {
   );
 }
 
-export default function IncomingJoinRequestsScreen({ route }: Props) {
+export default function IncomingJoinRequestsScreen({ route, navigation }: Props) {
   const { workspaceId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
   const { user } = useAuth();
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);

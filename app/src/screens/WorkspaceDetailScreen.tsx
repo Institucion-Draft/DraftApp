@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDetail'>;
@@ -161,6 +162,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: workspace?.name ?? 'Workspace',
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspacesList'),
     });
   }, [navigation, workspace?.name]);
 

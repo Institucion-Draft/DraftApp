@@ -22,4 +22,7 @@ export type MainStackParamList = {
   PairingsList: { eventId: string };
   PairingDetail: { pairingId: string };
   CubeRoulette: { eventId: string };
+  LifeTracker: { matchId: string };
+  MatchResult: { matchId: string };
+  Standings: { eventId: string };
 };

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
@@ -27,6 +28,11 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 
 export default function CubeRouletteScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
+    });
+  }, [navigation, eventId]);
   const [loading, setLoading] = useState(true);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [cubes, setCubes] = useState<CubeRow[]>([]);

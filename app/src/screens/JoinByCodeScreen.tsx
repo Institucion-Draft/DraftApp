@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'JoinByCode'>;
 
@@ -23,6 +24,11 @@ function normalizeCode(raw: string): string {
 
 export default function JoinByCodeScreen({ navigation }: Props) {
   const { user } = useAuth();
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspacesList'),
+    });
+  }, [navigation]);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
 
