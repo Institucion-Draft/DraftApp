@@ -1,18 +1,21 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import type { MtgColor } from '../lib/database.types';
+import PlayerAvatar from '../components/PlayerAvatar';
+import ColorFlag from '../components/ColorFlag';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Standings'>;
 
 type RowView = {
   participantId: string;
+  userId: string;
   name: string;
-  avatar: string | null;
+  colors: MtgColor[];
   pg: number;
   pj: number;
   eg: number;
@@ -69,6 +72,23 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     const participants = partsRes.data ?? [];
     const participantIds = participants.map((p) => p.id as string);
+    const colorsRes =
+      participantIds.length > 0
+        ? await supabase
+            .from('participant_colors')
+            .select('participant_id, color')
+            .in('participant_id', participantIds)
+        : { data: [], error: null };
+    if (colorsRes.error) {
+      setRows([]);
+      return;
+    }
+    const colorMap: Record<string, MtgColor[]> = {};
+    for (const row of colorsRes.data ?? []) {
+      const pid = row.participant_id as string;
+      if (!colorMap[pid]) colorMap[pid] = [];
+      colorMap[pid].push(row.color as MtgColor);
+    }
     const pairings = pairingsRes.data ?? [];
     const pairingIds = pairings.map((p) => p.id as string);
 
@@ -97,9 +117,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const rowsBuilt: RowView[] = participants.map((p: any) => {
       const pid = p.id as string;
       const u = relationOne(p.users);
-      const da = relationOne(u?.default_avatars);
-      const avatar = u ? avatarPublicUrl(u.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null) : null;
       const name = u?.display_name || u?.username || 'Jugador';
+      const userId = p.user_id as string;
+      const colors = colorMap[pid] ?? [];
 
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
       const pairingSet = new Set(playerPairings.map((x: any) => x.id));
@@ -127,7 +147,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .map((m: any) => (new Date(m.ended_at as string).getTime() - new Date(m.started_at as string).getTime()) / 1000);
       const tm = durations.length ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : 0;
 
-      return { participantId: pid, name, avatar, pg, pj, eg, vm, tm, inProgress };
+      return { participantId: pid, userId, name, colors, pg, pj, eg, vm, tm, inProgress };
     });
 
     rowsBuilt.sort((a, b) => {
@@ -198,11 +218,20 @@ export default function StandingsScreen({ route, navigation }: Props) {
       {rows.map((r) => (
         <View key={r.participantId} style={styles.row}>
           <View style={[styles.playerCell, styles.playerCol]}>
-            {r.avatar ? <Image source={{ uri: r.avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.ph]} />}
-            <Text style={styles.playerName}>
-              {r.inProgress ? <Text style={styles.liveDot}>● </Text> : null}
-              {r.name}
-            </Text>
+            <PlayerAvatar
+              userId={r.userId}
+              participantId={r.participantId}
+              size="tiny"
+              withColorBorder={false}
+              style={styles.standingsAvatar}
+            />
+            <View style={styles.playerNameRow}>
+              <Text style={styles.playerName} numberOfLines={2}>
+                {r.inProgress ? <Text style={styles.liveDot}>● </Text> : null}
+                {r.name}
+              </Text>
+              <ColorFlag colors={r.colors} />
+            </View>
           </View>
           <Text style={styles.cell}>{r.pg}</Text>
           <Text style={styles.cell}>{r.pj}</Text>
@@ -224,10 +253,16 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
   cell: { width: 42, textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
   playerCol: { flex: 1, width: 'auto', minWidth: 120, textAlign: 'left' },
-  playerCell: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 24, height: 24, borderRadius: 12, marginRight: 6 },
-  ph: { backgroundColor: '#E5E7EB' },
-  playerName: { color: '#111', fontSize: 12, fontWeight: '600' },
+  playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
+  standingsAvatar: { marginRight: 6 },
+  playerNameRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  playerName: { flex: 1, flexShrink: 1, color: '#111', fontSize: 12, fontWeight: '600' },
   liveDot: { color: '#3B82F6', fontWeight: '700' },
   legend: { marginTop: 12, color: '#666', fontSize: 12 },
 });

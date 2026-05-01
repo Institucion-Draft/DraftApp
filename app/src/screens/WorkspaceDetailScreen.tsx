@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDetail'>;
 
@@ -43,16 +44,6 @@ type MemberRow = {
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
-}
-
-function memberUserAvatarUri(m: MemberRow): string | null {
-  const u = relationOne(m.users);
-  if (!u) return null;
-  const da = relationOne(u.default_avatars);
-  return (
-    avatarPublicUrl(u.custom_avatar_path) ??
-    avatarPublicUrl(da?.storage_path ?? null)
-  );
 }
 
 export default function WorkspaceDetailScreen({ navigation, route }: Props) {
@@ -280,18 +271,14 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       {members.map((m) => {
         const u = relationOne(m.users);
         const label = u?.username ?? u?.display_name ?? 'Usuario';
-        const uri = memberUserAvatarUri(m);
         return (
           <View key={m.user_id} style={styles.memberRow}>
-            {uri ? (
-              <Image source={{ uri }} style={styles.memberAvatar} />
-            ) : (
-              <View style={[styles.memberAvatar, styles.memberAvatarPh]}>
-                <Text style={styles.memberAvatarTxt}>
-                  {label.slice(0, 1).toUpperCase()}
-                </Text>
-              </View>
-            )}
+            <PlayerAvatar
+              userId={m.user_id}
+              size="small"
+              withColorBorder={false}
+              style={{ marginRight: 12 }}
+            />
             <View style={styles.memberBody}>
               <Text style={styles.memberName}>{label}</Text>
               <Text style={styles.memberRole}>
@@ -437,23 +424,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#f0f0f0',
-  },
-  memberAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    marginRight: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  memberAvatarPh: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E5E7EB',
-  },
-  memberAvatarTxt: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#374151',
   },
   memberBody: {
     flex: 1,

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import {
   ActivityIndicator,
   Alert,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'LifeTracker'>;
@@ -535,16 +534,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const u = relationOne(pb?.users);
     return u?.display_name || u?.username || 'Jugador B';
   }, [pb]);
-  const avatarA = useMemo(() => {
-    const u = relationOne(pa?.users);
-    const da = relationOne(u?.default_avatars);
-    return u ? avatarPublicUrl(u.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null) : null;
-  }, [pa]);
-  const avatarB = useMemo(() => {
-    const u = relationOne(pb?.users);
-    const da = relationOne(u?.default_avatars);
-    return u ? avatarPublicUrl(u.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null) : null;
-  }, [pb]);
   const canDecreaseA = aLife > 0;
   const canDecreaseB = bLife > 0;
 
@@ -609,11 +598,15 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           <View style={styles.lifeRow}>
             <View style={styles.playerBlock}>
               <View style={styles.avatarWrap}>
-                {avatarA ? (
-                  <Image source={{ uri: avatarA }} style={styles.playerAvatar} />
-                ) : (
-                  <View style={[styles.playerAvatar, styles.playerAvatarPlaceholder]} />
-                )}
+                <View style={styles.avatarInner}>
+                  <PlayerAvatar
+                    userId={pa.user_id}
+                    participantId={pa.id}
+                    size="xlarge"
+                    withColorBorder
+                    borderWidth={5}
+                  />
+                </View>
                 <TouchableOpacity style={styles.flagBtn} onPress={() => onSurrender('a')}>
                   <Text style={styles.flag}>🏳️</Text>
                 </TouchableOpacity>
@@ -658,11 +651,15 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         <View style={styles.lifeRow}>
           <View style={styles.playerBlock}>
             <View style={styles.avatarWrap}>
-              {avatarB ? (
-                <Image source={{ uri: avatarB }} style={styles.playerAvatar} />
-              ) : (
-                <View style={[styles.playerAvatar, styles.playerAvatarPlaceholder]} />
-              )}
+              <View style={styles.avatarInner}>
+                <PlayerAvatar
+                  userId={pb.user_id}
+                  participantId={pb.id}
+                  size="xlarge"
+                  withColorBorder
+                  borderWidth={5}
+                />
+              </View>
               <TouchableOpacity style={styles.flagBtn} onPress={() => onSurrender('b')}>
                 <Text style={styles.flag}>🏳️</Text>
               </TouchableOpacity>
@@ -713,7 +710,8 @@ const styles = StyleSheet.create({
   lifeBtnTxt: { color: '#fff', fontSize: 24, fontWeight: '700' },
   lifeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   playerBlock: { width: '50%', alignItems: 'center', justifyContent: 'center' },
-  avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, position: 'relative' },
+  avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  avatarInner: { alignItems: 'center', justifyContent: 'center' },
   flagBtn: {
     position: 'absolute',
     left: 6,
@@ -723,8 +721,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
-  playerAvatar: { width: '100%', height: '100%', borderRadius: 22, backgroundColor: '#f3f4f6' },
-  playerAvatarPlaceholder: { backgroundColor: '#FFFFFF99' },
   playerName: { marginTop: 10, fontSize: 24, color: '#111', fontWeight: '700', textAlign: 'center' },
   lifeControlsVertical: { width: '50%', alignItems: 'center', justifyContent: 'space-between' },
   lifeCenter: { alignItems: 'center', flex: 1 },

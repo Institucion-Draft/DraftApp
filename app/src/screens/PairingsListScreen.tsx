@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   RefreshControl,
   Alert,
 } from 'react-native';
@@ -14,7 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { getPairingStatusLabel } from '../lib/labels';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
@@ -50,10 +49,10 @@ type ItemView = PairingRow & {
   status: 'in_progress' | 'scheduled' | 'completed';
   aName: string;
   bName: string;
-  aAvatar: string | null;
-  bAvatar: string | null;
+  aUserId: string;
+  bUserId: string;
   winnerName: string | null;
-  winnerAvatar: string | null;
+  winnerUserId: string | null;
   mine: boolean;
   liveScoreA: number | null;
   liveScoreB: number | null;
@@ -78,10 +77,11 @@ type RevengeItemView = {
   status: 'in_progress' | 'completed' | 'aborted';
   aName: string;
   bName: string;
-  aAvatar: string | null;
-  bAvatar: string | null;
+  aUserId: string;
+  bUserId: string;
+  participantAId: string;
+  participantBId: string;
   winnerName: string | null;
-  winnerAvatar: string | null;
   liveScoreA: number | null;
   liveScoreB: number | null;
   mine: boolean;
@@ -228,18 +228,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const pb = pMap.get(pairing.participant_b_id);
       const ua = relationOne(pa?.users);
       const ub = relationOne(pb?.users);
-      const daA = relationOne(ua?.default_avatars);
-      const daB = relationOne(ub?.default_avatars);
       const aName = ua?.display_name || ua?.username || 'Jugador A';
       const bName = ub?.display_name || ub?.username || 'Jugador B';
-      const aAvatar = ua
-        ? avatarPublicUrl(ua.custom_avatar_path) ??
-          avatarPublicUrl(daA?.storage_path ?? null)
-        : null;
-      const bAvatar = ub
-        ? avatarPublicUrl(ub.custom_avatar_path) ??
-          avatarPublicUrl(daB?.storage_path ?? null)
-        : null;
+      const aUserId = pa?.user_id ?? '';
+      const bUserId = pb?.user_id ?? '';
       const inProg = (inProgressByPairing.get(pairing.id) ?? 0) > 0;
       const completed = !!pairing.official_winner_participant_id;
       const status: ItemView['status'] = inProg
@@ -252,13 +244,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         ? pMap.get(pairing.official_winner_participant_id)
         : null;
       const winnerUser = relationOne(winnerParticipant?.users);
-      const winnerDA = relationOne(winnerUser?.default_avatars);
       const winnerName =
         winnerUser?.display_name || winnerUser?.username || null;
-      const winnerAvatar = winnerUser
-        ? avatarPublicUrl(winnerUser.custom_avatar_path) ??
-          avatarPublicUrl(winnerDA?.storage_path ?? null)
-        : null;
+      const winnerUserId = winnerParticipant?.user_id ?? null;
 
       const mine =
         !!myUserId &&
@@ -286,10 +274,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         status,
         aName,
         bName,
-        aAvatar,
-        bAvatar,
+        aUserId,
+        bUserId,
         winnerName,
-        winnerAvatar,
+        winnerUserId,
         mine,
         liveScoreA,
         liveScoreB,
@@ -321,16 +309,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const pb = pMap.get(pairing.participant_b_id);
       const ua = relationOne(pa?.users);
       const ub = relationOne(pb?.users);
-      const daA = relationOne(ua?.default_avatars);
-      const daB = relationOne(ub?.default_avatars);
       const aName = ua?.display_name || ua?.username || 'Jugador A';
       const bName = ub?.display_name || ub?.username || 'Jugador B';
-      const aAvatar = ua
-        ? avatarPublicUrl(ua.custom_avatar_path) ?? avatarPublicUrl(daA?.storage_path ?? null)
-        : null;
-      const bAvatar = ub
-        ? avatarPublicUrl(ub.custom_avatar_path) ?? avatarPublicUrl(daB?.storage_path ?? null)
-        : null;
+      const aUserId = pa?.user_id ?? '';
+      const bUserId = pb?.user_id ?? '';
       if (m.status !== 'in_progress' && m.status !== 'completed' && m.status !== 'aborted') {
         continue;
       }
@@ -338,9 +320,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const winnerPid = m.winner_participant_id;
       const winnerParticipant = winnerPid ? pMap.get(winnerPid) : null;
       const wu = relationOne(winnerParticipant?.users);
-      const wda = relationOne(wu?.default_avatars);
       const winnerName = wu?.display_name || wu?.username || null;
-      const winnerAvatar = wu ? avatarPublicUrl(wu.custom_avatar_path) ?? avatarPublicUrl(wda?.storage_path ?? null) : null;
       const mine =
         !!myUserId && (pa?.user_id === myUserId || pb?.user_id === myUserId);
       let liveScoreA: number | null = null;
@@ -357,10 +337,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         status: st,
         aName,
         bName,
-        aAvatar,
-        bAvatar,
+        aUserId,
+        bUserId,
+        participantAId: pairing.participant_a_id,
+        participantBId: pairing.participant_b_id,
         winnerName,
-        winnerAvatar,
         liveScoreA,
         liveScoreB,
         mine,
@@ -486,7 +467,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             >
               <View style={styles.compactRow}>
                 <View style={styles.inlinePlayer}>
-                  {item.aAvatar ? <Image source={{ uri: item.aAvatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarPh]} />}
+                  <PlayerAvatar
+                    userId={item.aUserId}
+                    participantId={item.participant_a_id}
+                    size="small"
+                    withColorBorder
+                    borderWidth={3}
+                  />
                   <View>
                     <Text style={styles.name}>{item.aName}</Text>
                     <View style={styles.bo3Row}>
@@ -512,7 +499,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       <View style={[styles.bo3Box, item.winsB >= 2 && styles.bo3Filled]} />
                     </View>
                   </View>
-                  {item.bAvatar ? <Image source={{ uri: item.bAvatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarPh]} />}
+                  <PlayerAvatar
+                    userId={item.bUserId}
+                    participantId={item.participant_b_id}
+                    size="small"
+                    withColorBorder
+                    borderWidth={3}
+                  />
                 </View>
               </View>
               <View style={styles.footer}>
@@ -521,9 +514,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 ) : (
                   <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
                 )}
-                {item.winnerName ? (
+                {item.winnerName &&
+                item.winnerUserId &&
+                item.official_winner_participant_id ? (
                   <View style={styles.winnerWrap}>
-                    {item.winnerAvatar ? <Image source={{ uri: item.winnerAvatar }} style={styles.winnerAvatar} /> : null}
+                    <PlayerAvatar
+                      userId={item.winnerUserId}
+                      participantId={item.official_winner_participant_id}
+                      size="small"
+                      withColorBorder
+                      borderWidth={3}
+                      style={styles.winnerAvatarWrap}
+                    />
                     <Text style={styles.winnerTxt}>Ganó: {item.winnerName}</Text>
                   </View>
                 ) : null}
@@ -555,7 +557,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 >
                   <View style={styles.compactRow}>
                     <View style={styles.inlinePlayer}>
-                      {item.aAvatar ? <Image source={{ uri: item.aAvatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarPh]} />}
+                      <PlayerAvatar
+                        userId={item.aUserId}
+                        participantId={item.participantAId}
+                        size="small"
+                        withColorBorder
+                        borderWidth={3}
+                      />
                       <Text style={styles.name}>{item.aName}</Text>
                     </View>
                     <View style={styles.scoreWrap}>
@@ -569,7 +577,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     </View>
                     <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
                       <Text style={styles.nameRight}>{item.bName}</Text>
-                      {item.bAvatar ? <Image source={{ uri: item.bAvatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarPh]} />}
+                      <PlayerAvatar
+                        userId={item.bUserId}
+                        participantId={item.participantBId}
+                        size="small"
+                        withColorBorder
+                        borderWidth={3}
+                      />
                     </View>
                   </View>
                   <View style={styles.footer}>
@@ -627,8 +641,7 @@ const styles = StyleSheet.create({
   inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
   inlinePlayerRight: { justifyContent: 'flex-end' },
   playerRightText: { alignItems: 'flex-end' },
-  avatar: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#f3f4f6' },
-  avatarPh: { backgroundColor: '#E5E7EB' },
+  winnerAvatarWrap: { marginRight: 6 },
   name: { fontSize: 12, color: '#111', fontWeight: '700' },
   nameRight: { fontSize: 12, color: '#111', fontWeight: '700', textAlign: 'right' },
   scoreWrap: { minWidth: 74, alignItems: 'center' },
@@ -650,6 +663,5 @@ const styles = StyleSheet.create({
   status: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
   liveCentered: { color: '#3B82F6', fontWeight: '800', fontSize: 12, textAlign: 'center' },
   winnerWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  winnerAvatar: { width: 20, height: 20, borderRadius: 10, marginRight: 6 },
   winnerTxt: { color: '#166534', fontWeight: '600', fontSize: 12 },
 });

@@ -1,12 +1,12 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MatchResult'>;
 
@@ -156,10 +156,6 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const ub = relationOne(pb.users);
   const aName = ua?.display_name || ua?.username || 'Jugador A';
   const bName = ub?.display_name || ub?.username || 'Jugador B';
-  const ada = relationOne(ua?.default_avatars);
-  const bda = relationOne(ub?.default_avatars);
-  const aAvatar = ua ? avatarPublicUrl(ua.custom_avatar_path) ?? avatarPublicUrl(ada?.storage_path ?? null) : null;
-  const bAvatar = ub ? avatarPublicUrl(ub.custom_avatar_path) ?? avatarPublicUrl(bda?.storage_path ?? null) : null;
   const winnerIsA = match.winner_participant_id === pairing.participant_a_id;
   const winnerIsB = match.winner_participant_id === pairing.participant_b_id;
   const winnerName = winnerIsA ? aName : winnerIsB ? bName : 'Sin definir';
@@ -210,13 +206,37 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         <View style={styles.avatarHeroRow}>
           {winnerIsA ? (
             <>
-              {aAvatar ? <Image source={{ uri: aAvatar }} style={styles.winnerAvatar} /> : <View style={[styles.winnerAvatar, styles.ph]} />}
-              {bAvatar ? <Image source={{ uri: bAvatar }} style={styles.loserAvatar} /> : <View style={[styles.loserAvatar, styles.ph]} />}
+              <PlayerAvatar
+                userId={pa.user_id}
+                participantId={pa.id}
+                size="xlarge"
+                withColorBorder={false}
+              />
+              <View style={styles.loserAvatarWrap}>
+                <PlayerAvatar
+                  userId={pb.user_id}
+                  participantId={pb.id}
+                  size="medium"
+                  withColorBorder={false}
+                />
+              </View>
             </>
           ) : (
             <>
-              {bAvatar ? <Image source={{ uri: bAvatar }} style={styles.winnerAvatar} /> : <View style={[styles.winnerAvatar, styles.ph]} />}
-              {aAvatar ? <Image source={{ uri: aAvatar }} style={styles.loserAvatar} /> : <View style={[styles.loserAvatar, styles.ph]} />}
+              <PlayerAvatar
+                userId={pb.user_id}
+                participantId={pb.id}
+                size="xlarge"
+                withColorBorder={false}
+              />
+              <View style={styles.loserAvatarWrap}>
+                <PlayerAvatar
+                  userId={pa.user_id}
+                  participantId={pa.id}
+                  size="medium"
+                  withColorBorder={false}
+                />
+              </View>
             </>
           )}
         </View>
@@ -253,18 +273,12 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginBottom: 22, marginTop: 12 },
   winText: { fontSize: 30, fontWeight: '900', color: '#111', textAlign: 'center', marginBottom: 12 },
   avatarHeroRow: { width: '100%', alignItems: 'center', justifyContent: 'center', minHeight: 160 },
-  winnerAvatar: { width: 132, height: 132, borderRadius: 66, backgroundColor: '#e5e7eb' },
-  loserAvatar: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#e5e7eb',
+  loserAvatarWrap: {
     position: 'absolute',
     right: 16,
     bottom: 4,
-    opacity: 0.4,
+    opacity: 0.5,
   },
-  ph: { backgroundColor: '#E5E7EB' },
   sub: { color: '#666', marginTop: 4 },
   block: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 12, marginBottom: 18 },
   meta: { color: '#111', marginBottom: 4 },
