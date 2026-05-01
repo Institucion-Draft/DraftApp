@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Image,
   TouchableOpacity,
   Alert,
   RefreshControl,
@@ -15,7 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingDetail'>;
@@ -237,10 +236,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   const au = relationOne(a?.users);
   const bu = relationOne(b?.users);
-  const ada = relationOne(au?.default_avatars);
-  const bda = relationOne(bu?.default_avatars);
-  const aAvatar = au ? avatarPublicUrl(au.custom_avatar_path) ?? avatarPublicUrl(ada?.storage_path ?? null) : null;
-  const bAvatar = bu ? avatarPublicUrl(bu.custom_avatar_path) ?? avatarPublicUrl(bda?.storage_path ?? null) : null;
   const aName = au?.display_name || au?.username || 'Jugador A';
   const bName = bu?.display_name || bu?.username || 'Jugador B';
   const isParticipant = !!myUserId && (a?.user_id === myUserId || b?.user_id === myUserId);
@@ -307,7 +302,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       <View style={styles.hero}>
         <View style={styles.heroThreeCol}>
           <View style={[styles.heroSide, styles.heroSideLeft]}>
-            {aAvatar ? <Image source={{ uri: aAvatar }} style={styles.heroAvatarBig} /> : <View style={[styles.heroAvatarBig, styles.ph]} />}
+            {a ? (
+              <PlayerAvatar
+                userId={a.user_id}
+                participantId={a.id}
+                size="large"
+                withColorBorder
+                borderWidth={4}
+              />
+            ) : null}
             <Text style={styles.heroPlayerName}>{aName}</Text>
             <View style={styles.heroBo3RowLeft}>
               <View style={[styles.heroBo3Box, winsA >= 1 && styles.heroBo3Filled]} />
@@ -318,7 +321,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={styles.heroVsBig}>vs</Text>
           </View>
           <View style={[styles.heroSide, styles.heroSideRight]}>
-            {bAvatar ? <Image source={{ uri: bAvatar }} style={styles.heroAvatarBig} /> : <View style={[styles.heroAvatarBig, styles.ph]} />}
+            {b ? (
+              <PlayerAvatar
+                userId={b.user_id}
+                participantId={b.id}
+                size="large"
+                withColorBorder
+                borderWidth={4}
+              />
+            ) : null}
             <Text style={styles.heroPlayerName}>{bName}</Text>
             <View style={styles.heroBo3RowRight}>
               <View style={[styles.heroBo3Box, winsB >= 1 && styles.heroBo3Filled]} />
@@ -485,8 +496,6 @@ const styles = StyleSheet.create({
   heroSideRight: { paddingLeft: 4 },
   heroCenter: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
   heroVsBig: { fontSize: 22, fontWeight: '800', color: '#6B7280' },
-  heroAvatarBig: { width: 88, height: 88, borderRadius: 18, backgroundColor: '#f3f4f6' },
-  ph: { backgroundColor: '#E5E7EB' },
   heroPlayerName: { marginTop: 8, fontSize: 14, fontWeight: '700', color: '#111', textAlign: 'center' },
   heroBo3RowLeft: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-start', paddingLeft: 4 },
   heroBo3RowRight: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },

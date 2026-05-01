@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getEventStatusLabel, getEventTypeLabel, getPairingsLabel } from '../lib/labels';
 
@@ -556,18 +557,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         {participants.length === 0 ? <Text style={styles.muted}>Todavía no hay participantes.</Text> : null}
         {participants.map((p) => {
           const u = relationOne(p.users);
-          const da = relationOne(u?.default_avatars);
-          const uri = u ? avatarPublicUrl(u.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null) : null;
           const uname = u?.display_name || u?.username || 'sin nombre';
           return (
             <View key={p.id} style={styles.participantRow}>
-              {uri ? (
-                <Image source={{ uri }} style={styles.participantAvatar} />
-              ) : (
-                <View style={[styles.participantAvatar, styles.avatarPh]}>
-                  <Text style={styles.participantTxt}>{uname.slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )}
+              <PlayerAvatar
+                userId={p.user_id}
+                participantId={p.id}
+                size="small"
+                withColorBorder={false}
+                style={{ marginRight: 10 }}
+              />
               <View style={styles.participantBody}>
                 <Text style={styles.participantName}>{uname}</Text>
               </View>
@@ -705,8 +704,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: '#fafafa',
   },
-  participantAvatar: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#f3f4f6', marginRight: 10 },
-  participantTxt: { fontSize: 16, fontWeight: '700', color: '#4338CA' },
   participantBody: { flex: 1, minWidth: 0 },
   participantName: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 2 },
   metaSmall: { fontSize: 12, color: '#666' },

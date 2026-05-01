@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspacesList'>;
 
@@ -31,12 +32,6 @@ type WorkspaceListItem = {
   };
 };
 
-type UserProfileHeader = {
-  display_name: string;
-  custom_avatar_path: string | null;
-  default_avatars: { storage_path: string } | null;
-};
-
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -45,36 +40,9 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 export default function WorkspacesListScreen({ navigation }: Props) {
   const { user, signOut } = useAuth();
   const [items, setItems] = useState<WorkspaceListItem[]>([]);
-  const [profile, setProfile] = useState<UserProfileHeader | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const initialLoadRef = useRef(true);
-
-  const loadProfile = useCallback(async () => {
-    if (!user?.id) return;
-    const { data, error } = await supabase
-      .from('users')
-      .select('display_name, custom_avatar_path, default_avatars(storage_path)')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (error) {
-      Alert.alert('Error', 'No se pudo cargar tu perfil.');
-      return;
-    }
-    if (data) {
-      setProfile({
-        display_name: data.display_name,
-        custom_avatar_path: data.custom_avatar_path,
-        default_avatars: relationOne(
-          data.default_avatars as
-            | { storage_path: string }
-            | { storage_path: string }[]
-            | null
-        ),
-      });
-    }
-  }, [user?.id]);
 
   const loadWorkspaces = useCallback(async () => {
     if (!user?.id) {
@@ -126,8 +94,8 @@ export default function WorkspacesListScreen({ navigation }: Props) {
   }, [user?.id]);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadProfile(), loadWorkspaces()]);
-  }, [loadProfile, loadWorkspaces]);
+    await loadWorkspaces();
+  }, [loadWorkspaces]);
 
   useFocusEffect(
     useCallback(() => {
@@ -166,27 +134,16 @@ export default function WorkspacesListScreen({ navigation }: Props) {
     ]);
   };
 
-  const userAvatarUri = profile
-    ? avatarPublicUrl(profile.custom_avatar_path) ??
-      avatarPublicUrl(profile.default_avatars?.storage_path ?? null)
-    : null;
-
   const renderHeader = () => (
     <View style={styles.topBar}>
       <View style={styles.avatarWrap}>
-        {userAvatarUri ? (
-          <Image
-            source={{ uri: userAvatarUri }}
-            style={styles.avatarImg}
-            accessibilityLabel="Tu avatar"
+        {user?.id ? (
+          <PlayerAvatar
+            userId={user.id}
+            size="medium"
+            withColorBorder={false}
           />
-        ) : (
-          <View style={styles.avatarFallback}>
-            <Text style={styles.avatarFallbackText}>
-              {(profile?.display_name ?? user?.email ?? '?').slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        )}
+        ) : null}
       </View>
       <Text style={styles.screenTitle}>Tus workspaces</Text>
       <TouchableOpacity
@@ -341,28 +298,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   avatarWrap: {
-    width: 40,
-    height: 40,
-    marginRight: 12,
-  },
-  avatarImg: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f3f4f6',
-  },
-  avatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E5E7EB',
-    alignItems: 'center',
+    width: 48,
+    height: 48,
+    marginRight: 8,
     justifyContent: 'center',
-  },
-  avatarFallbackText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#374151',
+    alignItems: 'center',
   },
   screenTitle: {
     flex: 1,

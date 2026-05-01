@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  Image,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -15,7 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'IncomingJoinRequests'>;
@@ -38,15 +37,6 @@ type RequestRow = {
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
-}
-
-function applicantAvatarUri(applicant: UserEmbed | null): string | null {
-  if (!applicant) return null;
-  const da = relationOne(applicant.default_avatars);
-  return (
-    avatarPublicUrl(applicant.custom_avatar_path) ??
-    avatarPublicUrl(da?.storage_path ?? null)
-  );
 }
 
 export default function IncomingJoinRequestsScreen({ route, navigation }: Props) {
@@ -160,19 +150,17 @@ export default function IncomingJoinRequestsScreen({ route, navigation }: Props)
   const renderItem = ({ item }: { item: RequestRow }) => {
     const applicant = relationOne(item.applicant);
     const label = applicant?.username ?? applicant?.display_name ?? 'Usuario';
-    const uri = applicantAvatarUri(applicant);
     const busy = actingId === item.id;
 
     return (
       <View style={styles.card}>
         <View style={styles.cardTop}>
-          {uri ? (
-            <Image source={{ uri }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPh]}>
-              <Text style={styles.avatarTxt}>{label.slice(0, 1).toUpperCase()}</Text>
-            </View>
-          )}
+          <PlayerAvatar
+            userId={item.user_id}
+            size="small"
+            withColorBorder={false}
+            style={{ marginRight: 12 }}
+          />
           <View style={styles.cardBody}>
             <Text style={styles.username}>{label}</Text>
             <Text style={styles.date}>{formatDate(item.created_at)}</Text>
@@ -269,23 +257,6 @@ const styles = StyleSheet.create({
   cardTop: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    marginRight: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  avatarPh: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E5E7EB',
-  },
-  avatarTxt: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#374151',
   },
   cardBody: {
     flex: 1,
