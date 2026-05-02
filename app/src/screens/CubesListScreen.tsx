@@ -42,12 +42,18 @@ export default function CubesListScreen({ navigation, route }: Props) {
   const firstLoadRef = useRef(true);
 
   const load = useCallback(async () => {
+    const meRes = await supabase.auth.getUser();
+    const currentUserId = meRes.data.user?.id ?? null;
+
     const [myRoleRes, cubesRes] = await Promise.all([
-      supabase
-        .from('workspace_members')
-        .select('role')
-        .eq('workspace_id', workspaceId)
-        .maybeSingle(),
+      currentUserId
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', workspaceId)
+            .eq('user_id', currentUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from('cubes_with_stats')
         .select('id, name, card_count, cubecobra_url, avatar_path, usage_count')
@@ -56,11 +62,11 @@ export default function CubesListScreen({ navigation, route }: Props) {
     ]);
 
     if (myRoleRes.error) {
-      Alert.alert('Error', 'No se pudo validar tu rol en este workspace.');
-      setIsOrganizer(false);
-    } else {
-      setIsOrganizer(myRoleRes.data?.role === 'organizer');
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', myRoleRes.error);
+      }
     }
+    setIsOrganizer(!myRoleRes.error && myRoleRes.data?.role === 'organizer');
 
     if (cubesRes.error) {
       Alert.alert('Error', 'No se pudieron cargar los cubos.');

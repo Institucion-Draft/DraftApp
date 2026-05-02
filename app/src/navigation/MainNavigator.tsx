@@ -22,6 +22,7 @@ import CreateEventScreen from '../screens/CreateEventScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import EventCheckInScreen from '../screens/EventCheckInScreen';
+import PlayerProfileInEventScreen from '../screens/PlayerProfileInEventScreen';
 import PairingsListScreen from '../screens/PairingsListScreen';
 import PairingDetailScreen from '../screens/PairingDetailScreen';
 import CubeRouletteScreen from '../screens/CubeRouletteScreen';
@@ -124,7 +125,12 @@ export default function MainNavigator() {
         <Stack.Screen name="CreateEvent" component={CreateEventScreen} options={{ title: 'Nuevo evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Check-in', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Mi mazo', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen
+          name="PlayerProfileInEvent"
+          component={PlayerProfileInEventScreen}
+          options={{ title: 'Perfil del Jugador', headerBackTitle: 'Atrás' }}
+        />
         <Stack.Screen name="PairingsList" component={PairingsListScreen} options={{ title: 'Enfrentamientos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="PairingDetail" component={PairingDetailScreen} options={{ title: 'Enfrentamiento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CubeRoulette" component={CubeRouletteScreen} options={{ title: 'Ruleta de cubos', headerBackTitle: 'Atrás' }} />

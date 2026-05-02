@@ -20,6 +20,28 @@ const CORNER_RATIO = 0.15;
 
 const NEUTRAL_BORDER = '#9CA3AF';
 const PLACEHOLDER_BG = '#9CA3AF';
+/** Contorno fino del anillo de colores (visible sobre W/C y fondos claros). */
+const RING_OUTLINE = '#1F2937';
+const RING_OUTLINE_W = 1;
+
+const OUTSIDE_EVENT_PALETTE = [
+  '#4F46E5',
+  '#2563EB',
+  '#059669',
+  '#D97706',
+  '#DC2626',
+  '#7C3AED',
+  '#0D9488',
+  '#BE185D',
+];
+
+function hashUserIdToAvatarColor(userId: string): string {
+  let h = 0;
+  for (let i = 0; i < userId.length; i += 1) {
+    h = (h * 31 + userId.charCodeAt(i)) >>> 0;
+  }
+  return OUTSIDE_EVENT_PALETTE[h % OUTSIDE_EVENT_PALETTE.length];
+}
 
 type Props = {
   userId: string;
@@ -28,6 +50,8 @@ type Props = {
   withColorBorder?: boolean;
   borderWidth?: number;
   style?: StyleProp<ViewStyle>;
+  /** Fuera de eventos: inicial sobre color (sin Pokémon); custom sigue mostrando imagen. */
+  outsideEvent?: boolean;
 };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -123,6 +147,7 @@ export default function PlayerAvatar({
   withColorBorder = false,
   borderWidth = 3,
   style,
+  outsideEvent = false,
 }: Props) {
   const diameter = SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
@@ -135,8 +160,12 @@ export default function PlayerAvatar({
   const strokeH = outer - bw;
   const rStroke = Math.min(rInner + bw / 2, strokeW / 2, strokeH / 2);
 
+  /** Borde exterior del anillo de color (borde del SVG / fondo). */
+  const outerRingOutlineRx = Math.min(rStroke + bw / 2, (outer - RING_OUTLINE_W) / 2);
+
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [borderColors, setBorderColors] = useState<MtgColor[]>([]);
   const [imageFailed, setImageFailed] = useState(false);
@@ -152,6 +181,7 @@ export default function PlayerAvatar({
         .select(
           `
           display_name,
+          username,
           custom_avatar_path,
           default_avatars (storage_path)
         `
@@ -160,7 +190,7 @@ export default function PlayerAvatar({
         .maybeSingle();
 
       const partPromise =
-        participantId != null && participantId !== ''
+        !outsideEvent && participantId != null && participantId !== ''
           ? supabase
               .from('event_participants')
               .select(
@@ -185,6 +215,7 @@ export default function PlayerAvatar({
 
       const u = uRes.data;
       setDisplayName(u?.display_name?.trim() ?? '');
+      setUsername(((u as { username?: string | null } | null)?.username ?? '').trim());
 
       const custom = u?.custom_avatar_path ?? null;
       const userDefaultDa = relationOne(
@@ -213,10 +244,12 @@ export default function PlayerAvatar({
       let uri: string | null = null;
       if (custom) {
         uri = avatarPublicUrl(custom);
-      } else if (participantId && rotatedStoragePath) {
-        uri = defaultAvatarPublicUrl(rotatedStoragePath);
-      } else if (userDefaultPath) {
-        uri = defaultAvatarPublicUrl(userDefaultPath);
+      } else if (!outsideEvent) {
+        if (participantId && rotatedStoragePath) {
+          uri = defaultAvatarPublicUrl(rotatedStoragePath);
+        } else if (userDefaultPath) {
+          uri = defaultAvatarPublicUrl(userDefaultPath);
+        }
       }
 
       setImageUri(uri);
@@ -227,13 +260,15 @@ export default function PlayerAvatar({
     return () => {
       cancelled = true;
     };
-  }, [userId, participantId, withColorBorder]);
+  }, [userId, participantId, withColorBorder, outsideEvent]);
 
   const initial = useMemo(() => {
-    const n = displayName.trim();
+    const n = (displayName.trim() || username.trim());
     if (n.length > 0) return n.slice(0, 1).toUpperCase();
     return '?';
-  }, [displayName]);
+  }, [displayName, username]);
+
+  const outsidePhBg = useMemo(() => hashUserIdToAvatarColor(userId), [userId]);
 
   const showPlaceholder = loading || imageFailed || !imageUri;
   const fontSize = Math.max(10, Math.round(diameter * 0.42));
@@ -282,6 +317,18 @@ export default function PlayerAvatar({
           );
         })
       )}
+      {/* Contorno exterior: mismo perímetro que el borde externo del anillo de color. */}
+      <Rect
+        x={RING_OUTLINE_W / 2}
+        y={RING_OUTLINE_W / 2}
+        width={outer - RING_OUTLINE_W}
+        height={outer - RING_OUTLINE_W}
+        rx={outerRingOutlineRx}
+        ry={outerRingOutlineRx}
+        fill="none"
+        stroke={RING_OUTLINE}
+        strokeWidth={RING_OUTLINE_W}
+      />
     </Svg>
   ) : null;
 
@@ -297,6 +344,12 @@ export default function PlayerAvatar({
             width: diameter,
             height: diameter,
             borderRadius: rInner,
+            ...(bw > 0
+              ? {
+                  borderWidth: RING_OUTLINE_W,
+                  borderColor: RING_OUTLINE,
+                }
+              : {}),
           },
         ]}
       >
@@ -308,6 +361,7 @@ export default function PlayerAvatar({
                 width: diameter,
                 height: diameter,
                 borderRadius: rInner,
+                backgroundColor: outsideEvent ? outsidePhBg : PLACEHOLDER_BG,
               },
             ]}
           >
@@ -339,7 +393,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   ph: {
-    backgroundColor: PLACEHOLDER_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },

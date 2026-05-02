@@ -18,7 +18,7 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
-import { getEventStatusLabel, getEventTypeLabel, getPairingsLabel } from '../lib/labels';
+import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventDetail'>;
 
@@ -100,9 +100,19 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const e = data as EventRow;
     setEvent(e);
 
-    const [meRes, roleRes, partsRes, cubeRes, venueRes] = await Promise.all([
-      supabase.auth.getUser(),
-      supabase.from('workspace_members').select('role').eq('workspace_id', e.workspace_id).maybeSingle(),
+    const meRes = await supabase.auth.getUser();
+    const currentUserId = meRes.data.user?.id ?? null;
+    setMyUserId(currentUserId);
+
+    const [roleRes, partsRes, cubeRes, venueRes] = await Promise.all([
+      currentUserId
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', e.workspace_id)
+            .eq('user_id', currentUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from('event_participants')
         .select(
@@ -123,8 +133,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       e.venue_id ? supabase.from('venues').select('name').eq('id', e.venue_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
     ]);
 
-    const currentUserId = meRes.data.user?.id ?? null;
-    setMyUserId(currentUserId);
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
     const role = roleRes.data?.role as 'organizer' | 'member' | undefined;
     setIsOrganizer(role === 'organizer');
     setIsWorkspaceMember(role === 'organizer' || role === 'member');
@@ -383,11 +396,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     ? `Falta ${missingStartRequirements.join(', ')}`
     : '';
 
-  const canOpenMatchups =
-    event?.status === 'playing' || event?.status === 'completed'
-      ? isOrganizer || (isWorkspaceMember && (!myParticipantId || hasDeclaredColors))
-      : false;
-
   const insertMyRegistration = async () => {
     if (!event || !myUserId) return;
     const { error } = await supabase.from('event_participants').insert({
@@ -456,6 +464,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   }
 
   const eventAvatar = avatarPublicUrl(event.avatar_path);
+  const playingOrDone = event.status === 'playing' || event.status === 'completed';
+  const showEnfrentamientosBtn = playingOrDone && (myParticipantId != null || isWorkspaceMember);
+  const showStandingsBtn =
+    isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId);
+
+  const goEnfrentamientos = () => {
+    if (myParticipantId && !hasDeclaredColors && playingOrDone) {
+      navigation.navigate('EventCheckIn', { eventId: event.id, returnTo: 'EventDetail' });
+      return;
+    }
+    navigation.navigate('PairingsList', { eventId: event.id });
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
@@ -493,7 +513,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
               disabled={startDraftDisabled}
               onPress={() =>
-                Alert.alert('Iniciar draft', '¿Iniciar el draft? Las inscripciones se cerrarán.', [
+                Alert.alert('Iniciar draft', '¿Iniciar el draft? Se cierran las inscripciones.', [
                   { text: 'Volver', style: 'cancel' },
                   {
                     text: 'Iniciar',
@@ -502,7 +522,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 ])
               }
             >
-              <Text style={styles.secondaryBtnTxt}>Marcar inicio del draft</Text>
+              <Text style={styles.secondaryBtnTxt}>Arrancar a draftear</Text>
             </TouchableOpacity>
           ) : null}
           {event.status === 'scheduled' && startDraftDisabled ? (
@@ -516,18 +536,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               onPress={() =>
                 Alert.alert(
                   'Fin del draft',
-                  '¿Marcar fin del draft? Los jugadores podrán pasar a enfrentamientos.',
+                  '¿Finalizar draft? Queda habilitado Enfrentamientos.',
                   [
                     { text: 'Volver', style: 'cancel' },
                     {
-                      text: 'Marcar fin',
+                      text: 'Finalizar',
                       onPress: () => void finishDraftAndGeneratePairings(),
                     },
                   ]
                 )
               }
             >
-              <Text style={styles.secondaryBtnTxt}>Marcar fin del draft</Text>
+              <Text style={styles.secondaryBtnTxt}>Finalizar draft</Text>
             </TouchableOpacity>
           ) : null}
           {(event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id ? (
@@ -552,6 +572,53 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
+      {event.status === 'scheduled' ? (
+        <View style={styles.block}>
+          {!myParticipantId && isWorkspaceMember ? (
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => void insertMyRegistration()}>
+              <Text style={styles.primaryBtnTxt}>Inscribirme al evento</Text>
+            </TouchableOpacity>
+          ) : null}
+          {myParticipantId ? (
+            <View style={styles.inlineRow}>
+              <Text style={styles.registeredTxt}>Estás inscripto</Text>
+              <TouchableOpacity onPress={cancelMyRegistration} style={styles.smallDangerBtn}>
+                <Text style={styles.smallDangerTxt}>Cancelar inscripción</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {event.status === 'drafting' ? (
+        <View style={styles.block}>
+          {!myParticipantId ? (
+            <Text style={styles.muted}>Las inscripciones cerraron al iniciar el draft.</Text>
+          ) : (
+            <Text style={styles.muted}>Estás inscripto en este evento.</Text>
+          )}
+        </View>
+      ) : null}
+
+      {showEnfrentamientosBtn ? (
+        <View style={styles.block}>
+          <TouchableOpacity style={styles.primaryBtn} onPress={goEnfrentamientos}>
+            <Text style={styles.primaryBtnTxt}>Enfrentamientos</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {showStandingsBtn ? (
+        <View style={styles.block}>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => navigation.navigate('Standings', { eventId: event.id })}
+          >
+            <Text style={styles.primaryBtnTxt}>Tabla de posiciones</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Participantes</Text>
         {participants.length === 0 ? <Text style={styles.muted}>Todavía no hay participantes.</Text> : null}
@@ -559,7 +626,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           const u = relationOne(p.users);
           const uname = u?.display_name || u?.username || 'sin nombre';
           return (
-            <View key={p.id} style={styles.participantRow}>
+            <TouchableOpacity
+              key={p.id}
+              style={styles.participantRow}
+              onPress={() =>
+                navigation.navigate('PlayerProfileInEvent', {
+                  eventId: event.id,
+                  participantId: p.id,
+                  from: 'EventDetail',
+                })
+              }
+            >
               <PlayerAvatar
                 userId={p.user_id}
                 participantId={p.id}
@@ -570,87 +647,19 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               <View style={styles.participantBody}>
                 <Text style={styles.participantName}>{uname}</Text>
               </View>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
 
-      <View style={styles.block}>
-        {event.status === 'scheduled' ? (
-          <>
-            {!myParticipantId && isWorkspaceMember ? (
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => void insertMyRegistration()}>
-                <Text style={styles.primaryBtnTxt}>Inscribirme al evento</Text>
-              </TouchableOpacity>
-            ) : null}
-            {myParticipantId ? (
-              <View style={styles.inlineRow}>
-                <Text style={styles.registeredTxt}>Estás inscripto</Text>
-                <TouchableOpacity onPress={cancelMyRegistration} style={styles.smallDangerBtn}>
-                  <Text style={styles.smallDangerTxt}>Cancelar inscripción</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-          </>
-        ) : null}
-
-        {event.status === 'drafting' ? (
-          !myParticipantId ? (
-            <Text style={styles.muted}>Las inscripciones cerraron al iniciar el draft.</Text>
-          ) : (
-            <Text style={styles.muted}>Estás inscripto en este evento.</Text>
-          )
-        ) : null}
-
-        {event.status === 'playing' ? (
-          <>
-            {myParticipantId && !hasDeclaredColors ? (
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EventCheckIn', { eventId: event.id })}>
-                <Text style={styles.primaryBtnTxt}>Pasar a enfrentamientos</Text>
-              </TouchableOpacity>
-            ) : null}
-            {myParticipantId && hasDeclaredColors ? (
-              <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventCheckIn', { eventId: event.id })}>
-                <Text style={styles.secondaryBtnTxt}>Editar mis colores</Text>
-              </TouchableOpacity>
-            ) : null}
-          </>
-        ) : null}
-      </View>
-
-      <View style={styles.block}>
-        <Text style={styles.blockTitle}>Próximamente</Text>
+      <View style={[styles.block, styles.blockLast]}>
         <TouchableOpacity
           style={styles.placeholderBtn}
-          onPress={() =>
-            canOpenMatchups
-              ? navigation.navigate('PairingsList', { eventId: event.id })
-              : Alert.alert('Enfrentamientos', 'Los enfrentamientos se habilitan después del draft.')
-          }
+          onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en una próxima versión.')}
         >
-          <Text style={styles.placeholderTxt}>{getPairingsLabel()}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.placeholderBtn} onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en Sprint 3B.')}>
           <Text style={styles.placeholderTxt}>Bitácora digital</Text>
+          <Text style={styles.placeholderSub}>Próximamente</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.placeholderBtn}
-          onPress={() => navigation.navigate('Standings', { eventId: event.id })}
-        >
-          <Text style={styles.placeholderTxt}>Tabla de posiciones</Text>
-        </TouchableOpacity>
-        {((event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id) ? (
-          <TouchableOpacity
-            style={styles.placeholderBtn}
-            onPress={() =>
-              isOrganizer
-                ? navigation.navigate('CubeRoulette', { eventId: event.id })
-                : Alert.alert('Ruleta', 'Solo disponible para organizadores.')
-            }
-          >
-            <Text style={styles.placeholderTxt}>Ruleta</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
     </ScrollView>
   );
@@ -728,4 +737,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fafafa',
   },
   placeholderTxt: { color: '#374151', fontSize: 14, fontWeight: '600' },
+  placeholderSub: { color: '#9CA3AF', fontSize: 12, marginTop: 4, fontWeight: '500' },
+  blockLast: { paddingBottom: 28 },
 });

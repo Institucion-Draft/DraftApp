@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -19,14 +19,86 @@ type RowView = {
   pg: number;
   pj: number;
   eg: number;
-  vm: number;
-  tm: number;
+  /** Diferencial medio de vida; null si no aplica (p. ej. sin estados ≠ 0). */
+  dmv: number | null;
+  /** Tiempo medio por partida (s). */
+  tmp: number;
   inProgress: boolean;
 };
+
+type LifeEvRow = { match_id: string; participant_id: string; resulting_life: number; occurred_at: string };
+
+const DMV_POS = '#10B981';
+const DMV_NEG = '#EF4444';
+const DMV_GRAY = '#6B7280';
+
+/** Tras cada evento (vida inicial 20–20), registra vida propia − rival si ≠ 0; promedio = DMV del match. */
+function computeMatchDmv(events: LifeEvRow[], myPid: string, oppPid: string): number | null {
+  if (events.length === 0) return null;
+  const sorted = [...events].sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)));
+  let lifeMy = 20;
+  let lifeOpp = 20;
+  const nonZeroDiffs: number[] = [];
+
+  for (const ev of sorted) {
+    const pid = String(ev.participant_id);
+    if (pid === myPid) {
+      lifeMy = Number(ev.resulting_life);
+    } else if (pid === oppPid) {
+      lifeOpp = Number(ev.resulting_life);
+    } else {
+      continue;
+    }
+    const diff = lifeMy - lifeOpp;
+    if (diff !== 0) nonZeroDiffs.push(diff);
+  }
+
+  if (nonZeroDiffs.length === 0) return null;
+  return nonZeroDiffs.reduce((a, b) => a + b, 0) / nonZeroDiffs.length;
+}
+
+function formatDmvCell(dmv: number | null): string {
+  if (dmv == null) return '—';
+  const rounded = Math.round(dmv * 10) / 10;
+  if (rounded > 0) return `+${rounded.toFixed(1)}`;
+  if (rounded === 0) return '0.0';
+  return rounded.toFixed(1);
+}
+
+function dmvCellColor(dmv: number | null): string {
+  if (dmv == null) return DMV_GRAY;
+  if (dmv > 1e-9) return DMV_POS;
+  if (dmv < -1e-9) return DMV_NEG;
+  return DMV_GRAY;
+}
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
+}
+
+/** Ciclo ~1.2s; opacidad 1 ↔ 0.3. Usa `View` (no anidar en `Text`) para que `useNativeDriver` componga bien. */
+const PULSE_HALF_MS = 600;
+
+function PulsingLiveDot() {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.3, duration: PULSE_HALF_MS, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: PULSE_HALF_MS, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+    };
+  }, [opacity]);
+  return (
+    <Animated.View style={[styles.liveDotWrap, { opacity }]} accessibilityLabel="En partida">
+      <Text style={styles.liveDot}>●</Text>
+    </Animated.View>
+  );
 }
 
 export default function StandingsScreen({ route, navigation }: Props) {
@@ -50,6 +122,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .select(
           `
           id,
+          user_id,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -92,28 +165,38 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const pairings = pairingsRes.data ?? [];
     const pairingIds = pairings.map((p) => p.id as string);
 
-    const [matchesRes, lifeRes] = await Promise.all([
-      pairingIds.length
-        ? supabase
+    const matchesRes =
+      pairingIds.length > 0
+        ? await supabase
             .from('matches')
             .select('id, pairing_id, winner_participant_id, status, started_at, ended_at')
             .in('pairing_id', pairingIds)
-        : Promise.resolve({ data: [], error: null } as any),
-      participantIds.length
-        ? supabase
+        : { data: [], error: null };
+
+    const matches = (matchesRes.data ?? []) as any[];
+    const matchIds = matches.map((m) => String(m.id));
+
+    const lifeRes =
+      matchIds.length > 0
+        ? await supabase
             .from('life_events')
             .select('match_id, participant_id, resulting_life, occurred_at')
-            .in('participant_id', participantIds)
-        : Promise.resolve({ data: [], error: null } as any),
-    ]);
+            .in('match_id', matchIds)
+        : { data: [], error: null };
 
     if (matchesRes.error || lifeRes.error) {
       setRows([]);
       return;
     }
 
-    const matches = matchesRes.data ?? [];
-    const lifeEvents = lifeRes.data ?? [];
+    const lifeEvents = (lifeRes.data ?? []) as LifeEvRow[];
+    const lifeByMatchId = new Map<string, LifeEvRow[]>();
+    for (const e of lifeEvents) {
+      const mid = String(e.match_id);
+      if (!lifeByMatchId.has(mid)) lifeByMatchId.set(mid, []);
+      lifeByMatchId.get(mid)!.push(e);
+    }
+
     const rowsBuilt: RowView[] = participants.map((p: any) => {
       const pid = p.id as string;
       const u = relationOne(p.users);
@@ -130,30 +213,37 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
       const inProgress = playerMatches.some((m: any) => m.status === 'in_progress');
 
-      const lifeByMatch: Record<string, { life: number; at: string }> = {};
-      for (const ev of lifeEvents) {
-        if (ev.participant_id !== pid) continue;
-        const mid = String(ev.match_id);
-        const at = String(ev.occurred_at);
-        if (!lifeByMatch[mid] || lifeByMatch[mid].at < at) {
-          lifeByMatch[mid] = { life: Number(ev.resulting_life), at };
-        }
+      const matchDmvs: number[] = [];
+      for (const m of playerMatches) {
+        if (m.status !== 'completed') continue;
+        const mid = String(m.id);
+        const evs = lifeByMatchId.get(mid) ?? [];
+        if (evs.length === 0) continue;
+        const pr = pairings.find((x: any) => x.id === m.pairing_id);
+        if (!pr) continue;
+        const pa = pr.participant_a_id as string;
+        const pb = pr.participant_b_id as string;
+        if (pid !== pa && pid !== pb) continue;
+        const opp = pid === pa ? pb : pa;
+        const mdv = computeMatchDmv(evs, pid, opp);
+        if (mdv != null) matchDmvs.push(mdv);
       }
-      const lifeVals = Object.values(lifeByMatch).map((x) => x.life);
-      const vm = lifeVals.length ? lifeVals.reduce((a, b) => a + b, 0) / lifeVals.length : 0;
+      const dmv = matchDmvs.length > 0 ? matchDmvs.reduce((a, b) => a + b, 0) / matchDmvs.length : null;
 
       const durations = completedMatches
         .filter((m: any) => m.ended_at)
         .map((m: any) => (new Date(m.ended_at as string).getTime() - new Date(m.started_at as string).getTime()) / 1000);
-      const tm = durations.length ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : 0;
+      const tmp = durations.length ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : 0;
 
-      return { participantId: pid, userId, name, colors, pg, pj, eg, vm, tm, inProgress };
+      return { participantId: pid, userId, name, colors, pg, pj, eg, dmv, tmp, inProgress };
     });
 
     rowsBuilt.sort((a, b) => {
       if (b.eg !== a.eg) return b.eg - a.eg;
       if (b.pg !== a.pg) return b.pg - a.pg;
-      return b.vm - a.vm;
+      const av = a.dmv ?? -Infinity;
+      const bv = b.dmv ?? -Infinity;
+      return bv - av;
     });
     setRows(rowsBuilt);
   }, [eventId]);
@@ -212,11 +302,22 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <Text style={styles.cell}>PG</Text>
         <Text style={styles.cell}>PJ</Text>
         <Text style={styles.cell}>EG</Text>
-        <Text style={styles.cell}>VM</Text>
-        <Text style={styles.cell}>TM</Text>
+        <Text style={styles.cell}>DMV</Text>
+        <Text style={styles.cell}>TMP</Text>
       </View>
       {rows.map((r) => (
-        <View key={r.participantId} style={styles.row}>
+        <TouchableOpacity
+          key={r.participantId}
+          style={styles.row}
+          activeOpacity={0.7}
+          onPress={() =>
+            navigation.navigate('PlayerProfileInEvent', {
+              eventId,
+              participantId: r.participantId,
+              from: 'Standings',
+            })
+          }
+        >
           <View style={[styles.playerCell, styles.playerCol]}>
             <PlayerAvatar
               userId={r.userId}
@@ -226,21 +327,30 @@ export default function StandingsScreen({ route, navigation }: Props) {
               style={styles.standingsAvatar}
             />
             <View style={styles.playerNameRow}>
-              <Text style={styles.playerName} numberOfLines={2}>
-                {r.inProgress ? <Text style={styles.liveDot}>● </Text> : null}
-                {r.name}
-              </Text>
+              <View style={styles.playerNameInner}>
+                {r.inProgress ? <PulsingLiveDot /> : null}
+                <Text style={styles.playerName} numberOfLines={2}>
+                  {r.name}
+                </Text>
+              </View>
               <ColorFlag colors={r.colors} />
             </View>
           </View>
           <Text style={styles.cell}>{r.pg}</Text>
           <Text style={styles.cell}>{r.pj}</Text>
           <Text style={styles.cell}>{r.eg}</Text>
-          <Text style={styles.cell}>{r.vm.toFixed(1)}</Text>
-          <Text style={styles.cell}>{Math.round(r.tm)}s</Text>
-        </View>
+          <Text style={[styles.cell, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
+          <Text style={styles.cell}>{Math.round(r.tmp)}s</Text>
+        </TouchableOpacity>
       ))}
-      <Text style={styles.legend}>PG: Partidos Ganados · PJ: Partidos Jugados · EG: Enfrentamientos Ganados · VM: Vida Media Final · TM: Tiempo Medio</Text>
+      <View style={styles.legendLiveRow}>
+        <Text style={styles.legendStaticDot}>●</Text>
+        <Text style={styles.legendLiveCaption}> En partida</Text>
+      </View>
+      <Text style={styles.legend}>
+        PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · DMV: Diferencial Medio de Vida · TMP:
+        Tiempo Medio por Partida
+      </Text>
     </ScrollView>
   );
 }
@@ -262,7 +372,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  playerNameInner: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
   playerName: { flex: 1, flexShrink: 1, color: '#111', fontSize: 12, fontWeight: '600' },
-  liveDot: { color: '#3B82F6', fontWeight: '700' },
-  legend: { marginTop: 12, color: '#666', fontSize: 12 },
+  liveDotWrap: { justifyContent: 'center' },
+  liveDot: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
+  legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+  legendStaticDot: { color: '#3B82F6', fontWeight: '700', fontSize: 11 },
+  legendLiveCaption: { color: '#6B7280', fontSize: 11 },
+  legend: { marginTop: 10, color: '#666', fontSize: 12 },
 });

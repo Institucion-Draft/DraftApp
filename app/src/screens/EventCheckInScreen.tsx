@@ -28,20 +28,49 @@ const COLOR_OPTIONS: { key: MtgColor; bg: string; text: string }[] = [
 
 type ParticipantRow = { id: string; self_evaluation: number | null };
 
+function sameColorSet(a: MtgColor[], b: MtgColor[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((c, i) => c === sb[i]);
+}
+
 export default function EventCheckInScreen({ route, navigation }: Props) {
-  const { eventId } = route.params;
+  const {
+    eventId,
+    returnTo = 'EventDetail',
+    pairingId,
+    participantId: backProfileParticipantId,
+    profileReturnFrom,
+  } = route.params;
   useLayoutEffect(() => {
+    const profileBackFrom = profileReturnFrom ?? 'EventDetail';
+    const backParams =
+      returnTo === 'PairingDetail' && pairingId
+        ? { pairingId }
+        : returnTo === 'PlayerProfileInEvent' && backProfileParticipantId
+        ? { eventId, participantId: backProfileParticipantId, from: profileBackFrom }
+        : returnTo === 'PairingsList'
+        ? { eventId }
+        : { eventId };
     navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
+      headerLeft: hierarchicalHeaderBack(navigation, returnTo, backParams),
     });
-  }, [navigation, eventId]);
+  }, [navigation, eventId, returnTo, pairingId, backProfileParticipantId, profileReturnFrom]);
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [participantId, setParticipantId] = useState<string | null>(null);
   const [selectedColors, setSelectedColors] = useState<MtgColor[]>([]);
+  const [baselineColors, setBaselineColors] = useState<MtgColor[] | null>(null);
   const [selfEval, setSelfEval] = useState<number | null>(null);
   const [isFirstDeclaration, setIsFirstDeclaration] = useState(true);
+  /** Solo primera declaración: paso 1 = colores, paso 2 = valoración. */
+  const [wizardStep, setWizardStep] = useState<1 | 2>(1);
+
+  useEffect(() => {
+    setWizardStep(1);
+  }, [eventId, user?.id]);
 
   useEffect(() => {
     void (async () => {
@@ -57,7 +86,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         .maybeSingle();
 
       if (error) {
-        Alert.alert('Error', 'No se pudo cargar tu check-in.');
+        Alert.alert('Error', 'No se pudo cargar Mi mazo.');
         setLoading(false);
         return;
       }
@@ -66,13 +95,15 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         const p = data as ParticipantRow;
         setParticipantId(p.id);
         setSelfEval(p.self_evaluation);
-        const colorsRes = await supabase
-          .from('participant_colors')
-          .select('color')
-          .eq('participant_id', p.id);
-        if (!colorsRes.error) {
+        const colorsRes = await supabase.from('participant_colors').select('color').eq('participant_id', p.id);
+        if (colorsRes.error) {
+          setSelectedColors([]);
+          setBaselineColors([]);
+          setIsFirstDeclaration(true);
+        } else {
           const loaded = (colorsRes.data ?? []).map((c) => c.color as MtgColor);
           setSelectedColors(loaded);
+          setBaselineColors([...loaded]);
           setIsFirstDeclaration(loaded.length === 0);
         }
       }
@@ -89,7 +120,26 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     [selectedColors]
   );
 
-  const onSave = async () => {
+  const colorsDirty = baselineColors != null && !sameColorSet(selectedColors, baselineColors);
+  const editSaveDisabled = !colorsDirty || selectedColors.length < 1;
+
+  const navigateAfterSave = () => {
+    if (returnTo === 'PlayerProfileInEvent' && backProfileParticipantId) {
+      navigation.navigate('PlayerProfileInEvent', {
+        eventId,
+        participantId: backProfileParticipantId,
+        from: profileReturnFrom ?? 'EventDetail',
+      });
+      return;
+    }
+    if (returnTo === 'PairingDetail' && pairingId) {
+      navigation.navigate('PairingDetail', { pairingId });
+      return;
+    }
+    navigation.navigate('PairingsList', { eventId });
+  };
+
+  const persistWizard = async (opts: { withEvaluation: boolean }) => {
     if (!user?.id) {
       Alert.alert('Error', 'No hay sesión activa.');
       return;
@@ -101,10 +151,14 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No estás inscripto en este evento.');
       return;
     }
-    const updateRes = await supabase.from('event_participants').update({ self_evaluation: selfEval }).eq('id', pid);
+
+    const updateRes = await supabase
+      .from('event_participants')
+      .update({ self_evaluation: opts.withEvaluation ? selfEval : null })
+      .eq('id', pid);
     if (updateRes.error) {
       setSaving(false);
-      Alert.alert('Error', updateRes.error.message ?? 'No se pudo actualizar tu check-in.');
+      Alert.alert('Error', updateRes.error.message ?? 'No se pudo guardar Mi mazo.');
       return;
     }
 
@@ -126,7 +180,48 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     }
 
     setSaving(false);
-    navigation.goBack();
+    setBaselineColors([...sortedColors]);
+    navigateAfterSave();
+  };
+
+  const persistEditColorsOnly = async () => {
+    if (!user?.id || editSaveDisabled) return;
+    setSaving(true);
+    const pid = participantId;
+    if (!pid) {
+      setSaving(false);
+      Alert.alert('Error', 'No estás inscripto en este evento.');
+      return;
+    }
+
+    const delRes = await supabase.from('participant_colors').delete().eq('participant_id', pid);
+    if (delRes.error) {
+      setSaving(false);
+      Alert.alert('Error', 'No se pudieron actualizar tus colores.');
+      return;
+    }
+    if (sortedColors.length > 0) {
+      const ins = await supabase
+        .from('participant_colors')
+        .insert(sortedColors.map((c) => ({ participant_id: pid, color: c })));
+      if (ins.error) {
+        setSaving(false);
+        Alert.alert('Error', 'No se pudieron guardar tus colores.');
+        return;
+      }
+    }
+
+    setSaving(false);
+    setBaselineColors([...sortedColors]);
+    navigateAfterSave();
+  };
+
+  const onWizardContinue = () => {
+    if (selectedColors.length < 1) {
+      Alert.alert('Revisá los datos', 'Elegí al menos un color para continuar.');
+      return;
+    }
+    setWizardStep(2);
   };
 
   if (loading) {
@@ -137,13 +232,70 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     );
   }
 
+  const showWizard = isFirstDeclaration;
+
+  if (showWizard && wizardStep === 1) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+        <Text style={styles.title}>¿Qué colores sos?</Text>
+        <Text style={styles.label}>Colores jugados</Text>
+        <View style={styles.colorsWrap}>
+          {COLOR_OPTIONS.map((opt) => {
+            const active = selectedColors.includes(opt.key);
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.colorPill, { backgroundColor: opt.bg }, active && styles.colorPillActive]}
+                onPress={() => toggleColor(opt.key)}
+              >
+                <Text style={[styles.colorTxt, { color: opt.text }]}>{opt.key}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TouchableOpacity style={styles.saveBtn} onPress={onWizardContinue}>
+          <Text style={styles.saveBtnTxt}>Continuar</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  if (showWizard && wizardStep === 2) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+        <Text style={styles.title}>¿Qué tan sólido ves tu mazo hoy?</Text>
+        <Text style={styles.label}>Autoevaluación (1 a 10)</Text>
+        <View style={styles.starsWrap}>
+          {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
+            const active = selfEval != null && n <= selfEval;
+            return (
+              <TouchableOpacity key={n} onPress={() => setSelfEval(n)} style={styles.starBtn}>
+                <Text style={[styles.star, active && styles.starActive]}>★</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TouchableOpacity
+          style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+          onPress={() => void persistWizard({ withEvaluation: true })}
+          disabled={saving}
+        >
+          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.secondaryBtn, saving && styles.saveBtnDisabled]}
+          onPress={() => void persistWizard({ withEvaluation: false })}
+          disabled={saving}
+        >
+          <Text style={styles.secondaryBtnTxt}>Omitir</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      <Text style={styles.title}>
-        {isFirstDeclaration
-          ? 'Colores de tu mazo y valoración'
-          : 'Editar mis colores y valoración'}
-      </Text>
+      <Text style={styles.title}>Editar colores</Text>
       <Text style={styles.label}>Colores jugados</Text>
       <View style={styles.colorsWrap}>
         {COLOR_OPTIONS.map((opt) => {
@@ -160,22 +312,11 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         })}
       </View>
 
-      <Text style={styles.label}>Autoevaluación (1 a 10)</Text>
-      <View style={styles.starsWrap}>
-        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
-          const active = selfEval != null && n <= selfEval;
-          return (
-            <TouchableOpacity key={n} onPress={() => setSelfEval(n)} style={styles.starBtn}>
-              <Text style={[styles.star, active && styles.starActive]}>★</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <TouchableOpacity onPress={() => setSelfEval(null)} style={styles.skipBtn}>
-        <Text style={styles.skipTxt}>Saltear</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={() => void onSave()} disabled={saving}>
+      <TouchableOpacity
+        style={[styles.saveBtn, (saving || editSaveDisabled) && styles.saveBtnDisabled]}
+        onPress={() => void persistEditColorsOnly()}
+        disabled={saving || editSaveDisabled}
+      >
         {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
       </TouchableOpacity>
     </ScrollView>
@@ -204,9 +345,17 @@ const styles = StyleSheet.create({
   starBtn: { padding: 4, marginRight: 4 },
   star: { fontSize: 28, color: '#D1D5DB' },
   starActive: { color: '#F59E0B' },
-  skipBtn: { alignSelf: 'flex-start', marginBottom: 24 },
-  skipTxt: { color: '#666', fontSize: 14, fontWeight: '600' },
   saveBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
   saveBtnDisabled: { backgroundColor: '#9CA3AF' },
   saveBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  secondaryBtn: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  secondaryBtnTxt: { color: '#374151', fontSize: 16, fontWeight: '600' },
 });

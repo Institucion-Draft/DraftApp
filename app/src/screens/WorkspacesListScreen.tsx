@@ -142,6 +142,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
             userId={user.id}
             size="medium"
             withColorBorder={false}
+            outsideEvent
           />
         ) : null}
       </View>

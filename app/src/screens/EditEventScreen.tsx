@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Switch,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -20,6 +21,17 @@ import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
+
+type FormBaseline = {
+  name: string;
+  eventType: EventType;
+  status: EventStatus;
+  scheduledForMs: number;
+  cubeId: string | null;
+  venueId: string | null;
+  notes: string;
+  forceEditOverride: boolean;
+};
 
 const EVENT_TYPES: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
@@ -52,6 +64,15 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [notes, setNotes] = useState('');
   const [cubes, setCubes] = useState<SimpleOption[]>([]);
   const [venues, setVenues] = useState<SimpleOption[]>([]);
+  /** Solo aplica si status es playing/completed: permite editar cubo, sede, tipo, fecha (no estado). */
+  const [forceEditOverride, setForceEditOverride] = useState(false);
+  /** Estado del servidor al cargar la pantalla; no se actualiza al cambiar el picker. */
+  const [loadedStatus, setLoadedStatus] = useState<EventStatus | null>(null);
+  const [baseline, setBaseline] = useState<FormBaseline | null>(null);
+
+  const isAdvancedStatus = status === 'playing' || status === 'completed';
+  const restricted = isAdvancedStatus && !forceEditOverride;
+  const statusPickerLocked = loadedStatus === 'playing' || loadedStatus === 'completed';
 
   useEffect(() => {
     void (async () => {
@@ -72,11 +93,24 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setWorkspaceId(row.workspace_id);
       setName(row.name);
       setEventType(row.event_type as EventType);
-      setStatus(row.status as EventStatus);
+      const st = row.status as EventStatus;
+      setLoadedStatus(st);
+      setStatus(st);
       setScheduledFor(new Date(row.scheduled_for));
       setCubeId(row.cube_id);
       setVenueId(row.venue_id);
       setNotes(row.notes ?? '');
+      setForceEditOverride(false);
+      setBaseline({
+        name: row.name,
+        eventType: row.event_type as EventType,
+        status: st,
+        scheduledForMs: new Date(row.scheduled_for).getTime(),
+        cubeId: row.cube_id,
+        venueId: row.venue_id,
+        notes: row.notes ?? '',
+        forceEditOverride: false,
+      });
 
       const [cubesRes, venuesRes] = await Promise.all([
         supabase.from('cubes').select('id, name').eq('workspace_id', row.workspace_id).order('name'),
@@ -92,7 +126,37 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
   const typeLabel = EVENT_TYPES.find((t) => t.value === eventType)?.label ?? eventType;
 
+  const hasDirtyFields = useMemo(() => {
+    if (!baseline) return false;
+    return (
+      name.trim() !== baseline.name.trim() ||
+      eventType !== baseline.eventType ||
+      status !== baseline.status ||
+      scheduledFor.getTime() !== baseline.scheduledForMs ||
+      cubeId !== baseline.cubeId ||
+      venueId !== baseline.venueId ||
+      (notes.trim() || '') !== (baseline.notes.trim() || '') ||
+      forceEditOverride !== baseline.forceEditOverride
+    );
+  }, [baseline, name, eventType, status, scheduledFor, cubeId, venueId, notes, forceEditOverride]);
+
+  const openStatusPicker = () => {
+    if (statusPickerLocked || !loadedStatus) return;
+    if (loadedStatus === 'drafting') {
+      pick('Estado', [
+        { label: getEventStatusLabel('scheduled'), onPress: () => setStatus('scheduled') },
+        { label: getEventStatusLabel('cancelled'), onPress: () => setStatus('cancelled') },
+      ]);
+      return;
+    }
+    pick(
+      'Estado',
+      STATUS_OPTIONS.map((s) => ({ label: getEventStatusLabel(s), onPress: () => setStatus(s) }))
+    );
+  };
+
   const openDatePicker = () => {
+    if (restricted) return;
     if (Platform.OS === 'android') {
       DateTimePickerAndroid.open({
         value: scheduledFor,
@@ -121,22 +185,34 @@ export default function EditEventScreen({ route, navigation }: Props) {
   };
 
   const onSave = async () => {
+    if (!hasDirtyFields) return;
     const n = name.trim();
     if (n.length < 1 || n.length > 80) return Alert.alert('Revisá los datos', 'El nombre debe tener entre 1 y 80 caracteres.');
     if (notes.length > 2000) return Alert.alert('Revisá los datos', 'Las notas no pueden superar 2000 caracteres.');
     setSubmitting(true);
-    const { error } = await supabase
-      .from('draft_events')
-      .update({
-        name: n,
-        event_type: eventType,
-        status,
-        scheduled_for: scheduledFor.toISOString(),
-        cube_id: cubeId,
-        venue_id: venueId,
-        notes: notes.trim() || null,
-      })
-      .eq('id', eventId);
+    const patch: Record<string, unknown> = {
+      name: n,
+      notes: notes.trim() || null,
+    };
+    if (!restricted) {
+      patch.event_type = eventType;
+      patch.scheduled_for = scheduledFor.toISOString();
+      patch.cube_id = cubeId;
+      patch.venue_id = venueId;
+    }
+    if (!statusPickerLocked && loadedStatus) {
+      if (loadedStatus === 'drafting') {
+        if (status === 'scheduled' || status === 'cancelled') {
+          patch.status = status;
+          if (status === 'scheduled') {
+            patch.draft_started_at = null;
+          }
+        }
+      } else {
+        patch.status = status;
+      }
+    }
+    const { error } = await supabase.from('draft_events').update(patch).eq('id', eventId);
     setSubmitting(false);
     if (error) return Alert.alert('Error', error.message ?? 'No se pudo guardar el evento.');
     navigation.goBack();
@@ -176,9 +252,24 @@ export default function EditEventScreen({ route, navigation }: Props) {
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
 
-      <Text style={styles.label}>Tipo de evento</Text>
+      {isAdvancedStatus ? (
+        <View style={styles.forceEditBlock}>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>El draft ya empezó. ¿Forzar edición?</Text>
+            <Switch value={forceEditOverride} onValueChange={setForceEditOverride} />
+          </View>
+          {forceEditOverride ? (
+            <Text style={styles.forceEditHint}>
+              Los datos del evento ya empezado se modificarán. Los enfrentamientos en curso no se ven afectados.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Text style={[styles.label, restricted && styles.labelMuted]}>Tipo de evento</Text>
       <TouchableOpacity
-        style={styles.pickerBtn}
+        style={[styles.pickerBtn, restricted && styles.pickerBtnDisabled]}
+        disabled={restricted}
         onPress={() =>
           pick(
             'Tipo de evento',
@@ -186,25 +277,27 @@ export default function EditEventScreen({ route, navigation }: Props) {
           )
         }
       >
-        <Text style={styles.pickerTxt}>{typeLabel}</Text>
+        <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>{typeLabel}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.label}>Estado</Text>
+      <Text style={[styles.label, (restricted || statusPickerLocked) && styles.labelMuted]}>Estado</Text>
       <TouchableOpacity
-        style={styles.pickerBtn}
-        onPress={() =>
-          pick(
-            'Estado',
-            STATUS_OPTIONS.map((s) => ({ label: getEventStatusLabel(s), onPress: () => setStatus(s) }))
-          )
-        }
+        style={[styles.pickerBtn, (restricted || statusPickerLocked) && styles.pickerBtnDisabled]}
+        disabled={restricted || statusPickerLocked}
+        onPress={openStatusPicker}
       >
-        <Text style={styles.pickerTxt}>{getEventStatusLabel(status)}</Text>
+        <Text style={[styles.pickerTxt, (restricted || statusPickerLocked) && styles.pickerTxtMuted]}>
+          {getEventStatusLabel(status)}
+        </Text>
       </TouchableOpacity>
 
-      <Text style={styles.label}>Fecha y hora</Text>
-      <TouchableOpacity style={styles.pickerBtn} onPress={openDatePicker}>
-        <Text style={styles.pickerTxt}>
+      <Text style={[styles.label, restricted && styles.labelMuted]}>Fecha y hora</Text>
+      <TouchableOpacity
+        style={[styles.pickerBtn, restricted && styles.pickerBtnDisabled]}
+        disabled={restricted}
+        onPress={openDatePicker}
+      >
+        <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>
           {scheduledFor.toLocaleString('es-AR', {
             day: '2-digit',
             month: 'short',
@@ -215,7 +308,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </Text>
       </TouchableOpacity>
 
-      {Platform.OS === 'ios' && showIosPicker ? (
+      {Platform.OS === 'ios' && showIosPicker && !restricted ? (
         <View style={styles.iosPickerWrap}>
           <DateTimePicker
             value={scheduledFor}
@@ -230,9 +323,10 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      <Text style={styles.label}>Cubo</Text>
+      <Text style={[styles.label, restricted && styles.labelMuted]}>Cubo</Text>
       <TouchableOpacity
-        style={styles.pickerBtn}
+        style={[styles.pickerBtn, restricted && styles.pickerBtnDisabled]}
+        disabled={restricted}
         onPress={() =>
           pick('Seleccionar cubo', [
             { label: 'Sin definir', onPress: () => setCubeId(null) },
@@ -240,12 +334,13 @@ export default function EditEventScreen({ route, navigation }: Props) {
           ])
         }
       >
-        <Text style={styles.pickerTxt}>{cubeLabel}</Text>
+        <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>{cubeLabel}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.label}>Sede</Text>
+      <Text style={[styles.label, restricted && styles.labelMuted]}>Sede</Text>
       <TouchableOpacity
-        style={styles.pickerBtn}
+        style={[styles.pickerBtn, restricted && styles.pickerBtnDisabled]}
+        disabled={restricted}
         onPress={() =>
           pick('Seleccionar sede', [
             { label: 'Sin definir', onPress: () => setVenueId(null) },
@@ -253,14 +348,19 @@ export default function EditEventScreen({ route, navigation }: Props) {
           ])
         }
       >
-        <Text style={styles.pickerTxt}>{venueLabel}</Text>
+        <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>{venueLabel}</Text>
       </TouchableOpacity>
 
       <Text style={styles.label}>Notas (opcional)</Text>
       <TextInput style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={2000} />
       <Text style={styles.counter}>{notes.length}/2000</Text>
 
-      <TouchableOpacity style={[styles.primaryBtn, submitting && styles.primaryBtnDisabled]} onPress={() => void onSave()} disabled={submitting}>
+      {!hasDirtyFields ? <Text style={styles.noChangesHint}>No hay cambios para guardar</Text> : null}
+      <TouchableOpacity
+        style={[styles.primaryBtn, (submitting || !hasDirtyFields) && styles.primaryBtnDisabled]}
+        onPress={() => void onSave()}
+        disabled={submitting || !hasDirtyFields}
+      >
         {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnTxt}>Guardar</Text>}
       </TouchableOpacity>
 
@@ -295,7 +395,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16,
   },
+  pickerBtnDisabled: {
+    backgroundColor: '#E5E7EB',
+    borderColor: '#D1D5DB',
+  },
   pickerTxt: { fontSize: 16, color: '#111' },
+  pickerTxtMuted: { color: '#6B7280' },
+  labelMuted: { color: '#6B7280' },
+  forceEditBlock: { marginBottom: 8 },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  switchLabel: { flex: 1, fontSize: 15, color: '#374151', fontWeight: '500' },
+  forceEditHint: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
   notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
   counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
   iosPickerWrap: { marginBottom: 12 },
@@ -303,6 +425,7 @@ const styles = StyleSheet.create({
   iosDoneTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 16 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
   primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
+  noChangesHint: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 10 },
   primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
   deleteBtn: {
     marginTop: 20,

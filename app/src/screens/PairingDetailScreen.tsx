@@ -13,9 +13,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
-import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import {
+  findConcurrentInProgressDetailsForPairParticipants,
+  formatConcurrentMatchBlockMessage,
+} from '../lib/participantConcurrentMatch';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingDetail'>;
 
@@ -67,14 +70,12 @@ function shortName(name: string): string {
 }
 
 export default function PairingDetailScreen({ route, navigation }: Props) {
-  const { pairingId } = route.params;
+  const { pairingId, fromTab: fromPairingsTab = 'official' } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [a, setA] = useState<ParticipantRow | null>(null);
   const [b, setB] = useState<ParticipantRow | null>(null);
-  const [aColors, setAColors] = useState<MtgColor[]>([]);
-  const [bColors, setBColors] = useState<MtgColor[]>([]);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [status, setStatus] = useState<'scheduled' | 'in_progress' | 'completed'>('scheduled');
@@ -124,14 +125,21 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         .order('match_number', { ascending: true }),
     ]);
 
-    setMyUserId(meRes.data.user?.id ?? null);
-    if (eventRes.data?.workspace_id) {
+    const currentUserId = meRes.data.user?.id ?? null;
+    setMyUserId(currentUserId);
+    if (eventRes.data?.workspace_id && currentUserId) {
       const roleRes = await supabase
         .from('workspace_members')
         .select('role')
         .eq('workspace_id', eventRes.data.workspace_id as string)
+        .eq('user_id', currentUserId)
         .maybeSingle();
-      setIsOrganizer(roleRes.data?.role === 'organizer');
+      if (roleRes.error) {
+        if (__DEV__) {
+          console.error('Error cargando rol del workspace:', roleRes.error);
+        }
+      }
+      setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
     } else {
       setIsOrganizer(false);
     }
@@ -174,18 +182,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     else if (p.official_winner_participant_id) setStatus('completed');
     else setStatus('scheduled');
 
-    const colorsRes = await supabase
-      .from('participant_colors')
-      .select('participant_id, color')
-      .in('participant_id', [p.participant_a_id, p.participant_b_id]);
-    const byP: Record<string, MtgColor[]> = {};
-    for (const c of colorsRes.data ?? []) {
-      const pid = c.participant_id as string;
-      if (!byP[pid]) byP[pid] = [];
-      byP[pid].push(c.color as MtgColor);
-    }
-    setAColors(byP[p.participant_a_id] ?? []);
-    setBColors(byP[p.participant_b_id] ?? []);
   }, [pairingId]);
 
   useFocusEffect(
@@ -215,9 +211,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   useLayoutEffect(() => {
     if (!pairing?.event_id) return;
     navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'PairingsList', { eventId: pairing.event_id }),
+      headerLeft: hierarchicalHeaderBack(navigation, 'PairingsList', {
+        eventId: pairing.event_id,
+        initialTab: fromPairingsTab,
+      }),
     });
-  }, [navigation, pairing?.event_id]);
+  }, [navigation, pairing?.event_id, fromPairingsTab]);
 
   if (loading) {
     return (
@@ -262,6 +261,28 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   const startMatch = async () => {
     if (!pairing) return;
+    const details = await findConcurrentInProgressDetailsForPairParticipants({
+      eventId: pairing.event_id,
+      excludePairingId: pairing.id,
+      participantAId: pairing.participant_a_id,
+      participantBId: pairing.participant_b_id,
+    });
+    const blockMsg = formatConcurrentMatchBlockMessage({
+      nameA: aName,
+      nameB: bName,
+      participantAId: pairing.participant_a_id,
+      participantBId: pairing.participant_b_id,
+      userIdA: a?.user_id ?? '',
+      userIdB: b?.user_id ?? '',
+      myUserId,
+      isWorkspaceOrganizer: isOrganizer,
+      aInOtherMatchId: details.participantAInOtherMatchId,
+      bInOtherMatchId: details.participantBInOtherMatchId,
+    });
+    if (blockMsg) {
+      Alert.alert('Partida en curso', blockMsg);
+      return;
+    }
     const activeRes = await supabase
       .from('matches')
       .select('id')
@@ -274,7 +295,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       return;
     }
     if (activeRes.data?.id) {
-      navigation.navigate('LifeTracker', { matchId: String(activeRes.data.id) });
+      navigation.navigate('LifeTracker', {
+        matchId: String(activeRes.data.id),
+        fromTab: fromPairingsTab,
+      });
       return;
     }
 
@@ -294,7 +318,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Error', error?.message ?? 'No se pudo iniciar la partida.');
       return;
     }
-    navigation.navigate('LifeTracker', { matchId: String(data.id) });
+    navigation.navigate('LifeTracker', { matchId: String(data.id), fromTab: fromPairingsTab });
   };
 
   return (
@@ -337,12 +361,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             </View>
           </View>
         </View>
-      </View>
-
-      <View style={styles.block}>
-        <Text style={styles.blockTitle}>Jugadores</Text>
-        <Text style={styles.meta}>{aName} · Colores: {aColors.join(' ') || '—'}</Text>
-        <Text style={styles.meta}>{bName} · Colores: {bColors.join(' ') || '—'}</Text>
       </View>
 
       <View style={styles.block}>

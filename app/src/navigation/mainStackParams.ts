@@ -18,11 +18,27 @@ export type MainStackParamList = {
   CreateEvent: { workspaceId: string };
   EventDetail: { eventId: string };
   EditEvent: { eventId: string };
-  EventCheckIn: { eventId: string };
-  PairingsList: { eventId: string };
-  PairingDetail: { pairingId: string };
+  EventCheckIn: {
+    eventId: string;
+    returnTo?: 'PairingsList' | 'EventDetail' | 'PairingDetail' | 'PlayerProfileInEvent';
+    /** Requerido si returnTo es PairingDetail. */
+    pairingId?: string;
+    /** Requerido si returnTo es PlayerProfileInEvent. */
+    participantId?: string;
+    /** Pantalla lógica de vuelta al cerrar perfil (se reenvía al volver desde Mi mazo). */
+    profileReturnFrom?: 'Standings' | 'EventDetail';
+  };
+  PlayerProfileInEvent: {
+    eventId: string;
+    participantId: string;
+    /** Origen de navegación para el botón Atrás del header. */
+    from?: 'Standings' | 'EventDetail';
+  };
+  PairingsList: { eventId: string; initialTab?: 'official' | 'revenge' };
+  PairingDetail: { pairingId: string; fromTab?: 'official' | 'revenge' };
   CubeRoulette: { eventId: string };
-  LifeTracker: { matchId: string };
+  /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
+  LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge' };
   MatchResult: { matchId: string };
   Standings: { eventId: string };
 };
