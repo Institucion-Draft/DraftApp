@@ -270,13 +270,14 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       <Text style={styles.sectionTitle}>Miembros ({members.length})</Text>
       {members.map((m) => {
         const u = relationOne(m.users);
-        const label = u?.username ?? u?.display_name ?? 'Usuario';
+        const label = u?.display_name || u?.username || 'Sin nombre';
         return (
           <View key={m.user_id} style={styles.memberRow}>
             <PlayerAvatar
               userId={m.user_id}
               size="small"
               withColorBorder={false}
+              outsideEvent
               style={{ marginRight: 12 }}
             />
             <View style={styles.memberBody}>

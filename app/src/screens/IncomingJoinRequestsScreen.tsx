@@ -149,7 +149,7 @@ export default function IncomingJoinRequestsScreen({ route, navigation }: Props)
 
   const renderItem = ({ item }: { item: RequestRow }) => {
     const applicant = relationOne(item.applicant);
-    const label = applicant?.username ?? applicant?.display_name ?? 'Usuario';
+    const label = applicant?.display_name || applicant?.username || 'Sin nombre';
     const busy = actingId === item.id;
 
     return (
@@ -159,6 +159,7 @@ export default function IncomingJoinRequestsScreen({ route, navigation }: Props)
             userId={item.user_id}
             size="small"
             withColorBorder={false}
+            outsideEvent
             style={{ marginRight: 12 }}
           />
           <View style={styles.cardBody}>

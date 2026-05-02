@@ -62,8 +62,18 @@ export default function EventsListScreen({ navigation, route }: Props) {
   }, [pulse]);
 
   const load = useCallback(async () => {
+    const meRes = await supabase.auth.getUser();
+    const currentUserId = meRes.data.user?.id ?? null;
+
     const [roleRes, eventsRes, cubesRes, venuesRes] = await Promise.all([
-      supabase.from('workspace_members').select('role').eq('workspace_id', workspaceId).maybeSingle(),
+      currentUserId
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', workspaceId)
+            .eq('user_id', currentUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from('draft_events')
         .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id')
@@ -73,7 +83,12 @@ export default function EventsListScreen({ navigation, route }: Props) {
       supabase.from('venues').select('id, name').eq('workspace_id', workspaceId),
     ]);
 
-    if (!roleRes.error) setIsOrganizer(roleRes.data?.role === 'organizer');
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
+    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
     if (eventsRes.error) {
       Alert.alert('Error', 'No se pudieron cargar los eventos.');
       setItems([]);

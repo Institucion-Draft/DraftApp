@@ -58,12 +58,22 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
     const cube = data as CubeStatsRow;
     setRow(cube);
 
-    const { data: roleData } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', cube.workspace_id)
-      .maybeSingle();
-    setIsOrganizer(roleData?.role === 'organizer');
+    const meRes = await supabase.auth.getUser();
+    const currentUserId = meRes.data.user?.id ?? null;
+    const roleRes = currentUserId
+      ? await supabase
+          .from('workspace_members')
+          .select('role')
+          .eq('workspace_id', cube.workspace_id)
+          .eq('user_id', currentUserId)
+          .maybeSingle()
+      : { data: null, error: null };
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
+    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
   }, [cubeId]);
 
   useFocusEffect(

@@ -38,12 +38,18 @@ export default function VenuesListScreen({ navigation, route }: Props) {
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
+    const meRes = await supabase.auth.getUser();
+    const currentUserId = meRes.data.user?.id ?? null;
+
     const [roleRes, venuesRes] = await Promise.all([
-      supabase
-        .from('workspace_members')
-        .select('role')
-        .eq('workspace_id', workspaceId)
-        .maybeSingle(),
+      currentUserId
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', workspaceId)
+            .eq('user_id', currentUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase
         .from('venues_with_stats')
         .select('id, name, address, usage_count')
@@ -51,7 +57,12 @@ export default function VenuesListScreen({ navigation, route }: Props) {
         .order('name', { ascending: true }),
     ]);
 
-    if (!roleRes.error) setIsOrganizer(roleRes.data?.role === 'organizer');
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
+    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
     if (venuesRes.error) {
       Alert.alert('Error', 'No se pudieron cargar las sedes.');
       setItems([]);

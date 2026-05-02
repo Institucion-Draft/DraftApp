@@ -13,6 +13,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import {
+  findConcurrentInProgressDetailsForPairParticipants,
+  formatConcurrentMatchBlockMessage,
+} from '../lib/participantConcurrentMatch';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 
@@ -78,6 +82,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const { matchId } = route.params;
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState(false);
+  /** Otro match in_progress del mismo jugador en otro pairing. */
+  const [concurrentBlockMessage, setConcurrentBlockMessage] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [match, setMatch] = useState<MatchRow | null>(null);
   const [pairing, setPairing] = useState<PairingRow | null>(null);
@@ -101,6 +107,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const timerARef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerBRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myUserIdRef = useRef<string | null>(null);
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const pairingRef = useRef<PairingRow | null>(null);
   const lifeRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -109,9 +116,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const canUndo = historyRef.current.length > 1;
 
   const load = useCallback(async () => {
+    setConcurrentBlockMessage(null);
     const meRes = await supabase.auth.getUser();
     const uid = meRes.data.user?.id ?? null;
     myUserIdRef.current = uid;
+    setSessionUserId(uid);
 
     const { data: mData, error: mErr } = await supabase
       .from('matches')
@@ -177,18 +186,60 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       return;
     }
 
-    const roleRes = eventRes.data?.workspace_id
-      ? await supabase
-          .from('workspace_members')
-          .select('role')
-          .eq('workspace_id', eventRes.data.workspace_id as string)
-          .maybeSingle()
-      : { data: null };
-    const organizer = roleRes.data?.role === 'organizer';
+    const pRowsPre = (participantsRes.data ?? []) as ParticipantRow[];
+    const pMapPre = new Map(pRowsPre.map((x) => [x.id, x]));
+    const rowA = pMapPre.get(pairingRow.participant_a_id);
+    const rowB = pMapPre.get(pairingRow.participant_b_id);
+    const uA = relationOne(rowA?.users);
+    const uB = relationOne(rowB?.users);
+    const preNameA = uA?.display_name || uA?.username || 'Jugador A';
+    const preNameB = uB?.display_name || uB?.username || 'Jugador B';
+
+    const wsId = eventRes.data?.workspace_id as string | undefined;
+    const [roleRes, concurrentDetails] = await Promise.all([
+      wsId && uid
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', wsId)
+            .eq('user_id', uid)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      findConcurrentInProgressDetailsForPairParticipants({
+        eventId: pairingRow.event_id,
+        excludePairingId: pairingRow.id,
+        participantAId: pairingRow.participant_a_id,
+        participantBId: pairingRow.participant_b_id,
+      }),
+    ]);
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
+    const organizer = !roleRes.error && roleRes.data?.role === 'organizer';
     setIsOrganizer(organizer);
 
-    const pRows = (participantsRes.data ?? []) as ParticipantRow[];
-    const pMap = new Map(pRows.map((x) => [x.id, x]));
+    const blockMsg = formatConcurrentMatchBlockMessage({
+      nameA: preNameA,
+      nameB: preNameB,
+      participantAId: pairingRow.participant_a_id,
+      participantBId: pairingRow.participant_b_id,
+      userIdA: rowA?.user_id ?? '',
+      userIdB: rowB?.user_id ?? '',
+      myUserId: uid,
+      isWorkspaceOrganizer: organizer,
+      aInOtherMatchId: concurrentDetails.participantAInOtherMatchId,
+      bInOtherMatchId: concurrentDetails.participantBInOtherMatchId,
+    });
+    if (blockMsg) {
+      setConcurrentBlockMessage(blockMsg);
+      setLoading(false);
+      return;
+    }
+
+    const pRows = pRowsPre;
+    const pMap = pMapPre;
     setPa(pMap.get(pairingRow.participant_a_id) ?? null);
     setPb(pMap.get(pairingRow.participant_b_id) ?? null);
 
@@ -301,14 +352,17 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     };
   }, [matchId]);
 
+  const pairingsFromTab = route.params.fromTab ?? 'official';
+
   useLayoutEffect(() => {
     if (!pairing) return;
     navigation.setOptions({
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', {
         pairingId: pairing.id,
+        fromTab: pairingsFromTab,
       }),
     });
-  }, [navigation, pairing?.id]);
+  }, [navigation, pairing?.id, pairingsFromTab]);
 
   const persistLife = useCallback(
     async (target: 'a' | 'b', overrideValue?: number, checkWin = true) => {
@@ -417,7 +471,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       if (ref.current) clearTimeout(ref.current);
       ref.current = setTimeout(() => {
         void persistLife(target);
-      }, 10000);
+      }, 5000);
     },
     [persistLife]
   );
@@ -503,7 +557,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             return;
           }
           if (pairing) {
-            navigation.navigate('PairingDetail', { pairingId: pairing.id });
+            navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab });
           } else {
             navigation.goBack();
           }
@@ -534,6 +588,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const u = relationOne(pb?.users);
     return u?.display_name || u?.username || 'Jugador B';
   }, [pb]);
+  const layoutAB = useMemo(() => {
+    if (!pa || !pb) return { top: 'a' as const, bottom: 'b' as const };
+    if (sessionUserId === pa.user_id) return { top: 'b' as const, bottom: 'a' as const };
+    if (sessionUserId === pb.user_id) return { top: 'a' as const, bottom: 'b' as const };
+    return { top: 'a' as const, bottom: 'b' as const };
+  }, [sessionUserId, pa, pb]);
   const canDecreaseA = aLife > 0;
   const canDecreaseB = bLife > 0;
 
@@ -541,6 +601,24 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#3B82F6" />
+      </View>
+    );
+  }
+
+  if (concurrentBlockMessage) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.blockedText}>{concurrentBlockMessage}</Text>
+        <TouchableOpacity
+          style={[styles.linkBtn, styles.concurrentBackBtn]}
+          onPress={() =>
+            pairing
+              ? navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab })
+              : navigation.goBack()
+          }
+        >
+          <Text style={styles.linkTxt}>Volver</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -572,7 +650,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         ) : (
           <TouchableOpacity
             style={styles.linkBtn}
-            onPress={() => navigation.navigate('PairingDetail', { pairingId: pairing.id })}
+            onPress={() => navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab })}
           >
             <Text style={styles.linkTxt}>Volver</Text>
           </TouchableOpacity>
@@ -581,55 +659,83 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     );
   }
 
+  const renderPlayerHalf = (slot: 'a' | 'b', rotated: boolean) => {
+    const isA = slot === 'a';
+    const p = isA ? pa! : pb!;
+    const name = isA ? nameA : nameB;
+    const wins = isA ? winsA : winsB;
+    const life = isA ? aLife : bLife;
+    const canDec = isA ? canDecreaseA : canDecreaseB;
+    const pending = isA ? pendingA : pendingB;
+    const persisting = isA ? persistingA : persistingB;
+    const colors = isA ? colorsA : colorsB;
+    const t = isA ? ('a' as const) : ('b' as const);
+    const body = (
+      <>
+        <View style={styles.topRow}>
+          <View style={styles.bo3Wrap}>
+            <View style={[styles.bo3Box, wins >= 1 && styles.bo3Filled]} />
+            <View style={[styles.bo3Box, wins >= 2 && styles.bo3Filled]} />
+          </View>
+        </View>
+        <View style={styles.lifeRow}>
+          <View style={styles.playerBlock}>
+            <View style={styles.avatarWrap}>
+              <View style={styles.avatarInner}>
+                <PlayerAvatar
+                  userId={p.user_id}
+                  participantId={p.id}
+                  size="xlarge"
+                  withColorBorder
+                  borderWidth={5}
+                />
+              </View>
+            </View>
+            <Text style={styles.playerName}>{name}</Text>
+          </View>
+          <View style={styles.lifeControlsVertical}>
+            <TouchableOpacity style={styles.lifeBtn} onPress={() => adjustLife(t, 1)}>
+              <Text style={styles.lifeBtnTxt}>+1</Text>
+            </TouchableOpacity>
+            <View style={styles.lifeCenter}>
+              <Text style={styles.lifeNumber}>{clampLife(life)}</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.lifeBtn, !canDec && styles.lifeBtnDisabled]}
+              disabled={!canDec}
+              onPress={() => adjustLife(t, -1)}
+            >
+              <Text style={styles.lifeBtnTxt}>-1</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        {pending != null || persisting ? <Text style={styles.pending}>Pendiente...</Text> : null}
+      </>
+    );
+    return (
+      <View style={[styles.half, { backgroundColor: COLOR_BG[colors[0] ?? 'C'] }]}>
+        {rotated ? <View style={styles.rotated}>{body}</View> : body}
+        <TouchableOpacity
+          style={[
+            styles.flagBtn,
+            rotated ? styles.flagBtnTowardEquatorTop : styles.flagBtnTowardEquatorBottom,
+            rotated ? styles.flagBtnAvatarSideRotated : styles.flagBtnAvatarSideNormal,
+          ]}
+          onPress={() => onSurrender(t)}
+        >
+          <Text style={styles.flag}>🏳️</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <TouchableOpacity style={styles.menuBtn} onPress={onAbort}>
         <Text style={styles.menuTxt}>...</Text>
       </TouchableOpacity>
 
-      <View style={[styles.half, { backgroundColor: COLOR_BG[colorsA[0] ?? 'C'] }]}>
-        <View style={styles.rotated}>
-          <View style={styles.topRow}>
-            <View style={styles.bo3Wrap}>
-              <View style={[styles.bo3Box, winsA >= 1 && styles.bo3Filled]} />
-              <View style={[styles.bo3Box, winsA >= 2 && styles.bo3Filled]} />
-            </View>
-          </View>
-          <View style={styles.lifeRow}>
-            <View style={styles.playerBlock}>
-              <View style={styles.avatarWrap}>
-                <View style={styles.avatarInner}>
-                  <PlayerAvatar
-                    userId={pa.user_id}
-                    participantId={pa.id}
-                    size="xlarge"
-                    withColorBorder
-                    borderWidth={5}
-                  />
-                </View>
-                <TouchableOpacity style={styles.flagBtn} onPress={() => onSurrender('a')}>
-                  <Text style={styles.flag}>🏳️</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.playerName}>{nameA}</Text>
-            </View>
-            <View style={styles.lifeControlsVertical}>
-              <TouchableOpacity style={styles.lifeBtn} onPress={() => adjustLife('a', 1)}><Text style={styles.lifeBtnTxt}>+1</Text></TouchableOpacity>
-              <View style={styles.lifeCenter}>
-                <Text style={styles.lifeNumber}>{clampLife(aLife)}</Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.lifeBtn, !canDecreaseA && styles.lifeBtnDisabled]}
-                disabled={!canDecreaseA}
-                onPress={() => adjustLife('a', -1)}
-              >
-                <Text style={styles.lifeBtnTxt}>-1</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          {(pendingA != null || persistingA) ? <Text style={styles.pending}>Pendiente...</Text> : null}
-        </View>
-      </View>
+      {renderPlayerHalf(layoutAB.top, true)}
 
       <View style={styles.undoWrap}>
         <TouchableOpacity
@@ -641,47 +747,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.half, { backgroundColor: COLOR_BG[colorsB[0] ?? 'C'] }]}>
-        <View style={styles.topRow}>
-          <View style={styles.bo3Wrap}>
-            <View style={[styles.bo3Box, winsB >= 1 && styles.bo3Filled]} />
-            <View style={[styles.bo3Box, winsB >= 2 && styles.bo3Filled]} />
-          </View>
-        </View>
-        <View style={styles.lifeRow}>
-          <View style={styles.playerBlock}>
-            <View style={styles.avatarWrap}>
-              <View style={styles.avatarInner}>
-                <PlayerAvatar
-                  userId={pb.user_id}
-                  participantId={pb.id}
-                  size="xlarge"
-                  withColorBorder
-                  borderWidth={5}
-                />
-              </View>
-              <TouchableOpacity style={styles.flagBtn} onPress={() => onSurrender('b')}>
-                <Text style={styles.flag}>🏳️</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.playerName}>{nameB}</Text>
-          </View>
-          <View style={styles.lifeControlsVertical}>
-            <TouchableOpacity style={styles.lifeBtn} onPress={() => adjustLife('b', 1)}><Text style={styles.lifeBtnTxt}>+1</Text></TouchableOpacity>
-            <View style={styles.lifeCenter}>
-              <Text style={styles.lifeNumber}>{clampLife(bLife)}</Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.lifeBtn, !canDecreaseB && styles.lifeBtnDisabled]}
-              disabled={!canDecreaseB}
-              onPress={() => adjustLife('b', -1)}
-            >
-              <Text style={styles.lifeBtnTxt}>-1</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        {(pendingB != null || persistingB) ? <Text style={styles.pending}>Pendiente...</Text> : null}
-      </View>
+      {renderPlayerHalf(layoutAB.bottom, false)}
     </ScrollView>
   );
 }
@@ -695,10 +761,11 @@ const styles = StyleSheet.create({
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 16 },
   primaryTxt: { color: '#fff', fontWeight: '700' },
   linkBtn: { marginTop: 6 },
+  concurrentBackBtn: { marginTop: 18 },
   linkTxt: { color: '#3B82F6', fontWeight: '700' },
   menuBtn: { position: 'absolute', right: 16, top: 16, zIndex: 3, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#00000020', borderRadius: 8 },
   menuTxt: { color: '#111', fontWeight: '700' },
-  half: { flex: 1, minHeight: 300, padding: 16, justifyContent: 'center' },
+  half: { flex: 1, minHeight: 300, padding: 16, justifyContent: 'center', position: 'relative' },
   rotated: { transform: [{ rotate: '180deg' }] },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   bo3Wrap: { flexDirection: 'row' },
@@ -710,17 +777,23 @@ const styles = StyleSheet.create({
   lifeBtnTxt: { color: '#fff', fontSize: 24, fontWeight: '700' },
   lifeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   playerBlock: { width: '50%', alignItems: 'center', justifyContent: 'center' },
-  avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
   avatarInner: { alignItems: 'center', justifyContent: 'center' },
   flagBtn: {
     position: 'absolute',
-    left: 6,
-    top: 6,
     backgroundColor: '#00000030',
     borderRadius: 14,
     paddingHorizontal: 6,
     paddingVertical: 4,
+    zIndex: 2,
   },
+  /** Mitad superior (rotada): borde inferior hacia el ecuador / barra Undo. */
+  flagBtnTowardEquatorTop: { bottom: 12 },
+  /** Mitad inferior: borde superior hacia el ecuador. */
+  flagBtnTowardEquatorBottom: { top: 12 },
+  /** Contenido rotado 180°: el bloque del avatar queda a la derecha; misma orientación que antes. */
+  flagBtnAvatarSideRotated: { right: 22 },
+  flagBtnAvatarSideNormal: { left: 22 },
   playerName: { marginTop: 10, fontSize: 24, color: '#111', fontWeight: '700', textAlign: 'center' },
   lifeControlsVertical: { width: '50%', alignItems: 'center', justifyContent: 'space-between' },
   lifeCenter: { alignItems: 'center', flex: 1 },

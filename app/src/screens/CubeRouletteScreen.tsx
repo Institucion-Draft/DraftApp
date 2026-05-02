@@ -55,9 +55,17 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       return;
     }
     const wsId = eventRes.data.workspace_id as string;
+    const currentUserId = meRes.data.user?.id ?? null;
 
     const [roleRes, cubesRes, playersRes] = await Promise.all([
-      supabase.from('workspace_members').select('role').eq('workspace_id', wsId).maybeSingle(),
+      currentUserId
+        ? supabase
+            .from('workspace_members')
+            .select('role')
+            .eq('workspace_id', wsId)
+            .eq('user_id', currentUserId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
       supabase.from('cubes').select('id, name').eq('workspace_id', wsId).is('deleted_at', null).order('name', { ascending: true }),
       supabase
         .from('event_participants')
@@ -66,13 +74,19 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         .eq('role', 'player'),
     ]);
 
+    if (roleRes.error) {
+      if (__DEV__) {
+        console.error('Error cargando rol del workspace:', roleRes.error);
+      }
+    }
+
     if (cubesRes.error || playersRes.error) {
       Alert.alert('Error', 'No se pudo cargar la ruleta.');
       return;
     }
     setCubes((cubesRes.data ?? []) as CubeRow[]);
     setPlayers((playersRes.data ?? []) as PlayerRow[]);
-    setIsOrganizer(roleRes.data?.role === 'organizer' && !!meRes.data.user?.id);
+    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
   }, [eventId]);
 
   useFocusEffect(

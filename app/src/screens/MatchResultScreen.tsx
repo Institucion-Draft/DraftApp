@@ -257,7 +257,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           <Text style={styles.primaryTxt}>{rematchLabel}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
-          <Text style={styles.secondaryTxt}>Volver a enfrentamientos</Text>
+          <Text style={styles.secondaryTxt}>Enfrentamientos</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>
           <Text style={styles.secondaryTxt}>Volver al evento</Text>

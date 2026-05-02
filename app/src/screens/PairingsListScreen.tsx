@@ -121,11 +121,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     });
   }, [navigation, eventId]);
 
-  const load = useCallback(async () => {
+  useLayoutEffect(() => {
+    const initialTab = route.params.initialTab;
+    if (initialTab === 'revenge') {
+      setTab('revenge');
+      navigation.setParams({ eventId, initialTab: undefined });
+    } else if (initialTab === 'official') {
+      setTab('officials');
+      navigation.setParams({ eventId, initialTab: undefined });
+    }
+  }, [route.params.initialTab, eventId, navigation]);
+
+  const load = useCallback(async (): Promise<boolean> => {
     const meRes = await supabase.auth.getUser();
     const myUserId = meRes.data.user?.id ?? null;
 
-    const [pairingsRes, participantsRes] = await Promise.all([
+    const [eventRes, pairingsRes, participantsRes] = await Promise.all([
+      supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
       supabase
         .from('pairings')
         .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
@@ -152,9 +164,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudieron cargar los enfrentamientos.');
       setItems([]);
       setRevengeItems([]);
-      return;
+      return false;
     }
 
+    const eventStatus = eventRes.data?.status as string | undefined;
     const pairings = (pairingsRes.data ?? []) as PairingRow[];
     const participants = (participantsRes.data ?? []) as ParticipantRow[];
     const pMap = new Map<string, ParticipantRow>(participants.map((p) => [p.id, p]));
@@ -173,7 +186,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudieron cargar detalles de enfrentamientos.');
       setItems([]);
       setRevengeItems([]);
-      return;
+      return false;
     }
 
     const inProgressByPairing = new Map<string, number>();
@@ -361,6 +374,21 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
     setItems(mapped);
     setRevengeItems(revengeMapped);
+
+    let needsCheckIn = false;
+    if (eventStatus === 'playing' && myUserId) {
+      const myP = participants.find((p) => p.user_id === myUserId);
+      if (myP?.id) {
+        const cr = await supabase
+          .from('participant_colors')
+          .select('id', { count: 'exact', head: true })
+          .eq('participant_id', myP.id);
+        if (!cr.error && (cr.count ?? 0) === 0) {
+          needsCheckIn = true;
+        }
+      }
+    }
+    return needsCheckIn;
   }, [eventId]);
 
   useFocusEffect(
@@ -372,13 +400,16 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           setLoading(true);
           firstLoadRef.current = false;
         }
-        await load();
+        const needsCheckIn = await load();
+        if (!cancelled && needsCheckIn) {
+          navigation.navigate('EventCheckIn', { eventId, returnTo: 'PairingsList' });
+        }
         if (!cancelled && first) setLoading(false);
       })();
       return () => {
         cancelled = true;
       };
-    }, [load])
+    }, [load, navigation, eventId])
   );
 
   useEffect(() => {
@@ -463,7 +494,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.card}
-              onPress={() => navigation.navigate('PairingDetail', { pairingId: item.id })}
+              onPress={() =>
+                navigation.navigate('PairingDetail', { pairingId: item.id, fromTab: 'official' })
+              }
             >
               <View style={styles.compactRow}>
                 <View style={styles.inlinePlayer}>
@@ -550,9 +583,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   key={item.matchId}
                   style={styles.card}
                   onPress={() =>
-                    item.status === 'in_progress'
-                      ? navigation.navigate('LifeTracker', { matchId: item.matchId })
-                      : navigation.navigate('PairingDetail', { pairingId: item.pairingId })
+                    navigation.navigate('PairingDetail', { pairingId: item.pairingId, fromTab: 'revenge' })
                   }
                 >
                   <View style={styles.compactRow}>
