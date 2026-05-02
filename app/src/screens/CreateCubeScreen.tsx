@@ -71,7 +71,7 @@ export default function CreateCubeScreen({ navigation, route }: Props) {
     if (error) {
       const msg = error.message?.toLowerCase() ?? '';
       if (error.code === '23505' || msg.includes('unique') || msg.includes('duplicate')) {
-        Alert.alert('Nombre en uso', 'Ya existe un cubo con ese nombre en este workspace.');
+        Alert.alert('Nombre en uso', 'Ya existe un cubo con ese nombre en este grupo.');
         return;
       }
       Alert.alert('Error', error.message ?? 'No se pudo crear el cubo.');

@@ -111,7 +111,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         Alert.alert('Slug en uso', 'Ese slug ya está tomado. Elegí otro.');
         return;
       }
-      Alert.alert('Error', error.message ?? 'No se pudo crear el workspace.');
+      Alert.alert('Error', error.message ?? 'No se pudo crear el grupo de Draft.');
       return;
     }
 
@@ -130,7 +130,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         <Text style={styles.label}>Nombre</Text>
         <TextInput
           style={styles.input}
-          placeholder="Nombre del workspace"
+          placeholder="Nombre del grupo de Draft"
           value={name}
           onChangeText={onNameChange}
           editable={!submitting}
@@ -144,7 +144,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         </Text>
         <TextInput
           style={styles.input}
-          placeholder="mi-workspace"
+          placeholder="mi-grupo-draft"
           value={slug}
           onChangeText={onSlugChange}
           autoCapitalize="none"
@@ -169,7 +169,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
 
         <View style={styles.switchRow}>
           <View style={styles.switchLabels}>
-            <Text style={styles.labelInline}>Workspace público</Text>
+            <Text style={styles.labelInline}>Grupo público</Text>
             <Text style={styles.hintSmall}>
               Si está activado, otros usuarios podrán encontrarlo más adelante.
             </Text>
