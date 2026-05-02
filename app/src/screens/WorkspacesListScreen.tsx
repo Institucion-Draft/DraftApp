@@ -68,7 +68,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
       .order('joined_at', { ascending: false });
 
     if (error) {
-      Alert.alert('Error', 'No se pudieron cargar los workspaces.');
+      Alert.alert('Error', 'No se pudieron cargar los grupos de Draft.');
       setItems([]);
       return;
     }
@@ -146,12 +146,12 @@ export default function WorkspacesListScreen({ navigation }: Props) {
           />
         ) : null}
       </View>
-      <Text style={styles.screenTitle}>Tus workspaces</Text>
+      <Text style={styles.screenTitle}>Tus grupos de Draft</Text>
       <TouchableOpacity
         onPress={() => navigation.navigate('SearchWorkspaces')}
         style={styles.searchButton}
         accessibilityRole="button"
-        accessibilityLabel="Buscar workspaces"
+        accessibilityLabel="Buscar grupos de Draft"
       >
         <Text style={styles.searchIcon}>🔍</Text>
       </TouchableOpacity>
@@ -219,7 +219,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
 
   const renderEmpty = () => (
     <View style={styles.emptyWrap}>
-      <Text style={styles.emptyTitle}>Todavía no tenés workspaces</Text>
+      <Text style={styles.emptyTitle}>Todavía no tenés grupos de Draft</Text>
       <Text style={styles.emptySubtitle}>
         Creá uno para tu grupo o unite a uno que ya exista.
       </Text>
@@ -227,13 +227,13 @@ export default function WorkspacesListScreen({ navigation }: Props) {
         style={styles.primaryBtn}
         onPress={() => navigation.navigate('CreateWorkspace')}
       >
-        <Text style={styles.primaryBtnText}>Crear workspace</Text>
+        <Text style={styles.primaryBtnText}>Crear grupo de Draft</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.secondaryBtn}
         onPress={() => navigation.navigate('SearchWorkspaces')}
       >
-        <Text style={styles.secondaryBtnText}>Buscar workspace</Text>
+        <Text style={styles.secondaryBtnText}>Buscar grupo de Draft</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.outlineAltBtn}
@@ -250,7 +250,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
         style={styles.footerBtn}
         onPress={() => navigation.navigate('CreateWorkspace')}
       >
-        <Text style={styles.footerBtnText}>+ Nuevo workspace</Text>
+        <Text style={styles.footerBtnText}>+ Nuevo grupo de Draft</Text>
       </TouchableOpacity>
     ) : null;
 

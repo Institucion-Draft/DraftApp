@@ -19,7 +19,7 @@ type RowView = {
   pg: number;
   pj: number;
   eg: number;
-  /** Diferencial medio de vida; null si no aplica (p. ej. sin estados ≠ 0). */
+  /** Diferencial medio de vida; null si no hay ≥2 life_events con duración efectiva > 0. */
   dmv: number | null;
   /** Tiempo medio por partida (s). */
   tmp: number;
@@ -32,29 +32,54 @@ const DMV_POS = '#10B981';
 const DMV_NEG = '#EF4444';
 const DMV_GRAY = '#6B7280';
 
-/** Tras cada evento (vida inicial 20–20), registra vida propia − rival si ≠ 0; promedio = DMV del match. */
-function computeMatchDmv(events: LifeEvRow[], myPid: string, oppPid: string): number | null {
-  if (events.length === 0) return null;
-  const sorted = [...events].sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)));
-  let lifeMy = 20;
-  let lifeOpp = 20;
-  const nonZeroDiffs: number[] = [];
+function parseEventMs(iso: string): number {
+  return new Date(iso).getTime();
+}
 
-  for (const ev of sorted) {
+/**
+ * DMV del match: promedio temporal de (vida_propia − vida_oponente) entre el primer y último
+ * life_event. Solo estados después de cada evento i y antes de i+1 (el post-último evento no cuenta).
+ * Peso dur_i / (lastEventTime − firstEventTime); se incluyen todos los diffs, también 0.
+ */
+function computeMatchDmv(events: LifeEvRow[], myPid: string, oppPid: string): number | null {
+  const filtered = events.filter((e) => {
+    const pid = String(e.participant_id);
+    return pid === myPid || pid === oppPid;
+  });
+  if (filtered.length < 2) return null;
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dt = parseEventMs(String(a.occurred_at)) - parseEventMs(String(b.occurred_at));
+    if (dt !== 0) return dt;
+    return String(a.participant_id).localeCompare(String(b.participant_id));
+  });
+
+  const tFirst = parseEventMs(String(sorted[0]!.occurred_at));
+  const tLast = parseEventMs(String(sorted[sorted.length - 1]!.occurred_at));
+  const duracionEfectiva = tLast - tFirst;
+  if (!Number.isFinite(tFirst) || !Number.isFinite(tLast) || duracionEfectiva <= 0) return null;
+
+  const apply = (ev: LifeEvRow, life: { my: number; opp: number }) => {
     const pid = String(ev.participant_id);
-    if (pid === myPid) {
-      lifeMy = Number(ev.resulting_life);
-    } else if (pid === oppPid) {
-      lifeOpp = Number(ev.resulting_life);
-    } else {
-      continue;
+    if (pid === myPid) life.my = Number(ev.resulting_life);
+    else life.opp = Number(ev.resulting_life);
+  };
+
+  const life = { my: 20, opp: 20 };
+  apply(sorted[0]!, life);
+
+  let weightedSum = 0;
+  const n = sorted.length;
+  for (let i = 0; i < n - 1; i++) {
+    const durI = parseEventMs(String(sorted[i + 1]!.occurred_at)) - parseEventMs(String(sorted[i]!.occurred_at));
+    const diffI = life.my - life.opp;
+    weightedSum += diffI * (durI / duracionEfectiva);
+    if (i < n - 2) {
+      apply(sorted[i + 1]!, life);
     }
-    const diff = lifeMy - lifeOpp;
-    if (diff !== 0) nonZeroDiffs.push(diff);
   }
 
-  if (nonZeroDiffs.length === 0) return null;
-  return nonZeroDiffs.reduce((a, b) => a + b, 0) / nonZeroDiffs.length;
+  return weightedSum;
 }
 
 function formatDmvCell(dmv: number | null): string {

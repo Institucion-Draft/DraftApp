@@ -81,7 +81,7 @@ export default function EditVenueScreen({ route, navigation }: Props) {
     if (error) {
       const msg = error.message?.toLowerCase() ?? '';
       if (error.code === '23505' || msg.includes('unique') || msg.includes('duplicate')) {
-        Alert.alert('Nombre en uso', 'Ya existe una sede con ese nombre en este workspace.');
+        Alert.alert('Nombre en uso', 'Ya existe una sede con ese nombre en este grupo.');
         return;
       }
       Alert.alert('Error', error.message ?? 'No se pudo guardar la sede.');

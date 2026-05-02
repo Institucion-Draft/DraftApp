@@ -166,7 +166,7 @@ export default function MyJoinRequestsScreen(_props: Props) {
 
     return (
       <View style={styles.card}>
-        <Text style={styles.wsName}>{ws?.name ?? 'Workspace'}</Text>
+        <Text style={styles.wsName}>{ws?.name ?? 'Grupo'}</Text>
         <Text style={styles.date}>Solicitud: {formatDate(item.created_at)}</Text>
         <View style={[styles.statusPill, { backgroundColor: colors.bg }]}>
           <Text style={[styles.statusText, { color: colors.text }]}>

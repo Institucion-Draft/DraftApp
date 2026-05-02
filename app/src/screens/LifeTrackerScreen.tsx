@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -79,6 +80,7 @@ const COLOR_BG: Record<MtgColor, string> = {
 };
 
 export default function LifeTrackerScreen({ route, navigation }: Props) {
+  useKeepAwake();
   const { matchId } = route.params;
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState(false);

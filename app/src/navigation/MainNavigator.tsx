@@ -53,7 +53,7 @@ export default function MainNavigator() {
           name="CreateWorkspace"
           component={CreateWorkspaceScreen}
           options={({ navigation }) => ({
-            title: 'Nuevo workspace',
+            title: 'Nuevo grupo de Draft',
             headerBackVisible: false,
             headerLeft: () => (
               <Pressable
@@ -70,7 +70,7 @@ export default function MainNavigator() {
           name="WorkspaceDetail"
           component={WorkspaceDetailScreen}
           options={{
-            title: 'Workspace',
+            title: 'Detalle del grupo',
             headerBackTitle: 'Atrás',
           }}
         />
@@ -78,7 +78,7 @@ export default function MainNavigator() {
           name="SearchWorkspaces"
           component={SearchWorkspacesScreen}
           options={{
-            title: 'Buscar workspaces',
+            title: 'Buscar grupos de Draft',
             headerBackTitle: 'Atrás',
           }}
         />

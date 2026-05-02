@@ -89,7 +89,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
 
     if (error) {
       setSearching(false);
-      Alert.alert('Error', 'No se pudo buscar workspaces.');
+      Alert.alert('Error', 'No se pudo buscar grupos de Draft.');
       setResults([]);
       return;
     }
@@ -118,7 +118,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
 
     if (memRes.error || reqRes.error) {
       setSearching(false);
-      Alert.alert('Error', 'No se pudo cargar tu estado en los workspaces.');
+      Alert.alert('Error', 'No se pudo cargar tu estado en los grupos de Draft.');
       setResults([]);
       return;
     }
@@ -184,7 +184,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
       if (dup) {
         Alert.alert(
           'Solicitud existente',
-          'Ya tenés una solicitud pendiente para este workspace.'
+          'Ya tenés una solicitud pendiente para este grupo.'
         );
         closeJoinModal();
         void runSearch();
@@ -270,7 +270,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
       {showHint ? (
         <View style={styles.hintBox}>
           <Text style={styles.hintText}>
-            Escribí el nombre de un workspace público para buscarlo.
+            Escribí el nombre de un grupo de Draft público para buscarlo.
           </Text>
         </View>
       ) : (

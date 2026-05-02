@@ -67,7 +67,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       .maybeSingle();
 
     if (wsError) {
-      Alert.alert('Error', 'No se pudo cargar el workspace.');
+      Alert.alert('Error', 'No se pudo cargar el grupo de Draft.');
       setWorkspace(null);
       setMembers([]);
       setPendingJoinCount(0);
@@ -152,7 +152,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: workspace?.name ?? 'Workspace',
+      title: workspace?.name ?? 'Detalle del grupo',
       headerLeft: hierarchicalHeaderBack(navigation, 'WorkspacesList'),
     });
   }, [navigation, workspace?.name]);
@@ -180,7 +180,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   if (!workspace) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.muted}>No se encontró el workspace.</Text>
+        <Text style={styles.muted}>No se encontró el grupo.</Text>
       </View>
     );
   }

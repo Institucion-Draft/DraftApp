@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "app",
+    "name": "DraftApp",
     "slug": "app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,9 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.toxic214.draftapp"
     },
     "android": {
+      "package": "com.toxic214.draftapp",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -28,6 +30,18 @@
     },
     "plugins": [
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "89b6b61b-1fa2-4440-885e-6e5a2596a6be"
+      }
+    },
+    "owner": "toxic214",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/89b6b61b-1fa2-4440-885e-6e5a2596a6be"
+    }
   }
 }
