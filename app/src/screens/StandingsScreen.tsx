@@ -310,7 +310,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const playerMatches = matches.filter((m: any) => pairingSet.has(m.pairing_id));
       const completedMatches = playerMatches.filter((m: any) => !!m.winner_participant_id);
       const pg = completedMatches.filter((m: any) => m.winner_participant_id === pid).length;
-      const pj = playerMatches.length;
+      const pj = completedMatches.length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
       const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
       const inProgress = playerMatches.some((m: any) => m.status === 'in_progress');
@@ -485,7 +485,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       ) : null}
       <Text style={styles.legend}>
         {[
-          'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
+          'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
           'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
           'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
         ].join('\n')}

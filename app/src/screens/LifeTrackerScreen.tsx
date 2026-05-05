@@ -753,6 +753,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const pending = isA ? pendingA : pendingB;
     const persisting = isA ? persistingA : persistingB;
     const colors = isA ? colorsA : colorsB;
+    const isDarkBg = colors[0] === 'B';
     const t = isA ? ('a' as const) : ('b' as const);
     const diffColor =
       deltaDisplay > 0 ? '#16A34A' : deltaDisplay < 0 ? '#DC2626' : '#6B7280';
@@ -779,20 +780,27 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
-            <Text style={styles.playerName}>{name}</Text>
+            <Text style={[styles.playerName, isDarkBg && { color: '#fff' }]}>{name}</Text>
           </View>
           <View style={styles.lifeControlsVertical}>
-            <TouchableOpacity style={styles.lifeBtn} onPress={() => adjustLife(t, 1)}>
+            <TouchableOpacity
+              style={[styles.lifeBtn, isDarkBg && { borderWidth: 1, borderColor: '#fff' }]}
+              onPress={() => adjustLife(t, 1)}
+            >
               <Text style={styles.lifeBtnTxt}>+1</Text>
             </TouchableOpacity>
             <View style={styles.lifeCenter}>
               <Animated.View style={[styles.lifeDiffWrap, { opacity: diffOpacity }]}>
                 <Text style={[styles.lifeDiff, { color: diffColor }]}>{diffLabel}</Text>
               </Animated.View>
-              <Text style={styles.lifeNumber}>{clampLife(life)}</Text>
+              <Text style={[styles.lifeNumber, isDarkBg && { color: '#fff' }]}>{clampLife(life)}</Text>
             </View>
             <TouchableOpacity
-              style={[styles.lifeBtn, !canDec && styles.lifeBtnDisabled]}
+              style={[
+                styles.lifeBtn,
+                isDarkBg && { borderWidth: 1, borderColor: '#fff' },
+                !canDec && styles.lifeBtnDisabled,
+              ]}
               disabled={!canDec}
               onPress={() => adjustLife(t, -1)}
             >
