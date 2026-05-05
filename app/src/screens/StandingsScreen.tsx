@@ -21,8 +21,8 @@ type RowView = {
   eg: number;
   /** Diferencial medio de vida; null si no hay ≥2 life_events con duración efectiva > 0. */
   dmv: number | null;
-  /** Tiempo medio por partida (s). */
-  tmp: number;
+  /** Tiempo medio por partida (s); null si no hay partidas completadas con duración. */
+  tmp: number | null;
   inProgress: boolean;
 };
 
@@ -95,6 +95,16 @@ function dmvCellColor(dmv: number | null): string {
   if (dmv > 1e-9) return DMV_POS;
   if (dmv < -1e-9) return DMV_NEG;
   return DMV_GRAY;
+}
+
+/** TMP en minutos para la tabla; cálculo interno sigue en segundos. */
+function formatTmpDisplay(tmpSeconds: number | null): string {
+  if (tmpSeconds == null || !Number.isFinite(tmpSeconds)) return '—';
+  const minutes = tmpSeconds / 60;
+  if (minutes < 10) {
+    return `${minutes.toFixed(1).replace('.', ',')} min`;
+  }
+  return `${Math.round(minutes)} min`;
 }
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -258,7 +268,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const durations = completedMatches
         .filter((m: any) => m.ended_at)
         .map((m: any) => (new Date(m.ended_at as string).getTime() - new Date(m.started_at as string).getTime()) / 1000);
-      const tmp = durations.length ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : 0;
+      const tmp =
+        durations.length > 0 ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : null;
 
       return { participantId: pid, userId, name, colors, pg, pj, eg, dmv, tmp, inProgress };
     });
@@ -328,7 +339,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <Text style={styles.cell}>PJ</Text>
         <Text style={styles.cell}>EG</Text>
         <Text style={styles.cell}>DMV</Text>
-        <Text style={styles.cell}>TMP</Text>
+        <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
       </View>
       {rows.map((r) => (
         <TouchableOpacity
@@ -365,7 +376,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
           <Text style={styles.cell}>{r.pj}</Text>
           <Text style={styles.cell}>{r.eg}</Text>
           <Text style={[styles.cell, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
-          <Text style={styles.cell}>{Math.round(r.tmp)}s</Text>
+          <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
+            {formatTmpDisplay(r.tmp)}
+          </Text>
         </TouchableOpacity>
       ))}
       <View style={styles.legendLiveRow}>
@@ -387,6 +400,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
   cell: { width: 42, textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
+  tmpCol: { width: 56, fontSize: 11 },
   playerCol: { flex: 1, width: 'auto', minWidth: 120, textAlign: 'left' },
   playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   standingsAvatar: { marginRight: 6 },

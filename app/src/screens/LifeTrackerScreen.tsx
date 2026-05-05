@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   ScrollView,
   StyleSheet,
   Text,
@@ -112,10 +113,41 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const pairingRef = useRef<PairingRow | null>(null);
   const lifeRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const diffOpacityA = useRef(new Animated.Value(0)).current;
+  const diffOpacityB = useRef(new Animated.Value(0)).current;
 
   const aLife = pendingA ?? stableA;
   const bLife = pendingB ?? stableB;
+  const deltaA = clampLife((pendingA ?? stableA)) - stableA;
+  const deltaB = clampLife((pendingB ?? stableB)) - stableB;
   const canUndo = historyRef.current.length > 1;
+
+  const clearPendingAdjustments = useCallback(() => {
+    if (timerARef.current) clearTimeout(timerARef.current);
+    if (timerBRef.current) clearTimeout(timerBRef.current);
+    timerARef.current = null;
+    timerBRef.current = null;
+    pendingARef.current = null;
+    pendingBRef.current = null;
+    setPendingA(null);
+    setPendingB(null);
+  }, []);
+
+  useEffect(() => {
+    Animated.timing(diffOpacityA, {
+      toValue: deltaA !== 0 ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [deltaA, diffOpacityA]);
+
+  useEffect(() => {
+    Animated.timing(diffOpacityB, {
+      toValue: deltaB !== 0 ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [deltaB, diffOpacityB]);
 
   const load = useCallback(async () => {
     setConcurrentBlockMessage(null);
@@ -407,6 +439,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         return;
       }
       const persistedLife = clampLife(Number(data?.resulting_life ?? normalizedPending));
+      const insertedLifeEventId = (data as { id?: string } | null)?.id ?? null;
 
       if (target === 'a') {
         stableARef.current = persistedLife;
@@ -435,12 +468,55 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         const nmB = uB?.display_name || uB?.username || 'Jugador B';
         const winnerName = target === 'a' ? nmB : nmA;
         const stableBeforeZero = stable;
+        const participantIdForZero = participantId;
         Alert.alert('Fin de partida', '¿Confirmás el resultado?', [
           {
             text: 'Cancelar',
             style: 'cancel',
             onPress: () => {
-              void persistLife(target, stableBeforeZero, false);
+              clearPendingAdjustments();
+              void (async () => {
+                let idToDelete = insertedLifeEventId;
+                if (!idToDelete) {
+                  const lastRes = await supabase
+                    .from('life_events')
+                    .select('id')
+                    .eq('match_id', matchId)
+                    .eq('participant_id', participantIdForZero)
+                    .eq('resulting_life', 0)
+                    .order('occurred_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                  if (lastRes.error || !lastRes.data?.id) {
+                    Alert.alert(
+                      'Error',
+                      lastRes.error?.message ?? 'No se pudo deshacer el golpe de gracia.'
+                    );
+                    return;
+                  }
+                  idToDelete = lastRes.data.id as string;
+                }
+                const delRes = await supabase.from('life_events').delete().eq('id', idToDelete);
+                if (delRes.error) {
+                  Alert.alert('Error', delRes.error.message ?? 'No se pudo deshacer el golpe de gracia.');
+                  return;
+                }
+                const prevLife = clampLife(stableBeforeZero);
+                if (target === 'a') {
+                  stableARef.current = prevLife;
+                  pendingARef.current = null;
+                  setStableA(prevLife);
+                  setPendingA(null);
+                } else {
+                  stableBRef.current = prevLife;
+                  pendingBRef.current = null;
+                  setStableB(prevLife);
+                  setPendingB(null);
+                }
+                if (historyRef.current.length > 1) {
+                  historyRef.current = historyRef.current.slice(0, -1);
+                }
+              })();
             },
           },
           {
@@ -464,7 +540,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         ]);
       }
     },
-    [matchId, navigation, pairing, pa, pb]
+    [clearPendingAdjustments, matchId, navigation, pairing, pa, pb]
   );
 
   const queuePersist = useCallback(
@@ -500,6 +576,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   );
 
   const onUndo = async () => {
+    clearPendingAdjustments();
     if (historyRef.current.length < 2 || !pairing) return;
     const nextHistory = [...historyRef.current];
     nextHistory.pop();
@@ -519,7 +596,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const winner =
       target === 'a' ? pairing.participant_b_id : pairing.participant_a_id;
     Alert.alert('Rendición', '¿Rendirte?', [
-      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Cancelar', style: 'cancel', onPress: () => clearPendingAdjustments() },
       {
         text: 'Sí, me rindo',
         style: 'destructive',
@@ -545,7 +622,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
 
   const onAbort = () => {
     Alert.alert('Abortar partida', '¿Abortar la partida? No se contará en estadísticas.', [
-      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Cancelar', style: 'cancel', onPress: () => clearPendingAdjustments() },
       {
         text: 'Abortar',
         style: 'destructive',
@@ -642,7 +719,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             style={styles.primaryBtn}
             onPress={() =>
               Alert.alert('Tomar control', '¿Tomar control de la partida?', [
-                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Cancelar', style: 'cancel', onPress: () => clearPendingAdjustments() },
                 { text: 'Tomar control', onPress: () => void takeControl() },
               ])
             }
@@ -661,7 +738,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     );
   }
 
-  const renderPlayerHalf = (slot: 'a' | 'b', rotated: boolean) => {
+  const renderPlayerHalf = (
+    slot: 'a' | 'b',
+    rotated: boolean,
+    deltaDisplay: number,
+    diffOpacity: Animated.Value
+  ) => {
     const isA = slot === 'a';
     const p = isA ? pa! : pb!;
     const name = isA ? nameA : nameB;
@@ -672,6 +754,10 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const persisting = isA ? persistingA : persistingB;
     const colors = isA ? colorsA : colorsB;
     const t = isA ? ('a' as const) : ('b' as const);
+    const diffColor =
+      deltaDisplay > 0 ? '#16A34A' : deltaDisplay < 0 ? '#DC2626' : '#6B7280';
+    const diffLabel =
+      deltaDisplay > 0 ? `+${deltaDisplay}` : deltaDisplay < 0 ? String(deltaDisplay) : '\u00a0';
     const body = (
       <>
         <View style={styles.topRow}>
@@ -700,6 +786,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               <Text style={styles.lifeBtnTxt}>+1</Text>
             </TouchableOpacity>
             <View style={styles.lifeCenter}>
+              <Animated.View style={[styles.lifeDiffWrap, { opacity: diffOpacity }]}>
+                <Text style={[styles.lifeDiff, { color: diffColor }]}>{diffLabel}</Text>
+              </Animated.View>
               <Text style={styles.lifeNumber}>{clampLife(life)}</Text>
             </View>
             <TouchableOpacity
@@ -737,7 +826,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         <Text style={styles.menuTxt}>...</Text>
       </TouchableOpacity>
 
-      {renderPlayerHalf(layoutAB.top, true)}
+      {renderPlayerHalf(
+        layoutAB.top,
+        true,
+        layoutAB.top === 'a' ? deltaA : deltaB,
+        layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
+      )}
 
       <View style={styles.undoWrap}>
         <TouchableOpacity
@@ -749,7 +843,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      {renderPlayerHalf(layoutAB.bottom, false)}
+      {renderPlayerHalf(
+        layoutAB.bottom,
+        false,
+        layoutAB.bottom === 'a' ? deltaA : deltaB,
+        layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
+      )}
     </ScrollView>
   );
 }
@@ -799,6 +898,8 @@ const styles = StyleSheet.create({
   playerName: { marginTop: 10, fontSize: 24, color: '#111', fontWeight: '700', textAlign: 'center' },
   lifeControlsVertical: { width: '50%', alignItems: 'center', justifyContent: 'space-between' },
   lifeCenter: { alignItems: 'center', flex: 1 },
+  lifeDiffWrap: { minHeight: 48, justifyContent: 'flex-end', marginBottom: 2 },
+  lifeDiff: { fontSize: 44, fontWeight: '800', lineHeight: 48 },
   lifeNumber: { fontSize: 72, color: '#111', fontWeight: '800', lineHeight: 80 },
   pending: { marginTop: 6, fontSize: 12, color: '#666', textAlign: 'center' },
   undoWrap: { alignItems: 'center', paddingVertical: 8, backgroundColor: '#fff' },
