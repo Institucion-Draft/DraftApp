@@ -136,7 +136,13 @@ export default function WorkspacesListScreen({ navigation }: Props) {
 
   const renderHeader = () => (
     <View style={styles.topBar}>
-      <View style={styles.avatarWrap}>
+      <TouchableOpacity
+        style={styles.avatarWrap}
+        onPress={() => navigation.navigate('MyProfile', { from: 'WorkspacesList' })}
+        disabled={!user?.id}
+        accessibilityRole="button"
+        accessibilityLabel="Mi perfil"
+      >
         {user?.id ? (
           <PlayerAvatar
             userId={user.id}
@@ -145,7 +151,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
             outsideEvent
           />
         ) : null}
-      </View>
+      </TouchableOpacity>
       <Text style={styles.screenTitle}>Tus grupos de Draft</Text>
       <TouchableOpacity
         onPress={() => navigation.navigate('SearchWorkspaces')}

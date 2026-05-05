@@ -7,6 +7,7 @@ import {
   Image,
   RefreshControl,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -154,8 +155,32 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     navigation.setOptions({
       title: workspace?.name ?? 'Detalle del grupo',
       headerLeft: hierarchicalHeaderBack(navigation, 'WorkspacesList'),
+      headerRight:
+        user?.id != null
+          ? () => (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate('MyProfile', {
+                    from: 'WorkspaceDetail',
+                    workspaceId,
+                  })
+                }
+                hitSlop={12}
+                style={styles.headerAvatarBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Mi perfil"
+              >
+                <PlayerAvatar
+                  userId={user.id}
+                  size="small"
+                  withColorBorder={false}
+                  outsideEvent
+                />
+              </Pressable>
+            )
+          : undefined,
     });
-  }, [navigation, workspace?.name]);
+  }, [navigation, workspace?.name, user?.id, workspaceId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -271,8 +296,9 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       {members.map((m) => {
         const u = relationOne(m.users);
         const label = u?.display_name || u?.username || 'Sin nombre';
-        return (
-          <View key={m.user_id} style={styles.memberRow}>
+        const isSelf = user?.id != null && m.user_id === user.id;
+        const rowInner = (
+          <>
             <PlayerAvatar
               userId={m.user_id}
               size="small"
@@ -286,7 +312,40 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
                 {m.role === 'organizer' ? 'Organizador' : 'Miembro'}
               </Text>
             </View>
-          </View>
+          </>
+        );
+        if (isSelf) {
+          return (
+            <TouchableOpacity
+              key={m.user_id}
+              style={styles.memberRow}
+              activeOpacity={0.7}
+              onPress={() =>
+                navigation.navigate('MyProfile', {
+                  from: 'WorkspaceDetail',
+                  workspaceId,
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Mi perfil"
+            >
+              {rowInner}
+            </TouchableOpacity>
+          );
+        }
+        return (
+          <TouchableOpacity
+            key={m.user_id}
+            style={styles.memberRow}
+            activeOpacity={0.7}
+            onPress={() =>
+              navigation.navigate('MemberProfile', { userId: m.user_id, workspaceId })
+            }
+            accessibilityRole="button"
+            accessibilityLabel={`Perfil de ${label}`}
+          >
+            {rowInner}
+          </TouchableOpacity>
         );
       })}
     </ScrollView>
@@ -294,6 +353,11 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
+  headerAvatarBtn: {
+    marginRight: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   scroll: {
     flex: 1,
     backgroundColor: '#fff',

@@ -3,6 +3,8 @@ import { Text, Pressable } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import WorkspacesListScreen from '../screens/WorkspacesListScreen';
+import MyProfileScreen from '../screens/MyProfileScreen';
+import MemberProfileScreen from '../screens/MemberProfileScreen';
 import CreateWorkspaceScreen from '../screens/CreateWorkspaceScreen';
 import WorkspaceDetailScreen from '../screens/WorkspaceDetailScreen';
 import SearchWorkspacesScreen from '../screens/SearchWorkspacesScreen';
@@ -48,6 +50,16 @@ export default function MainNavigator() {
           name="WorkspacesList"
           component={WorkspacesListScreen}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="MyProfile"
+          component={MyProfileScreen}
+          options={{ title: 'Mi perfil', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="MemberProfile"
+          component={MemberProfileScreen}
+          options={{ title: 'Perfil del miembro', headerBackTitle: 'Atrás' }}
         />
         <Stack.Screen
           name="CreateWorkspace"
