@@ -69,6 +69,33 @@ function shortName(name: string): string {
   return name.trim().slice(0, 3);
 }
 
+/** Fecha y hora local en 24 h: DD/MM/YYYY HH:mm (sin segundos). */
+function formatMatchTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+/** Duración legible entre inicio y cierre de partida (solo si hay timestamps válidos). */
+function formatCompletedMatchDuration(startedAt: string | null, endedAt: string | null): string | null {
+  if (!startedAt || !endedAt) return null;
+  const a = new Date(startedAt).getTime();
+  const b = new Date(endedAt).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  const totalSec = Math.round((b - a) / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return m > 0 ? `${h}h ${m} min` : `${h}h`;
+  if (m > 0) return s > 0 ? `${m} min ${s}s` : `${m} min`;
+  return `${s}s`;
+}
+
 export default function PairingDetailScreen({ route, navigation }: Props) {
   const { pairingId, fromTab: fromPairingsTab = 'official' } = route.params;
   const [loading, setLoading] = useState(true);
@@ -375,6 +402,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             ) : (
               officialMs.map((m, idx) => {
                 const displayNum = idx + 1;
+                const durationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
                 const showLive =
                   m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                 return (
@@ -389,18 +417,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       </Text>
                     ) : null}
                     {m.status === 'in_progress' ? (
-                      <Text style={styles.matchTime}>
-                        Inicio{' '}
-                        {new Date(m.started_at).toLocaleTimeString('es-AR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </Text>
+                      <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
                     ) : null}
                     {m.status === 'completed' && m.winner_participant_id ? (
-                      <Text style={styles.matchWinner}>
-                        Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
-                      </Text>
+                      <View>
+                        <Text style={styles.matchWinner}>
+                          Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                        </Text>
+                        {durationLabel ? (
+                          <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                        ) : null}
+                      </View>
                     ) : null}
                     {m.status === 'completed' && !m.winner_participant_id ? (
                       <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
@@ -409,9 +436,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       <Text style={styles.matchWinner}>Partida abortada.</Text>
                     ) : null}
                     {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
-                      <Text style={styles.matchTime}>
-                        Cierre: {new Date(m.ended_at).toLocaleString('es-AR')}
-                      </Text>
+                      <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
                     ) : null}
                     {m.status === 'completed' && !m.ended_at ? (
                       <Text style={styles.matchTime}>Cierre pendiente.</Text>
@@ -428,6 +453,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 </Text>
                 {revengeMs.map((m, idx) => {
                   const revengeNum = idx + 1;
+                  const revengeDurationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
                   const showLive =
                     m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                   const winnerName =
@@ -455,24 +481,24 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         </Text>
                       ) : null}
                       {m.status === 'in_progress' ? (
-                        <Text style={styles.matchTime}>
-                          Inicio{' '}
-                          {new Date(m.started_at).toLocaleTimeString('es-AR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </Text>
+                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
+                      ) : null}
+                      {m.status === 'completed' && winnerName && revengeDurationLabel ? (
+                        <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
                       ) : null}
                       {m.status === 'completed' && !winnerName ? (
-                        <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                        <View>
+                          <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                          {revengeDurationLabel ? (
+                            <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
+                          ) : null}
+                        </View>
                       ) : null}
                       {m.status === 'aborted' ? (
                         <Text style={styles.matchWinner}>Partida abortada.</Text>
                       ) : null}
                       {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
-                        <Text style={styles.matchTime}>
-                          Cierre: {new Date(m.ended_at).toLocaleString('es-AR')}
-                        </Text>
+                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
                       ) : null}
                       {m.status === 'completed' && !m.ended_at ? (
                         <Text style={styles.matchTime}>Cierre pendiente.</Text>
@@ -544,6 +570,7 @@ const styles = StyleSheet.create({
   matchLiveTxt: { color: '#1D4ED8', fontWeight: '700' },
   matchLiveScore: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 4 },
   matchWinner: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 2 },
+  matchDuration: { color: '#4B5563', fontSize: 12, marginTop: 4, fontWeight: '500' },
   matchTime: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 12 },
   primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },

@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -107,6 +107,7 @@ function shortName(name: string): string {
 
 export default function PairingsListScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
+  const isFocused = useIsFocused();
   const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
   const [items, setItems] = useState<ItemView[]>([]);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
@@ -411,6 +412,15 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       };
     }, [load, navigation, eventId])
   );
+
+  useEffect(() => {
+    if (!isFocused) return;
+    const intervalMs = 15000;
+    const handle = setInterval(() => {
+      void load();
+    }, intervalMs);
+    return () => clearInterval(handle);
+  }, [isFocused, load]);
 
   useEffect(() => {
     if (channelRef.current) return;

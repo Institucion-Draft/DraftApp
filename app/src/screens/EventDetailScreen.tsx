@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -68,7 +68,18 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
   return Array.isArray(x) ? (x[0] ?? null) : x;
 }
 
+function formatDraftNetDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return m > 0 ? `${h}h ${m}min` : `${h}h`;
+  if (m > 0) return s > 0 ? `${m} min ${s}s` : `${m} min`;
+  return `${s}s`;
+}
+
 export default function EventDetailScreen({ route, navigation }: Props) {
+  const isFocused = useIsFocused();
   const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
   const { eventId } = route.params;
   const [event, setEvent] = useState<EventRow | null>(null);
@@ -82,6 +93,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [cubeName, setCubeName] = useState<string | null>(null);
   const [venueName, setVenueName] = useState<string | null>(null);
   const firstRef = useRef(true);
+  const [, setDraftDurationTick] = useState(0);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -193,6 +205,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       };
     }, [load])
   );
+
+  useEffect(() => {
+    if (!event?.draft_started_at || event.draft_ended_at || !isFocused) return;
+    const id = setInterval(() => setDraftDurationTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [event?.draft_started_at, event?.draft_ended_at, isFocused]);
 
   useLayoutEffect(() => {
     const wsId = event?.workspace_id;
@@ -500,6 +518,19 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           <Text style={[styles.meta, event.cube_id ? styles.link : null]}>Cubo: {cubeName ?? 'Sin definir'}</Text>
         </TouchableOpacity>
         <Text style={styles.meta}>Sede: {venueName ?? 'Sin definir'}</Text>
+        {event.draft_started_at && event.draft_ended_at ? (
+          <Text style={styles.meta}>
+            Duración del draft:{' '}
+            {formatDraftNetDuration(
+              new Date(event.draft_ended_at).getTime() - new Date(event.draft_started_at).getTime()
+            )}
+          </Text>
+        ) : null}
+        {event.draft_started_at && !event.draft_ended_at ? (
+          <Text style={styles.meta}>
+            Drafteando: {formatDraftNetDuration(Date.now() - new Date(event.draft_started_at).getTime())}
+          </Text>
+        ) : null}
         <Text style={styles.meta}>Notas: {event.notes?.trim() || 'Sin notas.'}</Text>
       </View>
 
