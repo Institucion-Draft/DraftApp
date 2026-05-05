@@ -19,6 +19,8 @@ type RowView = {
   pg: number;
   pj: number;
   eg: number;
+  /** Enfrentamientos con BO3 cerrado (ganados o perdidos). */
+  ec: number;
   /** Diferencial medio de vida; null si no hay ≥2 life_events con duración efectiva > 0. */
   dmv: number | null;
   /** Tiempo medio por partida (s); null si no hay partidas completadas con duración. */
@@ -107,6 +109,13 @@ function formatTmpDisplay(tmpSeconds: number | null): string {
   return `${Math.round(minutes)} min`;
 }
 
+/** Porcentaje con un decimal y coma (0–100 como fracción del total). */
+function formatPctOneDecimal(fraction: number): string {
+  if (!Number.isFinite(fraction)) return '0,0%';
+  const pct = fraction * 100;
+  return `${pct.toFixed(1).replace('.', ',')}%`;
+}
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -136,11 +145,21 @@ function PulsingLiveDot() {
   );
 }
 
+type Bo3Footer = {
+  pct20: string;
+  pct21: string;
+  bold20: boolean;
+  bold21: boolean;
+};
+
+type EventFooterStats = { torneo: string | null; bo3: Bo3Footer | null };
+
 export default function StandingsScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<RowView[]>([]);
+  const [eventFooter, setEventFooter] = useState<EventFooterStats>({ torneo: null, bo3: null });
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -151,7 +170,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [navigation, eventId]);
 
   const load = useCallback(async () => {
-    const [partsRes, pairingsRes] = await Promise.all([
+    const [partsRes, pairingsRes, eventRes] = await Promise.all([
       supabase
         .from('event_participants')
         .select(
@@ -172,9 +191,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .from('pairings')
         .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
         .eq('event_id', eventId),
+      supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
     ]);
     if (partsRes.error || pairingsRes.error) {
       setRows([]);
+      setEventFooter({ torneo: null, bo3: null });
       return;
     }
 
@@ -189,6 +210,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         : { data: [], error: null };
     if (colorsRes.error) {
       setRows([]);
+      setEventFooter({ torneo: null, bo3: null });
       return;
     }
     const colorMap: Record<string, MtgColor[]> = {};
@@ -204,7 +226,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? await supabase
             .from('matches')
-            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at')
+            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at, match_type')
             .in('pairing_id', pairingIds)
         : { data: [], error: null };
 
@@ -221,8 +243,52 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     if (matchesRes.error || lifeRes.error) {
       setRows([]);
+      setEventFooter({ torneo: null, bo3: null });
       return;
     }
+
+    const eventStatus = eventRes.data?.status as string | undefined;
+    const totalPairings = pairings.length;
+    const resolvedPairings = pairings.filter(
+      (pr: any) => pr.official_winner_participant_id != null
+    ).length;
+    let torneoLine: string | null = null;
+    if (eventStatus === 'playing' || eventStatus === 'completed') {
+      const frac = totalPairings > 0 ? resolvedPairings / totalPairings : 0;
+      torneoLine = `Completitud: ${formatPctOneDecimal(frac)} (${resolvedPairings}/${totalPairings})`;
+    }
+
+    let bo3TwoZero = 0;
+    let bo3TwoOne = 0;
+    for (const pr of pairings as { id: string; official_winner_participant_id: string | null }[]) {
+      if (pr.official_winner_participant_id == null) continue;
+      const officialCompleted = matches.filter(
+        (m: any) =>
+          m.pairing_id === pr.id &&
+          m.status === 'completed' &&
+          (m.match_type === 'draft' || m.match_type === 'final')
+      ).length;
+      if (officialCompleted === 2) bo3TwoZero += 1;
+      else if (officialCompleted === 3) bo3TwoOne += 1;
+    }
+    const bo3ClosedTotal = bo3TwoZero + bo3TwoOne;
+    let bo3Footer: Bo3Footer | null = null;
+    if (bo3ClosedTotal > 0) {
+      const pct20 = formatPctOneDecimal(bo3TwoZero / bo3ClosedTotal);
+      const pct21 = formatPctOneDecimal(bo3TwoOne / bo3ClosedTotal);
+      let bold20 = false;
+      let bold21 = false;
+      if (bo3TwoZero === bo3TwoOne) {
+        bold20 = true;
+        bold21 = true;
+      } else if (bo3TwoZero > bo3TwoOne) {
+        bold20 = true;
+      } else {
+        bold21 = true;
+      }
+      bo3Footer = { pct20, pct21, bold20, bold21 };
+    }
+    setEventFooter({ torneo: torneoLine, bo3: bo3Footer });
 
     const lifeEvents = (lifeRes.data ?? []) as LifeEvRow[];
     const lifeByMatchId = new Map<string, LifeEvRow[]>();
@@ -246,6 +312,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const pg = completedMatches.filter((m: any) => m.winner_participant_id === pid).length;
       const pj = playerMatches.length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
+      const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
       const inProgress = playerMatches.some((m: any) => m.status === 'in_progress');
 
       const matchDmvs: number[] = [];
@@ -271,7 +338,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const tmp =
         durations.length > 0 ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : null;
 
-      return { participantId: pid, userId, name, colors, pg, pj, eg, dmv, tmp, inProgress };
+      return { participantId: pid, userId, name, colors, pg, pj, eg, ec, dmv, tmp, inProgress };
     });
 
     rowsBuilt.sort((a, b) => {
@@ -308,6 +375,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
         void load();
       })
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pairings', filter: `event_id=eq.${eventId}` },
+        () => {
+          void load();
+        }
+      )
       .subscribe();
     standingsChannelRef.current = channel;
     return () => {
@@ -335,10 +409,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <View style={styles.header}>
         <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
-        <Text style={styles.cell}>PG</Text>
-        <Text style={styles.cell}>PJ</Text>
-        <Text style={styles.cell}>EG</Text>
-        <Text style={styles.cell}>DMV</Text>
+        <Text style={[styles.cell, styles.statCol]}>PG</Text>
+        <Text style={[styles.cell, styles.statCol]}>PJ</Text>
+        <Text style={[styles.cell, styles.statCol]}>EG</Text>
+        <Text style={[styles.cell, styles.statCol]}>EC</Text>
+        <Text style={[styles.cell, styles.dmvCol]}>DMV</Text>
         <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
       </View>
       {rows.map((r) => (
@@ -372,10 +447,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
               <ColorFlag colors={r.colors} />
             </View>
           </View>
-          <Text style={styles.cell}>{r.pg}</Text>
-          <Text style={styles.cell}>{r.pj}</Text>
-          <Text style={styles.cell}>{r.eg}</Text>
-          <Text style={[styles.cell, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
+          <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
+          <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
+          <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
+          <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+          <Text style={[styles.cell, styles.dmvCol, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
           <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
             {formatTmpDisplay(r.tmp)}
           </Text>
@@ -385,9 +461,34 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <Text style={styles.legendStaticDot}>●</Text>
         <Text style={styles.legendLiveCaption}> En partida</Text>
       </View>
+      {eventFooter.torneo || eventFooter.bo3 ? (
+        <View style={styles.tourneyMeta}>
+          <View style={styles.tourneyMetaRow}>
+            {eventFooter.torneo ? (
+              <Text style={[styles.tourneyMetaLine, styles.tourneyMetaLeft]}>{eventFooter.torneo}</Text>
+            ) : (
+              <View style={styles.tourneyMetaLeftSpacer} />
+            )}
+            {eventFooter.bo3 ? (
+              <Text style={styles.tourneyMetaRight}>
+                <Text style={eventFooter.bo3.bold20 ? styles.tourneyMetaBo3Bold : styles.tourneyMetaBo3Norm}>
+                  E_2-0: {eventFooter.bo3.pct20}
+                </Text>
+                <Text style={styles.tourneyMetaBo3Sep}>{'  '}</Text>
+                <Text style={eventFooter.bo3.bold21 ? styles.tourneyMetaBo3Bold : styles.tourneyMetaBo3Norm}>
+                  E_2-1: {eventFooter.bo3.pct21}
+                </Text>
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       <Text style={styles.legend}>
-        PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · DMV: Diferencial Medio de Vida · TMP:
-        Tiempo Medio por Partida
+        {[
+          'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
+          'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
+          'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
+        ].join('\n')}
       </Text>
     </ScrollView>
   );
@@ -399,9 +500,11 @@ const styles = StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 28 },
   header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
-  cell: { width: 42, textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
-  tmpCol: { width: 56, fontSize: 11 },
-  playerCol: { flex: 1, width: 'auto', minWidth: 120, textAlign: 'left' },
+  cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
+  tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
+  playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },
+  statCol: { width: 34, minWidth: 34, fontSize: 11 },
+  dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
   playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   standingsAvatar: { marginRight: 6 },
   playerNameRow: {
@@ -415,7 +518,30 @@ const styles = StyleSheet.create({
   playerName: { flex: 1, flexShrink: 1, color: '#111', fontSize: 12, fontWeight: '600' },
   liveDotWrap: { justifyContent: 'center' },
   liveDot: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
-  legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+  tourneyMeta: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E7EB',
+  },
+  tourneyMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  tourneyMetaLine: { color: '#111827', fontSize: 11, fontWeight: '700' },
+  tourneyMetaLeft: { flex: 1, flexGrow: 1, minWidth: 120, paddingRight: 6 },
+  tourneyMetaLeftSpacer: { flex: 1, minWidth: 0 },
+  tourneyMetaRight: { flexShrink: 1, textAlign: 'right', color: '#374151', fontSize: 11 },
+  tourneyMetaBo3Norm: { color: '#374151', fontWeight: '400' },
+  tourneyMetaBo3Bold: { color: '#374151', fontWeight: '700' },
+  tourneyMetaBo3Sep: { color: '#374151', fontWeight: '400' },
+  legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
   legendStaticDot: { color: '#3B82F6', fontWeight: '700', fontSize: 11 },
   legendLiveCaption: { color: '#6B7280', fontSize: 11 },
   legend: { marginTop: 10, color: '#666', fontSize: 12 },

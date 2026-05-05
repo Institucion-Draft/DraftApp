@@ -1,5 +1,7 @@
 export type MainStackParamList = {
   WorkspacesList: undefined;
+  MyProfile: { from?: 'WorkspacesList' | 'WorkspaceDetail'; workspaceId?: string };
+  MemberProfile: { userId: string; workspaceId: string };
   CreateWorkspace: undefined;
   WorkspaceDetail: { workspaceId: string };
   SearchWorkspaces: undefined;
