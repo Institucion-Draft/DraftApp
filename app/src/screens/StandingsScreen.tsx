@@ -28,6 +28,19 @@ type RowView = {
   inProgress: boolean;
 };
 
+type RevengeRowView = {
+  participantId: string;
+  userId: string;
+  name: string;
+  colors: MtgColor[];
+  vg: number;
+  vj: number;
+  cv: number;
+  sc: number;
+  /** Match de venganza en curso en alguno de sus pairings. */
+  inProgress: boolean;
+};
+
 type LifeEvRow = { match_id: string; participant_id: string; resulting_life: number; occurred_at: string };
 
 const DMV_POS = '#10B981';
@@ -139,7 +152,7 @@ function PulsingLiveDot() {
     };
   }, [opacity]);
   return (
-    <Animated.View style={[styles.liveDotWrap, { opacity }]} accessibilityLabel="En partida">
+    <Animated.View style={[styles.liveDotWrap, { opacity }]} accessibilityLabel="En juego">
       <Text style={styles.liveDot}>●</Text>
     </Animated.View>
   );
@@ -159,6 +172,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<RowView[]>([]);
+  const [revengeRows, setRevengeRows] = useState<RevengeRowView[]>([]);
+  const [tab, setTab] = useState<'official' | 'revenge'>('official');
   const [eventFooter, setEventFooter] = useState<EventFooterStats>({ torneo: null, bo3: null });
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -189,12 +204,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .eq('role', 'player'),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .select(
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
+        )
         .eq('event_id', eventId),
       supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
     ]);
     if (partsRes.error || pairingsRes.error) {
       setRows([]);
+      setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       return;
     }
@@ -210,6 +228,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         : { data: [], error: null };
     if (colorsRes.error) {
       setRows([]);
+      setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       return;
     }
@@ -243,6 +262,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     if (matchesRes.error || lifeRes.error) {
       setRows([]);
+      setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       return;
     }
@@ -313,7 +333,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const pj = completedMatches.length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
       const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
-      const inProgress = playerMatches.some((m: any) => m.status === 'in_progress');
+      const inProgress = playerMatches.some(
+        (m: any) =>
+          m.status === 'in_progress' && (m.match_type === 'draft' || m.match_type === 'final')
+      );
 
       const matchDmvs: number[] = [];
       for (const m of playerMatches) {
@@ -349,6 +372,45 @@ export default function StandingsScreen({ route, navigation }: Props) {
       return bv - av;
     });
     setRows(rowsBuilt);
+
+    const revengeRowsBuilt: RevengeRowView[] = participants.map((p: any) => {
+      const pid = p.id as string;
+      const u = relationOne(p.users);
+      const name = u?.display_name || u?.username || 'Jugador';
+      const userId = p.user_id as string;
+      const colors = colorMap[pid] ?? [];
+
+      const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
+      const pairingSet = new Set(playerPairings.map((x: any) => x.id));
+      const playerMatches = matches.filter((m: any) => pairingSet.has(m.pairing_id));
+
+      const revengeCompleted = playerMatches.filter(
+        (m: any) => m.match_type === 'revenge' && m.status === 'completed'
+      );
+      const vj = revengeCompleted.length;
+      const vg = revengeCompleted.filter((m: any) => m.winner_participant_id === pid).length;
+
+      const cv = playerPairings.filter((pr: any) => pr.revenge_cup_winner_participant_id === pid).length;
+      const sc = playerPairings.filter((pr: any) => pr.super_cup_winner_participant_id === pid).length;
+
+      const inProgress = playerMatches.some(
+        (m: any) => m.status === 'in_progress' && m.match_type === 'revenge'
+      );
+
+      return { participantId: pid, userId, name, colors, vg, vj, cv, sc, inProgress };
+    });
+
+    const revengeFiltered = revengeRowsBuilt.filter((r) => r.vj > 0);
+    revengeFiltered.sort((a, b) => {
+      const ra = a.vj > 0 ? a.vg / a.vj : 0;
+      const rb = b.vj > 0 ? b.vg / b.vj : 0;
+      if (rb !== ra) return rb - ra;
+      return b.vg - a.vg;
+    });
+    setRevengeRows(revengeFiltered);
+    if (revengeFiltered.length === 0) {
+      setTab('official');
+    }
   }, [eventId]);
 
   useFocusEffect(
@@ -407,61 +469,126 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      <View style={styles.header}>
-        <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
-        <Text style={[styles.cell, styles.statCol]}>PG</Text>
-        <Text style={[styles.cell, styles.statCol]}>PJ</Text>
-        <Text style={[styles.cell, styles.statCol]}>EG</Text>
-        <Text style={[styles.cell, styles.statCol]}>EC</Text>
-        <Text style={[styles.cell, styles.dmvCol]}>DMV</Text>
-        <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
-      </View>
-      {rows.map((r) => (
-        <TouchableOpacity
-          key={r.participantId}
-          style={styles.row}
-          activeOpacity={0.7}
-          onPress={() =>
-            navigation.navigate('PlayerProfileInEvent', {
-              eventId,
-              participantId: r.participantId,
-              from: 'Standings',
-            })
-          }
-        >
-          <View style={[styles.playerCell, styles.playerCol]}>
-            <PlayerAvatar
-              userId={r.userId}
-              participantId={r.participantId}
-              size="tiny"
-              withColorBorder={false}
-              style={styles.standingsAvatar}
-            />
-            <View style={styles.playerNameRow}>
-              <View style={styles.playerNameInner}>
-                {r.inProgress ? <PulsingLiveDot /> : null}
-                <Text style={styles.playerName} numberOfLines={2}>
-                  {r.name}
-                </Text>
-              </View>
-              <ColorFlag colors={r.colors} />
-            </View>
+      {revengeRows.length > 0 ? (
+        <View style={styles.tabsRow}>
+          <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('official')} activeOpacity={0.7}>
+            <Text style={[styles.tabLabel, tab === 'official' && styles.tabLabelActive]}>Oficial</Text>
+            <View style={[styles.tabUnderline, tab !== 'official' && styles.tabUnderlineHidden]} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('revenge')} activeOpacity={0.7}>
+            <Text style={[styles.tabLabel, tab === 'revenge' && styles.tabLabelActive]}>Venganzas</Text>
+            <View style={[styles.tabUnderline, tab !== 'revenge' && styles.tabUnderlineHidden]} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {tab === 'official' ? (
+        <>
+          <View style={styles.header}>
+            <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
+            <Text style={[styles.cell, styles.statCol]}>PG</Text>
+            <Text style={[styles.cell, styles.statCol]}>PJ</Text>
+            <Text style={[styles.cell, styles.statCol]}>EG</Text>
+            <Text style={[styles.cell, styles.statCol]}>EC</Text>
+            <Text style={[styles.cell, styles.dmvCol]}>DMV</Text>
+            <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
-          <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
-          <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
-          <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
-          <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
-          <Text style={[styles.cell, styles.dmvCol, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
-          <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
-            {formatTmpDisplay(r.tmp)}
-          </Text>
-        </TouchableOpacity>
-      ))}
+          {rows.map((r) => (
+            <TouchableOpacity
+              key={r.participantId}
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={() =>
+                navigation.navigate('PlayerProfileInEvent', {
+                  eventId,
+                  participantId: r.participantId,
+                  from: 'Standings',
+                })
+              }
+            >
+              <View style={[styles.playerCell, styles.playerCol]}>
+                <PlayerAvatar
+                  userId={r.userId}
+                  participantId={r.participantId}
+                  size="tiny"
+                  withColorBorder={false}
+                  style={styles.standingsAvatar}
+                />
+                <View style={styles.playerNameRow}>
+                  <View style={styles.playerNameInner}>
+                    {r.inProgress ? <PulsingLiveDot /> : null}
+                    <Text style={styles.playerName} numberOfLines={2}>
+                      {r.name}
+                    </Text>
+                  </View>
+                  <ColorFlag colors={r.colors} />
+                </View>
+              </View>
+              <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+              <Text style={[styles.cell, styles.dmvCol, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
+              <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
+                {formatTmpDisplay(r.tmp)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </>
+      ) : (
+        <>
+          <View style={styles.header}>
+            <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
+            <Text style={[styles.cell, styles.statCol]}>VG</Text>
+            <Text style={[styles.cell, styles.statCol]}>VJ</Text>
+            <Text style={[styles.cell, styles.statCol]}>CV</Text>
+            <Text style={[styles.cell, styles.statCol]}>SC</Text>
+          </View>
+          {revengeRows.map((r) => (
+            <TouchableOpacity
+              key={r.participantId}
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={() =>
+                navigation.navigate('PlayerProfileInEvent', {
+                  eventId,
+                  participantId: r.participantId,
+                  from: 'Standings',
+                })
+              }
+            >
+              <View style={[styles.playerCell, styles.playerCol]}>
+                <PlayerAvatar
+                  userId={r.userId}
+                  participantId={r.participantId}
+                  size="tiny"
+                  withColorBorder={false}
+                  style={styles.standingsAvatar}
+                />
+                <View style={styles.playerNameRow}>
+                  <View style={styles.playerNameInner}>
+                    {r.inProgress ? <PulsingLiveDot /> : null}
+                    <Text style={styles.playerName} numberOfLines={2}>
+                      {r.name}
+                    </Text>
+                  </View>
+                  <ColorFlag colors={r.colors} />
+                </View>
+              </View>
+              <Text style={[styles.cell, styles.statCol]}>{r.vg}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.vj}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.cv}</Text>
+              <Text style={[styles.cell, styles.statCol]}>{r.sc}</Text>
+            </TouchableOpacity>
+          ))}
+        </>
+      )}
+
       <View style={styles.legendLiveRow}>
         <Text style={styles.legendStaticDot}>●</Text>
-        <Text style={styles.legendLiveCaption}> En partida</Text>
+        <Text style={styles.legendLiveCaption}> En juego</Text>
       </View>
-      {eventFooter.torneo || eventFooter.bo3 ? (
+      {tab === 'official' && (eventFooter.torneo || eventFooter.bo3) ? (
         <View style={styles.tourneyMeta}>
           <View style={styles.tourneyMetaRow}>
             {eventFooter.torneo ? (
@@ -484,11 +611,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
         </View>
       ) : null}
       <Text style={styles.legend}>
-        {[
-          'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
-          'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
-          'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
-        ].join('\n')}
+        {tab === 'official'
+          ? [
+              'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
+              'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
+              'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
+            ].join('\n')
+          : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'}
       </Text>
     </ScrollView>
   );
@@ -498,6 +627,19 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   scroll: { padding: 16, paddingBottom: 28 },
+  tabsRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    marginTop: -4,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
+  },
+  tabBtn: { marginRight: 22, paddingBottom: 4 },
+  tabLabel: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
+  tabLabelActive: { color: '#111827', fontWeight: '800' },
+  tabUnderline: { height: 2, backgroundColor: '#3B82F6', borderRadius: 1, marginTop: 6 },
+  tabUnderlineHidden: { backgroundColor: 'transparent' },
   header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
   cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
