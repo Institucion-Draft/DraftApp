@@ -512,7 +512,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {(isParticipant && status === 'scheduled') || isOrganizer ? (
+      {isParticipant || isOrganizer ? (
         <View style={styles.block}>
           <TouchableOpacity
             style={[styles.primaryBtn, inProgressMatch ? styles.resumeBtn : null]}
