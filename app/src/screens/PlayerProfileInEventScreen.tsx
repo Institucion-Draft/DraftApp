@@ -85,6 +85,22 @@ function findPairingBetween(pairings: PairingRow[], pid: string, oid: string): P
   );
 }
 
+function formatWinRate(wins: number, total: number): string {
+  if (total <= 0) return '-';
+  const pct = (wins / total) * 100;
+  const roundedOneDecimal = Math.round(pct * 10) / 10;
+  if (Math.abs(roundedOneDecimal - Math.round(roundedOneDecimal)) < 0.00001) {
+    return `${Math.round(roundedOneDecimal)}%`;
+  }
+  return `${roundedOneDecimal.toFixed(1).replace('.', ',')}%`;
+}
+
+function getStreakCircleSize(index: number, total: number, baseSize = 18, step = 2): number {
+  if (total <= 1) return baseSize;
+  const center = (total - 1) / 2;
+  return baseSize + (index - center) * step;
+}
+
 export default function PlayerProfileInEventScreen({ route, navigation }: Props) {
   const { eventId, participantId, from: profileFrom = 'EventDetail' } = route.params;
   useLayoutEffect(() => {
@@ -114,6 +130,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [superCupsWon, setSuperCupsWon] = useState(0);
   const [officialH2h, setOfficialH2h] = useState<OfficialH2HRow[]>([]);
   const [revengeH2h, setRevengeH2h] = useState<RevengeH2HRow[]>([]);
+  const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
 
   const load = useCallback(async () => {
     const meRes = await supabase.auth.getUser();
@@ -147,6 +164,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const { data: evRow } = await supabase.from('draft_events').select('workspace_id').eq('id', eventId).maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
     const uid = pRow.user_id as string;
+    setWorkspaceStreak([]);
     if (wsId) {
       const orgRes = await supabase
         .from('workspace_members')
@@ -168,6 +186,96 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     setUserId(pRow.user_id as string);
     setDisplayName(u?.display_name || u?.username || 'Jugador');
     setSelfEval((pRow as { self_evaluation: number | null }).self_evaluation ?? null);
+
+    if (wsId) {
+      const wsEventsRes = await supabase
+        .from('draft_events')
+        .select('id')
+        .eq('workspace_id', wsId);
+
+      const workspaceEventIds = (wsEventsRes.data ?? []).map((row) => row.id as string);
+
+      const wsParticipantsRes =
+        workspaceEventIds.length > 0
+          ? await supabase
+              .from('event_participants')
+              .select('id, event_id')
+              .eq('user_id', uid)
+              .eq('role', 'player')
+              .in('event_id', workspaceEventIds)
+          : { data: [], error: null };
+
+      if (__DEV__) {
+        console.log('[profile streak] workspace events:', workspaceEventIds.length);
+      }
+
+      if (__DEV__) {
+        console.log('[profile streak] user participants in workspace:', (wsParticipantsRes.data ?? []).length);
+      }
+
+      if (!wsParticipantsRes.error) {
+        const participantIds = (wsParticipantsRes.data ?? []).map((row: any) => row.id as string);
+        if (participantIds.length > 0) {
+          const wsPairingsRes = await supabase
+            .from('pairings')
+            .select('id, participant_a_id, participant_b_id')
+            .in('event_id', workspaceEventIds)
+            .or(
+              `participant_a_id.in.(${participantIds.join(',')}),participant_b_id.in.(${participantIds.join(',')})`
+            );
+
+          if (__DEV__) {
+            console.log('[profile streak] candidate pairings:', (wsPairingsRes.data ?? []).length);
+          }
+
+          if (!wsPairingsRes.error) {
+            const pairings = wsPairingsRes.data ?? [];
+            const pairingIds = pairings.map((row) => row.id as string);
+            const participantSet = new Set(participantIds);
+            const pairingById = new Map<string, { participant_a_id: string; participant_b_id: string }>();
+            for (const row of pairings) {
+              pairingById.set(row.id as string, {
+                participant_a_id: row.participant_a_id as string,
+                participant_b_id: row.participant_b_id as string,
+              });
+            }
+
+            const wsMatchesRes =
+              pairingIds.length > 0
+                ? await supabase
+                    .from('matches')
+                    .select('pairing_id, winner_participant_id, ended_at')
+                    .in('pairing_id', pairingIds)
+                    .in('match_type', ['draft', 'final'])
+                    .eq('status', 'completed')
+                    .not('winner_participant_id', 'is', null)
+                    .order('ended_at', { ascending: false })
+                    .limit(50)
+                : { data: [], error: null };
+
+            if (__DEV__) {
+              console.log('[profile streak] filtered matches:', (wsMatchesRes.data ?? []).length);
+            }
+
+            if (!wsMatchesRes.error) {
+              const filtered = (wsMatchesRes.data ?? []).filter((m) => {
+                const pair = pairingById.get(String(m.pairing_id));
+                if (!pair) return false;
+                return participantSet.has(pair.participant_a_id) || participantSet.has(pair.participant_b_id);
+              });
+              const lastFive = filtered.slice(0, 5);
+              const streak = lastFive.map((m) =>
+                participantSet.has(String(m.winner_participant_id)) ? 'V' : 'D'
+              ) as Array<'V' | 'D'>;
+              setWorkspaceStreak(streak);
+              if (__DEV__) {
+                console.log('[profile streak] streak matches used:', lastFive.length);
+              }
+            }
+          }
+        }
+      }
+    }
 
     const [colorsRes, playersRes, pairingsRes] = await Promise.all([
       supabase.from('participant_colors').select('color').eq('participant_id', participantId),
@@ -358,11 +466,26 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
   const renderOfficialContent = () => (
     <>
-      <Text style={styles.statLine}>Partidas jugadas: {matchesPlayed}</Text>
-      <Text style={styles.statLine}>Partidas ganadas: {matchesWon}</Text>
-      <Text style={styles.statLine}>
-        Enfrentamientos ganados: {pairingsWon} / Enfrentamientos completados: {pairingsCompleted}
-      </Text>
+      <View style={styles.statCard}>
+        <View style={styles.statCardLeft}>
+          <Text style={styles.statLine}>Enfrentamientos ganados: {pairingsWon}</Text>
+          <Text style={styles.statLine}>Enfrentamientos completados: {pairingsCompleted}</Text>
+        </View>
+        <View style={styles.winRateBox}>
+          <Text style={styles.winRateLabel}>Win Rate</Text>
+          <Text style={styles.winRateValue}>{formatWinRate(pairingsWon, pairingsCompleted)}</Text>
+        </View>
+      </View>
+      <View style={styles.statCard}>
+        <View style={styles.statCardLeft}>
+          <Text style={styles.statLine}>Partidas jugadas: {matchesPlayed}</Text>
+          <Text style={styles.statLine}>Partidas ganadas: {matchesWon}</Text>
+        </View>
+        <View style={styles.winRateBox}>
+          <Text style={styles.winRateLabel}>Win Rate</Text>
+          <Text style={styles.winRateValue}>{formatWinRate(matchesWon, matchesPlayed)}</Text>
+        </View>
+      </View>
       <Text style={styles.sectionTitle}>Enfrentamientos</Text>
       {officialH2h.map((row) => (
         <TouchableOpacity
@@ -400,15 +523,39 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           </View>
         </TouchableOpacity>
       ))}
+      {isSelf ? (
+        <View style={styles.selfBlock}>
+          <Text style={styles.sectionTitle}>Tu valoración para hoy</Text>
+          {selfEval != null ? (
+            <Text style={styles.stars}>
+              {Array.from({ length: 10 }, (_, i) => (i < selfEval ? '★' : '☆')).join('')}
+            </Text>
+          ) : (
+            <Text style={styles.muted}>Sin valorar</Text>
+          )}
+        </View>
+      ) : null}
     </>
   );
 
   const renderRevengeContent = () => (
     <>
-      <Text style={styles.statLine}>Venganzas ganadas: {revengeWon}</Text>
-      <Text style={styles.statLine}>Venganzas jugadas: {revengePlayed}</Text>
-      <Text style={styles.statLine}>Copas Venganza ganadas: {revengeCupsWon}</Text>
-      <Text style={styles.statLine}>Súper Copas ganadas: {superCupsWon}</Text>
+      <View style={styles.statCard}>
+        <View style={styles.statCardLeft}>
+          <Text style={styles.statLine}>Venganzas ganadas: {revengeWon}</Text>
+          <Text style={styles.statLine}>Venganzas jugadas: {revengePlayed}</Text>
+        </View>
+        <View style={styles.winRateBox}>
+          <Text style={styles.winRateLabel}>Win Rate</Text>
+          <Text style={styles.winRateValue}>{formatWinRate(revengeWon, revengePlayed)}</Text>
+        </View>
+      </View>
+      <View style={styles.statCard}>
+        <View style={styles.statCardLeft}>
+          <Text style={styles.statLine}>Copas Venganza ganadas: {revengeCupsWon}</Text>
+          <Text style={styles.statLine}>Súper Copas ganadas: {superCupsWon}</Text>
+        </View>
+      </View>
       <Text style={styles.sectionTitle}>Cruces</Text>
       {revengeH2h.map((row) => (
         <TouchableOpacity
@@ -422,14 +569,18 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.revengeH2hNameLeft} numberOfLines={1}>
                 {displayName}
               </Text>
-              {row.profileHasRevengeCup ? (
-                <View style={styles.cupInsignia}>
-                  <Text style={styles.cupInsigniaTxt}>🏆 CV</Text>
-                </View>
-              ) : null}
-              {row.profileHasSuperCup ? (
-                <View style={styles.cupInsignia}>
-                  <Text style={styles.cupInsigniaTxt}>🏆 SC</Text>
+              {row.profileHasRevengeCup || row.profileHasSuperCup ? (
+                <View style={styles.cupsColumn}>
+                  {row.profileHasRevengeCup ? (
+                    <View style={styles.cupInsignia}>
+                      <Text style={styles.cupInsigniaTxt}>🏆 CV</Text>
+                    </View>
+                  ) : null}
+                  {row.profileHasSuperCup ? (
+                    <View style={styles.cupInsignia}>
+                      <Text style={styles.cupInsigniaTxt}>🏆 SC</Text>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
             </View>
@@ -437,14 +588,18 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               {row.profileWins} - {row.opponentWins}
             </Text>
             <View style={styles.revengeH2hRight}>
-              {row.opponentHasRevengeCup ? (
-                <View style={styles.cupInsignia}>
-                  <Text style={styles.cupInsigniaTxt}>🏆 CV</Text>
-                </View>
-              ) : null}
-              {row.opponentHasSuperCup ? (
-                <View style={styles.cupInsignia}>
-                  <Text style={styles.cupInsigniaTxt}>🏆 SC</Text>
+              {row.opponentHasRevengeCup || row.opponentHasSuperCup ? (
+                <View style={styles.cupsColumn}>
+                  {row.opponentHasRevengeCup ? (
+                    <View style={styles.cupInsignia}>
+                      <Text style={styles.cupInsigniaTxt}>🏆 CV</Text>
+                    </View>
+                  ) : null}
+                  {row.opponentHasSuperCup ? (
+                    <View style={styles.cupInsignia}>
+                      <Text style={styles.cupInsigniaTxt}>🏆 SC</Text>
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
               <Text style={styles.revengeH2hNameRight} numberOfLines={1}>
@@ -460,6 +615,31 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <View style={styles.hero}>
+        <View style={styles.profileStreakAbsolute}>
+          {workspaceStreak.length > 0 ? (
+            <View style={styles.profileStreakDots}>
+              {workspaceStreak.map((result, idx) => (
+                (() => {
+                  const size = getStreakCircleSize(idx, workspaceStreak.length);
+                  return (
+                <View
+                  key={`${result}-${idx}`}
+                  style={[
+                    styles.profileStreakDot,
+                    { width: size, height: size, borderRadius: size / 2 },
+                    result === 'V' ? styles.profileStreakWin : styles.profileStreakLoss,
+                  ]}
+                >
+                  <Text style={styles.profileStreakDotTxt}>{result}</Text>
+                </View>
+                  );
+                })()
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.profileStreakEmpty}>Racha: -</Text>
+          )}
+        </View>
         <PlayerAvatar
           userId={userId ?? ''}
           participantId={participantId}
@@ -520,18 +700,6 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
       {showRevengeTabs ? (tab === 'official' ? renderOfficialContent() : renderRevengeContent()) : renderOfficialContent()}
 
-      {isSelf ? (
-        <View style={styles.selfBlock}>
-          <Text style={styles.sectionTitle}>Tu valoración para hoy</Text>
-          {selfEval != null ? (
-            <Text style={styles.stars}>
-              {Array.from({ length: 10 }, (_, i) => (i < selfEval ? '★' : '☆')).join('')}
-            </Text>
-          ) : (
-            <Text style={styles.muted}>Sin valorar</Text>
-          )}
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
@@ -540,8 +708,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   scroll: { padding: 24, paddingBottom: 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  hero: { alignItems: 'center', marginBottom: 7 },
+  hero: { alignItems: 'center', marginBottom: 7, position: 'relative', width: '100%' },
   name: { marginTop: 14, fontSize: 22, fontWeight: '800', color: '#111', textAlign: 'center' },
+  profileStreakAbsolute: { position: 'absolute', left: 0, top: 78 },
+  profileStreakDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  profileStreakDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileStreakWin: { backgroundColor: '#15803D' },
+  profileStreakLoss: { backgroundColor: '#B91C1C' },
+  profileStreakDotTxt: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  profileStreakEmpty: { color: '#6B7280', fontSize: 11, fontWeight: '600' },
   heroChipsColumn: { marginTop: 10, alignItems: 'center', gap: 16, width: '100%' },
   orgChip: {
     paddingHorizontal: 10,
@@ -565,7 +746,32 @@ const styles = StyleSheet.create({
   flagSeg: { flex: 1, minHeight: 52, alignItems: 'center', justifyContent: 'center' },
   flagLetter: { fontSize: 22, fontWeight: '900', color: '#111' },
   flagLetterOnDark: { color: '#fff' },
+  statCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    backgroundColor: '#FAFAFA',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  statCardLeft: { flex: 1, marginRight: 12 },
   statLine: { fontSize: 15, color: '#374151', marginBottom: 6 },
+  winRateBox: {
+    borderWidth: 1,
+    borderColor: '#B45309',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  winRateLabel: { fontSize: 9, color: '#B45309', fontWeight: '600' },
+  winRateValue: { fontSize: 14, color: '#B45309', fontWeight: '800' },
   muted: { color: '#6B7280', fontSize: 15 },
   stars: { fontSize: 22, color: '#F59E0B', marginBottom: 14, letterSpacing: 2 },
   selfBlock: { marginTop: 24 },
@@ -658,4 +864,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   cupInsigniaTxt: { fontSize: 11, fontWeight: '700', color: '#4338CA' },
+  cupsColumn: { flexDirection: 'column', gap: 4, alignItems: 'center' },
 });
