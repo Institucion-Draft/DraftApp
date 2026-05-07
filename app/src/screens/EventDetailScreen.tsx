@@ -20,6 +20,11 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
+import {
+  getTwoWayTieFirstPlaceParticipantIds,
+  pairingIsBetweenParticipants,
+  type PairingSummary,
+} from '../lib/tiebreakLeaders';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventDetail'>;
 
@@ -113,6 +118,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [championGender, setChampionGender] = useState<Gender | null>(null);
   const [championOfficialWins, setChampionOfficialWins] = useState(0);
   const [championOfficialPlayed, setChampionOfficialPlayed] = useState(0);
+  const [tiebreakBanner, setTiebreakBanner] = useState<{
+    pairingId: string;
+    nameA: string;
+    nameB: string;
+  } | null>(null);
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
 
@@ -132,6 +142,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
     const e = data as EventRow;
     setEvent(e);
+    setTiebreakBanner(null);
     setChampionName(null);
     setChampionGender(null);
     setChampionOfficialWins(0);
@@ -206,6 +217,37 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
     const p = (partsRes.data ?? []) as ParticipantView[];
     setParticipants(p);
+
+    if (
+      e.status === 'playing' &&
+      e.final_pending === true &&
+      !e.champion_user_id &&
+      p.length >= 2
+    ) {
+      const prRes = await supabase
+        .from('pairings')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .eq('event_id', e.id);
+      if (!prRes.error && prRes.data) {
+        const playerIds = p.map((x) => x.id);
+        const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, prRes.data as PairingSummary[]);
+        if (leaders) {
+          const row = prRes.data.find((pr) =>
+            pairingIsBetweenParticipants(pr as PairingSummary, leaders[0], leaders[1])
+          );
+          if (row?.id) {
+            const pa = p.find((x) => x.id === leaders[0]);
+            const pb = p.find((x) => x.id === leaders[1]);
+            const ua = relationOne(pa?.users);
+            const ub = relationOne(pb?.users);
+            const na = ua?.display_name || ua?.username || 'Jugador';
+            const nb = ub?.display_name || ub?.username || 'Jugador';
+            setTiebreakBanner({ pairingId: row.id, nameA: na, nameB: nb });
+          }
+        }
+      }
+    }
+
     const mine = p.find((x) => x.user_id === (currentUserId ?? ''));
     const championParticipant = e.champion_user_id ? p.find((x) => x.user_id === e.champion_user_id) : undefined;
     setMyParticipantId(mine?.id ?? null);
@@ -578,6 +620,31 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <Text style={styles.meta}>Tipo de evento: {getEventTypeLabel(event.event_type)}</Text>
       </View>
 
+      {event.status === 'playing' && event.final_pending && !event.champion_user_id ? (
+        <View style={styles.tiebreakNotice}>
+          <Text style={styles.tiebreakNoticeTitle}>Desempate pendiente</Text>
+          <Text style={styles.tiebreakNoticeBody}>
+            Hay empate por el primer lugar.
+            {tiebreakBanner
+              ? ` El desempate (BO3) se juega en el enfrentamiento entre ${tiebreakBanner.nameA} y ${tiebreakBanner.nameB}.`
+              : ' Cuando el empatado sea entre dos jugadores, vas a poder abrir ese enfrentamiento desde acá.'}
+          </Text>
+          {tiebreakBanner ? (
+            <TouchableOpacity
+              style={styles.tiebreakNoticeBtn}
+              onPress={() =>
+                navigation.navigate('PairingDetail', {
+                  pairingId: tiebreakBanner.pairingId,
+                  fromTab: 'official',
+                })
+              }
+            >
+              <Text style={styles.tiebreakNoticeBtnTxt}>Ir al desempate</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
       {event.champion_user_id ? (
         <View style={styles.block}>
           <TouchableOpacity
@@ -833,6 +900,26 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 6, textAlign: 'center' },
   meta: { color: '#666', fontSize: 14, marginBottom: 4 },
   link: { color: '#3B82F6' },
+  tiebreakNotice: {
+    marginHorizontal: 24,
+    marginTop: 4,
+    marginBottom: 8,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    backgroundColor: '#FFFBEB',
+  },
+  tiebreakNoticeTitle: { fontSize: 15, fontWeight: '700', color: '#92400E', marginBottom: 6 },
+  tiebreakNoticeBody: { fontSize: 14, color: '#78350F', lineHeight: 20 },
+  tiebreakNoticeBtn: {
+    marginTop: 12,
+    backgroundColor: '#F59E0B',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tiebreakNoticeBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
   block: { paddingHorizontal: 24, paddingTop: 18 },
   blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 10 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginBottom: 10 },

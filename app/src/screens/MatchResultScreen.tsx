@@ -14,7 +14,7 @@ type MatchRow = {
   id: string;
   pairing_id: string;
   winner_participant_id: string | null;
-  match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant';
+  match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant' | 'tiebreak';
   started_at: string;
   ended_at: string | null;
 };
@@ -25,6 +25,7 @@ type PairingRow = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  tiebreak_winner_participant_id: string | null;
 };
 
 type ParticipantRow = {
@@ -61,6 +62,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [winsA, setWinsA] = useState(0);
   const [winsB, setWinsB] = useState(0);
   const [completedPairingMatchCount, setCompletedPairingMatchCount] = useState(0);
+  const [tiebreakCompletedCount, setTiebreakCompletedCount] = useState(0);
+  const [tiebreakWinsA, setTiebreakWinsA] = useState(0);
+  const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -79,7 +83,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
 
     const pRes = await supabase
       .from('pairings')
-      .select('id, event_id, participant_a_id, participant_b_id, official_winner_participant_id')
+      .select(
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, tiebreak_winner_participant_id'
+      )
       .eq('id', m.pairing_id)
       .maybeSingle();
     if (pRes.error || !pRes.data) {
@@ -90,7 +96,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const p = pRes.data as PairingRow;
     setPairing(p);
 
-    const [partsRes, winsRes, completedCountRes] = await Promise.all([
+    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes] =
+      await Promise.all([
       supabase
         .from('event_participants')
         .select(
@@ -106,14 +113,38 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         `
         )
         .in('id', [p.participant_a_id, p.participant_b_id]),
-      supabase.from('matches').select('winner_participant_id').eq('pairing_id', p.id).not('winner_participant_id', 'is', null),
+      supabase
+        .from('matches')
+        .select('winner_participant_id, match_type')
+        .eq('pairing_id', p.id)
+        .not('winner_participant_id', 'is', null)
+        .in('match_type', ['draft', 'final']),
+      supabase
+        .from('matches')
+        .select('winner_participant_id')
+        .eq('pairing_id', p.id)
+        .eq('match_type', 'tiebreak')
+        .eq('status', 'completed')
+        .not('winner_participant_id', 'is', null),
       supabase
         .from('matches')
         .select('id', { count: 'exact', head: true })
         .eq('pairing_id', p.id)
         .eq('status', 'completed'),
+      supabase
+        .from('matches')
+        .select('id', { count: 'exact', head: true })
+        .eq('pairing_id', p.id)
+        .eq('status', 'completed')
+        .eq('match_type', 'tiebreak'),
     ]);
-    if (partsRes.error || winsRes.error || completedCountRes.error) {
+    if (
+      partsRes.error ||
+      winsRes.error ||
+      tiebreakWinsRes.error ||
+      completedCountRes.error ||
+      tiebreakCompletedRes.error
+    ) {
       Alert.alert('Error', 'No se pudo cargar el estado del resultado.');
       setLoading(false);
       return;
@@ -123,7 +154,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setPb(map.get(p.participant_b_id) ?? null);
     setWinsA((winsRes.data ?? []).filter((x) => x.winner_participant_id === p.participant_a_id).length);
     setWinsB((winsRes.data ?? []).filter((x) => x.winner_participant_id === p.participant_b_id).length);
+    setTiebreakWinsA(
+      (tiebreakWinsRes.data ?? []).filter((x) => x.winner_participant_id === p.participant_a_id).length
+    );
+    setTiebreakWinsB(
+      (tiebreakWinsRes.data ?? []).filter((x) => x.winner_participant_id === p.participant_b_id).length
+    );
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
+    setTiebreakCompletedCount(tiebreakCompletedRes.count ?? 0);
     setLoading(false);
   }, [matchId]);
 
@@ -160,13 +198,17 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const winnerIsB = match.winner_participant_id === pairing.participant_b_id;
   const winnerName = winnerIsA ? aName : winnerIsB ? bName : 'Sin definir';
   const rematchLabel =
-    match.match_type === 'revenge'
-      ? 'Otra venganza'
-      : pairing.official_winner_participant_id
-        ? 'Venganza'
-        : completedPairingMatchCount >= 2
-          ? 'Jugar el bueno'
-          : 'Jugar la vuelta';
+    match.match_type === 'tiebreak'
+      ? tiebreakCompletedCount >= 2
+        ? 'Jugar el bueno'
+        : 'Jugar la vuelta'
+      : match.match_type === 'revenge'
+        ? 'Otra venganza'
+        : pairing.official_winner_participant_id
+          ? 'Venganza'
+          : completedPairingMatchCount >= 2
+            ? 'Jugar el bueno'
+            : 'Jugar la vuelta';
   const durationMs =
     match.ended_at != null
       ? new Date(match.ended_at).getTime() - new Date(match.started_at).getTime()
@@ -174,6 +216,24 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const durSec = Math.max(0, Math.floor(durationMs / 1000));
   const durMm = String(Math.floor(durSec / 60)).padStart(2, '0');
   const durSs = String(durSec % 60).padStart(2, '0');
+  const showRematchBtn = !(match.match_type === 'tiebreak' && pairing.tiebreak_winner_participant_id != null);
+
+  const scoreBlockLine1 =
+    match.match_type === 'tiebreak'
+      ? `${aName}: ${tiebreakWinsA} · ${bName}: ${tiebreakWinsB}`
+      : `${aName}: ${winsA} · ${bName}: ${winsB}`;
+  const scoreBlockLine2 =
+    match.match_type === 'tiebreak'
+      ? tiebreakWinsA >= 2 || tiebreakWinsB >= 2
+        ? `${tiebreakWinsA >= 2 ? aName : bName} gana el desempate`
+        : 'El desempate sigue abierto'
+      : match.match_type === 'revenge'
+        ? winsA >= 2 || winsB >= 2
+          ? `${winsA >= 2 ? aName : bName} ganó el enfrentamiento`
+          : 'El enfrentamiento sigue abierto'
+        : winsA >= 2 || winsB >= 2
+          ? `${winsA >= 2 ? aName : bName} gana el enfrentamiento`
+          : 'El enfrentamiento sigue abierto';
 
   const createRematch = async () => {
     const countRes = await supabase
@@ -185,7 +245,12 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       return;
     }
     const number = (countRes.count ?? 0) + 1;
-    const type = pairing.official_winner_participant_id ? 'revenge' : 'draft';
+    const type =
+      match.match_type === 'tiebreak'
+        ? 'tiebreak'
+        : pairing.official_winner_participant_id
+          ? 'revenge'
+          : 'draft';
     const insRes = await supabase
       .from('matches')
       .insert({ pairing_id: pairing.id, match_number: number, match_type: type, started_at: new Date().toISOString() })
@@ -244,18 +309,16 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       </View>
 
       <View style={styles.block}>
-        <Text style={styles.meta}>{aName}: {winsA} · {bName}: {winsB}</Text>
-        <Text style={styles.meta}>
-          {(winsA >= 2 || winsB >= 2)
-            ? `${winsA >= 2 ? aName : bName} gana el enfrentamiento`
-            : 'El enfrentamiento sigue abierto'}
-        </Text>
+        <Text style={styles.meta}>{scoreBlockLine1}</Text>
+        <Text style={styles.meta}>{scoreBlockLine2}</Text>
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => void createRematch()}>
-          <Text style={styles.primaryTxt}>{rematchLabel}</Text>
-        </TouchableOpacity>
+        {showRematchBtn ? (
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => void createRematch()}>
+            <Text style={styles.primaryTxt}>{rematchLabel}</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
           <Text style={styles.secondaryTxt}>Enfrentamientos</Text>
         </TouchableOpacity>

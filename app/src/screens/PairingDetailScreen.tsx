@@ -19,6 +19,11 @@ import {
   findConcurrentInProgressDetailsForPairParticipants,
   formatConcurrentMatchBlockMessage,
 } from '../lib/participantConcurrentMatch';
+import {
+  getTwoWayTieFirstPlaceParticipantIds,
+  pairingIsBetweenParticipants,
+  type PairingSummary,
+} from '../lib/tiebreakLeaders';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingDetail'>;
 
@@ -28,6 +33,8 @@ type PairingInfo = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  tiebreak_winner_participant_id: string | null;
+  tiebreak_resolved_at: string | null;
 };
 
 type MatchRow = {
@@ -109,12 +116,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   /** Vidas actuales del match in_progress (si hay). */
   const [inProgressLives, setInProgressLives] = useState<{ a: number; b: number } | null>(null);
+  const [isTiebreakPairing, setIsTiebreakPairing] = useState(false);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
     const { data: pData, error: pErr } = await supabase
       .from('pairings')
-      .select('id, event_id, participant_a_id, participant_b_id, official_winner_participant_id')
+      .select(
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, tiebreak_winner_participant_id, tiebreak_resolved_at'
+      )
       .eq('id', pairingId)
       .maybeSingle();
     if (pErr || !pData) {
@@ -125,9 +135,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const p = pData as PairingInfo;
     setPairing(p);
 
-    const [meRes, eventRes, partRes, matchesRes] = await Promise.all([
+    const [meRes, eventRes, partRes, matchesRes, allPlayersRes, allPairingsRes] = await Promise.all([
       supabase.auth.getUser(),
-      supabase.from('draft_events').select('workspace_id').eq('id', p.event_id).maybeSingle(),
+      supabase
+        .from('draft_events')
+        .select('workspace_id, status, final_pending, champion_user_id')
+        .eq('id', p.event_id)
+        .maybeSingle(),
       supabase
         .from('event_participants')
         .select(
@@ -150,6 +164,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         )
         .eq('pairing_id', p.id)
         .order('match_number', { ascending: true }),
+      supabase.from('event_participants').select('id').eq('event_id', p.event_id).eq('role', 'player'),
+      supabase
+        .from('pairings')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .eq('event_id', p.event_id),
     ]);
 
     const currentUserId = meRes.data.user?.id ?? null;
@@ -180,6 +199,35 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
     const matchRows = (matchesRes.data ?? []) as MatchRow[];
     setMatches(matchRows);
+
+    const ev = eventRes.data as {
+      status?: string;
+      final_pending?: boolean | null;
+      champion_user_id?: string | null;
+    } | null;
+    let tiebreakHere = false;
+    if (
+      ev?.status === 'playing' &&
+      ev?.final_pending === true &&
+      (ev?.champion_user_id == null || ev.champion_user_id === '') &&
+      !allPlayersRes.error &&
+      !allPairingsRes.error &&
+      allPlayersRes.data &&
+      allPairingsRes.data
+    ) {
+      const playerIds = (allPlayersRes.data as { id: string }[]).map((x) => x.id);
+      const pairSumm = allPairingsRes.data as PairingSummary[];
+      const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, pairSumm);
+      if (
+        leaders &&
+        pairingIsBetweenParticipants(p, leaders[0], leaders[1]) &&
+        p.official_winner_participant_id != null &&
+        p.tiebreak_winner_participant_id == null
+      ) {
+        tiebreakHere = true;
+      }
+    }
+    setIsTiebreakPairing(tiebreakHere);
     const inProgRow = matchRows.find((m) => m.status === 'in_progress') ?? null;
     if (inProgRow?.id) {
       const lifeRes = await supabase
@@ -272,6 +320,22 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const revengeMs = matches
     .filter((m) => m.match_type === 'revenge')
     .sort((a, b) => a.match_number - b.match_number);
+  const tiebreakMs = matches
+    .filter((m) => m.match_type === 'tiebreak')
+    .sort((a, b) => a.match_number - b.match_number);
+  const tiebreakWinsA = tiebreakMs.filter(
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
+  ).length;
+  const tiebreakWinsB = tiebreakMs.filter(
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id
+  ).length;
+  const tiebreakWinnerName =
+    pairing.tiebreak_winner_participant_id === pairing.participant_a_id
+      ? aName
+      : pairing.tiebreak_winner_participant_id === pairing.participant_b_id
+      ? bName
+      : null;
+  const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPairing;
   const winsA = officialMs.filter(
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
   ).length;
@@ -330,7 +394,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     }
 
     const nextNumber = (matches[matches.length - 1]?.match_number ?? 0) + 1;
-    const matchType = pairing.official_winner_participant_id ? 'revenge' : 'draft';
+    let matchType: 'draft' | 'revenge' | 'tiebreak';
+    if (!pairing.official_winner_participant_id) {
+      matchType = 'draft';
+    } else if (isTiebreakPairing && !pairing.tiebreak_winner_participant_id) {
+      matchType = 'tiebreak';
+    } else {
+      matchType = 'revenge';
+    }
     const { data, error } = await supabase
       .from('matches')
       .insert({
@@ -392,7 +463,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Partidas</Text>
-        {matches.length === 0 ? (
+        {matches.length === 0 && !isTiebreakPairing ? (
           <Text style={styles.muted}>Todavía no hay partidas.</Text>
         ) : (
           <>
@@ -445,6 +516,67 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 );
               })
             )}
+            {showTiebreakSection ? (
+              <>
+                <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>Desempate</Text>
+                <Text style={styles.revengeCounter}>
+                  {shortName(aName)} {tiebreakWinsA} - {tiebreakWinsB} {shortName(bName)}
+                  {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
+                </Text>
+                {tiebreakMs.length === 0 ? (
+                  <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
+                ) : (
+                  tiebreakMs.map((m, idx) => {
+                    const displayNum = idx + 1;
+                    const durationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
+                    const showLive =
+                      m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
+                    return (
+                      <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
+                        <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                          #{displayNum} ·{' '}
+                          {m.status === 'in_progress'
+                            ? '● EN VIVO'
+                            : m.status === 'aborted'
+                            ? 'Abortado'
+                            : 'Completado'}
+                        </Text>
+                        {showLive ? (
+                          <Text style={styles.matchLiveScore}>
+                            {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                          </Text>
+                        ) : null}
+                        {m.status === 'in_progress' ? (
+                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
+                        ) : null}
+                        {m.status === 'completed' && m.winner_participant_id ? (
+                          <View>
+                            <Text style={styles.matchWinner}>
+                              Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                            </Text>
+                            {durationLabel ? (
+                              <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                        {m.status === 'completed' && !m.winner_participant_id ? (
+                          <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                        ) : null}
+                        {m.status === 'aborted' ? (
+                          <Text style={styles.matchWinner}>Partida abortada.</Text>
+                        ) : null}
+                        {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
+                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+                        ) : null}
+                        {m.status === 'completed' && !m.ended_at ? (
+                          <Text style={styles.matchTime}>Cierre pendiente.</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })
+                )}
+              </>
+            ) : null}
             {revengeMs.length > 0 ? (
               <>
                 <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>Venganzas</Text>
