@@ -19,6 +19,7 @@ import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { resolveGenderedText, type Gender } from '../lib/genderText';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventDetail'>;
 
@@ -43,16 +44,19 @@ type EventRow = {
 type ParticipantView = {
   id: string;
   user_id: string;
+  left_event_at: string | null;
   users:
     | {
         username: string;
         display_name: string;
+        gender?: Gender | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }
     | {
         username: string;
         display_name: string;
+        gender?: Gender | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }[]
@@ -106,6 +110,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [cubeName, setCubeName] = useState<string | null>(null);
   const [venueName, setVenueName] = useState<string | null>(null);
   const [championName, setChampionName] = useState<string | null>(null);
+  const [championGender, setChampionGender] = useState<Gender | null>(null);
   const [championOfficialWins, setChampionOfficialWins] = useState(0);
   const [championOfficialPlayed, setChampionOfficialPlayed] = useState(0);
   const firstRef = useRef(true);
@@ -128,17 +133,20 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const e = data as EventRow;
     setEvent(e);
     setChampionName(null);
+    setChampionGender(null);
     setChampionOfficialWins(0);
     setChampionOfficialPlayed(0);
 
     if (e.champion_user_id) {
       const championRes = await supabase
         .from('users')
-        .select('display_name')
+        .select('display_name, gender')
         .eq('id', e.champion_user_id)
         .maybeSingle();
       if (!championRes.error) {
-        setChampionName((championRes.data as { display_name?: string | null } | null)?.display_name ?? null);
+        const championUser = championRes.data as { display_name?: string | null; gender?: Gender | null } | null;
+        setChampionName(championUser?.display_name ?? null);
+        setChampionGender(championUser?.gender ?? null);
       }
     }
 
@@ -161,9 +169,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          left_event_at,
           users!event_participants_user_id_fkey (
             username,
             display_name,
+            gender,
             custom_avatar_path,
             default_avatars (storage_path)
           )
@@ -541,6 +551,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     ? participants.find((p) => p.user_id === event.champion_user_id) ?? null
     : null;
   const championDisplayName = championName?.trim() || 'Campeón';
+  const championTitle = resolveGenderedText(championGender, 'Campeón', 'Campeona');
   const championWinRate =
     formatWinRate(championOfficialWins, championOfficialPlayed);
 
@@ -593,7 +604,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             <View style={styles.championBody}>
               <View style={styles.championRightContent}>
                 <View style={styles.championHeroBadge}>
-                  <Text style={styles.championBadgeText}>🏆 Campeón</Text>
+                  <Text style={styles.championBadgeText}>🏆 {championTitle}</Text>
                 </View>
                 <Text style={styles.championName}>{championDisplayName}</Text>
                 <Text style={styles.championMeta}>
@@ -757,6 +768,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         {participants.map((p) => {
           const u = relationOne(p.users);
           const uname = u?.display_name || u?.username || 'sin nombre';
+          const participantChampionLabel = resolveGenderedText(u?.gender, 'Campeón', 'Campeona');
           return (
             <TouchableOpacity
               key={p.id}
@@ -781,7 +793,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   <Text style={styles.participantName}>{uname}</Text>
                   {event.champion_user_id && p.user_id === event.champion_user_id ? (
                     <View style={styles.championBadge}>
-                      <Text style={styles.championBadgeText}>Campeón</Text>
+                      <Text style={styles.championBadgeText}>{participantChampionLabel}</Text>
+                    </View>
+                  ) : null}
+                  {p.left_event_at ? (
+                    <View style={styles.leftEventChip}>
+                      <Text style={styles.leftEventChipText}>{p.user_id === myUserId ? 'Te fuiste' : 'Se fue'}</Text>
                     </View>
                   ) : null}
                 </View>
@@ -891,6 +908,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   championBadgeText: { fontSize: 11, fontWeight: '700', color: '#B45309' },
+  leftEventChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+  },
+  leftEventChipText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
   championWinRateWrap: { position: 'absolute', top: 0, right: 0 },
   winRateBox: {
     borderWidth: 1,
