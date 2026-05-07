@@ -35,6 +35,9 @@ type EventRow = {
   notes: string | null;
   draft_started_at: string | null;
   draft_ended_at: string | null;
+  champion_user_id: string | null;
+  event_ended_at: string | null;
+  final_pending: boolean | null;
 };
 
 type ParticipantView = {
@@ -78,6 +81,16 @@ function formatDraftNetDuration(ms: number): string {
   return `${s}s`;
 }
 
+function formatWinRate(wins: number, total: number): string {
+  if (total <= 0) return '-';
+  const pct = (wins / total) * 100;
+  const roundedOneDecimal = Math.round(pct * 10) / 10;
+  if (Math.abs(roundedOneDecimal - Math.round(roundedOneDecimal)) < 0.00001) {
+    return `${Math.round(roundedOneDecimal)}%`;
+  }
+  return `${roundedOneDecimal.toFixed(1).replace('.', ',')}%`;
+}
+
 export default function EventDetailScreen({ route, navigation }: Props) {
   const isFocused = useIsFocused();
   const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
@@ -92,6 +105,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
   const [cubeName, setCubeName] = useState<string | null>(null);
   const [venueName, setVenueName] = useState<string | null>(null);
+  const [championName, setChampionName] = useState<string | null>(null);
+  const [championOfficialWins, setChampionOfficialWins] = useState(0);
+  const [championOfficialPlayed, setChampionOfficialPlayed] = useState(0);
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
 
@@ -99,7 +115,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at'
+        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, event_ended_at, final_pending'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -111,6 +127,20 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
     const e = data as EventRow;
     setEvent(e);
+    setChampionName(null);
+    setChampionOfficialWins(0);
+    setChampionOfficialPlayed(0);
+
+    if (e.champion_user_id) {
+      const championRes = await supabase
+        .from('users')
+        .select('display_name')
+        .eq('id', e.champion_user_id)
+        .maybeSingle();
+      if (!championRes.error) {
+        setChampionName((championRes.data as { display_name?: string | null } | null)?.display_name ?? null);
+      }
+    }
 
     const meRes = await supabase.auth.getUser();
     const currentUserId = meRes.data.user?.id ?? null;
@@ -167,9 +197,30 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const p = (partsRes.data ?? []) as ParticipantView[];
     setParticipants(p);
     const mine = p.find((x) => x.user_id === (currentUserId ?? ''));
+    const championParticipant = e.champion_user_id ? p.find((x) => x.user_id === e.champion_user_id) : undefined;
     setMyParticipantId(mine?.id ?? null);
     setCubeName((cubeRes.data as any)?.name ?? null);
     setVenueName((venueRes.data as any)?.name ?? null);
+
+    if (e.champion_user_id && championParticipant?.id) {
+      const championParticipantId = championParticipant.id;
+      const [winsRes, playedRes] = await Promise.all([
+        supabase
+          .from('pairings')
+          .select('id', { count: 'exact', head: true })
+          .eq('event_id', e.id)
+          .eq('official_winner_participant_id', championParticipantId),
+        supabase
+          .from('pairings')
+          .select('id', { count: 'exact', head: true })
+          .eq('event_id', e.id)
+          .not('official_winner_participant_id', 'is', null)
+          .or(`participant_a_id.eq.${championParticipantId},participant_b_id.eq.${championParticipantId}`),
+      ]);
+
+      if (!winsRes.error) setChampionOfficialWins(winsRes.count ?? 0);
+      if (!playedRes.error) setChampionOfficialPlayed(playedRes.count ?? 0);
+    }
 
     if (p.length > 0) {
       const ids = p.map((x) => x.id);
@@ -486,6 +537,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const showEnfrentamientosBtn = playingOrDone && (myParticipantId != null || isWorkspaceMember);
   const showStandingsBtn =
     isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId);
+  const championParticipant = event.champion_user_id
+    ? participants.find((p) => p.user_id === event.champion_user_id) ?? null
+    : null;
+  const championDisplayName = championName?.trim() || 'Campeón';
+  const championWinRate =
+    formatWinRate(championOfficialWins, championOfficialPlayed);
 
   const goEnfrentamientos = () => {
     if (myParticipantId && !hasDeclaredColors && playingOrDone) {
@@ -507,8 +564,52 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         )}
         <Text style={styles.title}>{event.name}</Text>
         <Text style={styles.meta}>Estado: {getEventStatusLabel(event.status)}</Text>
-        <Text style={styles.meta}>Tipo: {getEventTypeLabel(event.event_type)}</Text>
+        <Text style={styles.meta}>Tipo de evento: {getEventTypeLabel(event.event_type)}</Text>
       </View>
+
+      {event.champion_user_id ? (
+        <View style={styles.block}>
+          <TouchableOpacity
+            style={styles.championRow}
+            disabled={!championParticipant}
+            onPress={() =>
+              championParticipant
+                ? navigation.navigate('PlayerProfileInEvent', {
+                    eventId: event.id,
+                    participantId: championParticipant.id,
+                    from: 'EventDetail',
+                  })
+                : undefined
+            }
+          >
+            <View style={styles.championAvatarWrap}>
+              <PlayerAvatar
+                userId={event.champion_user_id}
+                participantId={championParticipant?.id}
+                size="large"
+                withColorBorder={true}
+              />
+            </View>
+            <View style={styles.championBody}>
+              <View style={styles.championRightContent}>
+                <View style={styles.championHeroBadge}>
+                  <Text style={styles.championBadgeText}>🏆 Campeón</Text>
+                </View>
+                <Text style={styles.championName}>{championDisplayName}</Text>
+                <Text style={styles.championMeta}>
+                  EG: {championOfficialWins} · EC: {championOfficialPlayed}
+                </Text>
+              </View>
+              <View style={styles.championWinRateWrap}>
+                <View style={styles.winRateBox}>
+                  <Text style={styles.winRateLabel}>Win Rate</Text>
+                  <Text style={styles.winRateValue}>{championWinRate}</Text>
+                </View>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <View style={styles.block}>
         <Text style={styles.meta}>
@@ -676,7 +777,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 style={{ marginRight: 10 }}
               />
               <View style={styles.participantBody}>
-                <Text style={styles.participantName}>{uname}</Text>
+                <View style={styles.participantNameRow}>
+                  <Text style={styles.participantName}>{uname}</Text>
+                  {event.champion_user_id && p.user_id === event.champion_user_id ? (
+                    <View style={styles.championBadge}>
+                      <Text style={styles.championBadgeText}>Campeón</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
             </TouchableOpacity>
           );
@@ -746,6 +854,56 @@ const styles = StyleSheet.create({
   },
   participantBody: { flex: 1, minWidth: 0 },
   participantName: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 2 },
+  participantNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  championRow: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    backgroundColor: '#fafafa',
+    minHeight: 94,
+  },
+  championAvatarWrap: { marginRight: 18 },
+  championBody: { flex: 1, minWidth: 0, minHeight: 72, justifyContent: 'flex-start', paddingRight: 86 },
+  championRightContent: { flex: 1, minHeight: 72, justifyContent: 'flex-start' },
+  championName: { fontSize: 18, fontWeight: '700', color: '#111' },
+  championMeta: { fontSize: 12, color: '#666', marginTop: 4 },
+  championBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FBBF24',
+  },
+  championHeroBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FBBF24',
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  championBadgeText: { fontSize: 11, fontWeight: '700', color: '#B45309' },
+  championWinRateWrap: { position: 'absolute', top: 0, right: 0 },
+  winRateBox: {
+    borderWidth: 1,
+    borderColor: '#B45309',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  winRateLabel: { fontSize: 9, color: '#B45309', fontWeight: '600' },
+  winRateValue: { fontSize: 13, color: '#B45309', fontWeight: '800' },
   metaSmall: { fontSize: 12, color: '#666' },
   inlineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   registeredTxt: { color: '#166534', fontSize: 14, fontWeight: '600' },
