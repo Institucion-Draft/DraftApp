@@ -1,14 +1,44 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
-import PlayerAvatar from '../components/PlayerAvatar';
+import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
-import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { type Gender } from '../lib/genderText';
+import { computePodium, type PodiumState } from '../lib/podium';
+
+/** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
+const PODIUM_COL_WIDTH = 132;
+const PODIUM_AVATAR_ROW_GAP = 6;
+const AVATAR_BORDER_W = 2;
+const AVATAR_DIAM_MEDIUM = 48;
+const AVATAR_DIAM_SMALL = 32;
+const AVATAR_DIAM_TINY = 24;
+
+function avatarOuterApprox(diameterPx: number): number {
+  return diameterPx + 2 * AVATAR_BORDER_W;
+}
+
+function podiumRowMinWidthPx(n: number, diameterPx: number, gapPx: number): number {
+  if (n <= 0) return 0;
+  return diameterPx * n + gapPx * (n - 1);
+}
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Standings'>;
 
@@ -139,6 +169,26 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
   return Array.isArray(x) ? (x[0] ?? null) : x;
 }
 
+/** Tamaño por cantidad y por si caben con `gap` en el peldaño (misma lógica en 1º, 2º y 3º). */
+function podiumStepAvatarSize(nInStep: number): PlayerAvatarSize {
+  const w = PODIUM_COL_WIDTH;
+  const g = PODIUM_AVATAR_ROW_GAP;
+
+  if (nInStep <= 1) return 'large';
+
+  if (nInStep === 2) {
+    if (w < podiumRowMinWidthPx(2, avatarOuterApprox(AVATAR_DIAM_MEDIUM), g)) return 'small';
+    return 'medium';
+  }
+
+  if (nInStep <= 4) {
+    if (w < podiumRowMinWidthPx(nInStep, avatarOuterApprox(AVATAR_DIAM_SMALL), g)) return 'tiny';
+    return 'small';
+  }
+
+  return 'tiny';
+}
+
 /** Ciclo ~1.2s; opacidad 1 ↔ 0.3. Usa `View` (no anidar en `Text`) para que `useNativeDriver` componga bien. */
 const PULSE_HALF_MS = 600;
 
@@ -180,6 +230,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [revengeRows, setRevengeRows] = useState<RevengeRowView[]>([]);
   const [tab, setTab] = useState<'official' | 'revenge'>('official');
   const [eventFooter, setEventFooter] = useState<EventFooterStats>({ torneo: null, bo3: null });
+  const [podiumState, setPodiumState] = useState<PodiumState | null>(null);
+  const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
+  const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -215,17 +268,24 @@ export default function StandingsScreen({ route, navigation }: Props) {
           'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
         )
         .eq('event_id', eventId),
-      supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
+      supabase.from('draft_events').select('status, champion_user_id').eq('id', eventId).maybeSingle(),
     ]);
     if (partsRes.error || pairingsRes.error) {
       setRows([]);
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
+      setPodiumState(null);
       return;
     }
 
     const participants = partsRes.data ?? [];
     const participantIds = participants.map((p) => p.id as string);
+
+    const leftAtByParticipant = new Map<string, string | null>();
+    for (const p of participants as { id: string; left_event_at?: string | null }[]) {
+      leftAtByParticipant.set(String(p.id), (p.left_event_at as string | null) ?? null);
+    }
+
     const colorsRes =
       participantIds.length > 0
         ? await supabase
@@ -237,6 +297,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setRows([]);
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
+      setPodiumState(null);
       return;
     }
     const colorMap: Record<string, MtgColor[]> = {};
@@ -271,10 +332,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setRows([]);
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
+      setPodiumState(null);
       return;
     }
 
     const eventStatus = eventRes.data?.status as string | undefined;
+    const championUserId = (eventRes.data as { champion_user_id?: string | null } | null)?.champion_user_id ?? null;
+    setEventStatusStored(eventStatus ?? null);
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
       (pr: any) => pr.official_winner_participant_id != null
@@ -316,6 +380,51 @@ export default function StandingsScreen({ route, navigation }: Props) {
       bo3Footer = { pct20, pct21, bold20, bold21 };
     }
     setEventFooter({ torneo: torneoLine, bo3: bo3Footer });
+
+    const podiumPlayers = (participants as any[]).map((p: any) => {
+      const pid = p.id as string;
+      const userId = p.user_id as string;
+      const u = relationOne(p.users);
+      const name = u?.display_name || u?.username || 'Jugador';
+      const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
+      const pairingSet = new Set(playerPairings.map((x: any) => x.id));
+      const playerMatches = matches.filter((m: any) => pairingSet.has(m.pairing_id));
+      const officialDone = playerMatches.filter(
+        (m: any) =>
+          m.status === 'completed' &&
+          (m.match_type === 'draft' || m.match_type === 'final') &&
+          m.winner_participant_id != null &&
+          String(m.winner_participant_id).length > 0
+      );
+      const pgOff = officialDone.filter((m: any) => m.winner_participant_id === pid).length;
+      const pjOff = officialDone.length;
+      const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
+      const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
+      return {
+        participantId: pid,
+        userId,
+        name,
+        avatarUserId: userId,
+        bo3Won: eg,
+        bo3Completed: ec,
+        bo3WinRate: ec > 0 ? eg / ec : 0,
+        matchesWon: pgOff,
+        matchesCompleted: pjOff,
+        matchWinRate: pjOff > 0 ? pgOff / pjOff : 0,
+      };
+    });
+
+    const pairingRemain = (pairings as any[])
+      .filter((pr) => pr.official_winner_participant_id == null)
+      .map((pr: any) => ({
+        participantAId: String(pr.participant_a_id),
+        participantBId: String(pr.participant_b_id),
+        isBlocked: !!(
+          leftAtByParticipant.get(String(pr.participant_a_id)) || leftAtByParticipant.get(String(pr.participant_b_id))
+        ),
+      }));
+
+    setPodiumState(computePodium(podiumPlayers, pairingRemain, participants.length, championUserId));
 
     const lifeEvents = (lifeRes.data ?? []) as LifeEvRow[];
     const lifeByMatchId = new Map<string, LifeEvRow[]>();
@@ -470,6 +579,30 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setRefreshing(false);
   }, [load]);
 
+  useEffect(() => {
+    if (eventStatusStored !== 'completed') return undefined;
+    let cancelled = false;
+    let dismissT: ReturnType<typeof setTimeout> | undefined;
+    void (async () => {
+      try {
+        const k = `confetti_seen_${eventId}`;
+        const seen = await AsyncStorage.getItem(k);
+        if (cancelled || seen != null) return;
+        setShowConfettiOnce(true);
+        await AsyncStorage.setItem(k, '1');
+        dismissT = setTimeout(() => {
+          if (!cancelled) setShowConfettiOnce(false);
+        }, 4500);
+      } catch {
+        // ignore storage errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (dismissT) clearTimeout(dismissT);
+    };
+  }, [eventId, eventStatusStored]);
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -478,8 +611,93 @@ export default function StandingsScreen({ route, navigation }: Props) {
     );
   }
 
+  const winW = Dimensions.get('window').width;
+
+  const renderPedestalColumn = (rank: 1 | 2 | 3, baseH: number, bgColor: string) => {
+    if (!podiumState) return null;
+    const step =
+      podiumState.steps.find((s) => s.rank === rank) ??
+      ({
+        rank,
+        players: [],
+        topPlayerOnStool: null,
+      } as (typeof podiumState.steps)[number]);
+    const players = step.players;
+    const stoolId = step.topPlayerOnStool;
+    const cnt = players.length;
+    const avatarSize = cnt > 0 ? podiumStepAvatarSize(cnt) : ('large' as PlayerAvatarSize);
+    const avatarBorder = cnt <= 1 ? 3 : 2;
+
+    const renderOneAvatar = (pl: (typeof players)[number]) => (
+      <TouchableOpacity
+        key={pl.participantId}
+        activeOpacity={0.75}
+        style={[styles.podiumPlayerStack, styles.podiumAvatarCol]}
+        onPress={() =>
+          navigation.navigate('PlayerProfileInEvent', {
+            eventId,
+            participantId: pl.participantId,
+            from: 'Standings',
+          })
+        }
+      >
+        <PlayerAvatar
+          userId={pl.avatarUserId}
+          participantId={pl.participantId}
+          size={avatarSize}
+          withColorBorder
+          borderWidth={avatarBorder}
+        />
+        {stoolId === pl.participantId ? (
+          <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
+            🪑
+          </Text>
+        ) : null}
+      </TouchableOpacity>
+    );
+
+    return (
+      <View key={rank} style={styles.podiumCol}>
+        <View style={styles.podiumAvatarArea}>
+          {cnt === 0 ? (
+            <View style={styles.podiumAvatarSpacer} />
+          ) : (
+            <View style={styles.podiumAvatarRow}>{players.map(renderOneAvatar)}</View>
+          )}
+        </View>
+        <View style={[styles.podiumBaseBlock, { height: baseH, backgroundColor: bgColor }]}>
+          <Text style={[styles.podiumBaseRank, rank === 3 && styles.podiumBaseRankLight]}>{rank}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const step1Filled =
+    podiumState != null &&
+    (podiumState.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0;
+
+  const podiumBlock =
+    podiumState != null && step1Filled ? (
+      <View style={styles.podiumSection}>
+        <View style={styles.podiumArena}>
+          <View style={styles.podiumCenterRow}>
+            {renderPedestalColumn(2, 90, '#D1D5DB')}
+            {renderPedestalColumn(1, 124, '#FCD34D')}
+            {renderPedestalColumn(3, 70, '#B45309')}
+          </View>
+        </View>
+      </View>
+    ) : null;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+    <View style={styles.screenRoot}>
+      {showConfettiOnce ? (
+        <View pointerEvents="none" style={styles.confettiOverlay}>
+          <ConfettiCannon count={150} origin={{ x: Math.max(80, winW / 2), y: -6 }} fadeOut />
+        </View>
+      ) : null}
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      {podiumBlock}
       {revengeRows.length > 0 ? (
         <View style={styles.tabsRow}>
           <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('official')} activeOpacity={0.7}>
@@ -632,10 +850,75 @@ export default function StandingsScreen({ route, navigation }: Props) {
           : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'}
       </Text>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screenRoot: { flex: 1, backgroundColor: '#fff' },
+  confettiOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 12,
+  },
+  podiumSection: { marginBottom: 18 },
+  podiumArena: {
+    minHeight: 168,
+    marginBottom: 4,
+    justifyContent: 'flex-end',
+  },
+  podiumCenterRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 4,
+  },
+  podiumCol: {
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    width: PODIUM_COL_WIDTH,
+  },
+  podiumAvatarArea: {
+    width: '100%',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+    minHeight: 112,
+    marginBottom: 2,
+  },
+  podiumAvatarSpacer: { minHeight: 112 },
+  podiumAvatarRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    gap: PODIUM_AVATAR_ROW_GAP,
+    width: '100%',
+  },
+  podiumPlayerStack: { flexShrink: 0, alignItems: 'center' },
+  podiumAvatarCol: { flexDirection: 'column', alignItems: 'center' },
+  podiumStoolMark: { fontSize: 12, lineHeight: 14, marginTop: 2 },
+  podiumBaseBlock: {
+    width: '100%',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+    marginTop: 2,
+  },
+  podiumBaseRank: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: 'rgba(0,0,0,0.45)',
+  },
+  podiumBaseRankLight: {
+    color: '#FFFBEB',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   container: { flex: 1, backgroundColor: '#fff' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   scroll: { padding: 16, paddingBottom: 28 },
