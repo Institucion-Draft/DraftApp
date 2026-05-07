@@ -8,6 +8,7 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
+import { resolveGenderedText, type Gender } from '../lib/genderText';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Standings'>;
 
@@ -26,6 +27,8 @@ type RowView = {
   /** Tiempo medio por partida (s); null si no hay partidas completadas con duración. */
   tmp: number | null;
   inProgress: boolean;
+  leftEventAt: string | null;
+  gender: Gender | null;
 };
 
 type RevengeRowView = {
@@ -39,6 +42,8 @@ type RevengeRowView = {
   sc: number;
   /** Match de venganza en curso en alguno de sus pairings. */
   inProgress: boolean;
+  leftEventAt: string | null;
+  gender: Gender | null;
 };
 
 type LifeEvRow = { match_id: string; participant_id: string; resulting_life: number; occurred_at: string };
@@ -192,9 +197,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          left_event_at,
           users!event_participants_user_id_fkey (
             username,
             display_name,
+            gender,
             custom_avatar_path,
             default_avatars (storage_path)
           )
@@ -324,6 +331,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const name = u?.display_name || u?.username || 'Jugador';
       const userId = p.user_id as string;
       const colors = colorMap[pid] ?? [];
+      const gender = (u?.gender as Gender | null | undefined) ?? null;
 
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
       const pairingSet = new Set(playerPairings.map((x: any) => x.id));
@@ -337,6 +345,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         (m: any) =>
           m.status === 'in_progress' && (m.match_type === 'draft' || m.match_type === 'final')
       );
+      const leftEventAt = (p.left_event_at as string | null) ?? null;
 
       const matchDmvs: number[] = [];
       for (const m of playerMatches) {
@@ -361,7 +370,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const tmp =
         durations.length > 0 ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : null;
 
-      return { participantId: pid, userId, name, colors, pg, pj, eg, ec, dmv, tmp, inProgress };
+      return { participantId: pid, userId, name, colors, pg, pj, eg, ec, dmv, tmp, inProgress, leftEventAt, gender };
     });
 
     rowsBuilt.sort((a, b) => {
@@ -379,6 +388,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const name = u?.display_name || u?.username || 'Jugador';
       const userId = p.user_id as string;
       const colors = colorMap[pid] ?? [];
+      const gender = (u?.gender as Gender | null | undefined) ?? null;
 
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
       const pairingSet = new Set(playerPairings.map((x: any) => x.id));
@@ -396,8 +406,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const inProgress = playerMatches.some(
         (m: any) => m.status === 'in_progress' && m.match_type === 'revenge'
       );
+      const leftEventAt = (p.left_event_at as string | null) ?? null;
 
-      return { participantId: pid, userId, name, colors, vg, vj, cv, sc, inProgress };
+      return { participantId: pid, userId, name, colors, vg, vj, cv, sc, inProgress, leftEventAt, gender };
     });
 
     const revengeFiltered = revengeRowsBuilt.filter((r) => r.vj > 0);
@@ -496,7 +507,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           {rows.map((r) => (
             <TouchableOpacity
               key={r.participantId}
-              style={styles.row}
+              style={[styles.row, r.leftEventAt ? styles.rowLeftEvent : null]}
               activeOpacity={0.7}
               onPress={() =>
                 navigation.navigate('PlayerProfileInEvent', {
@@ -518,7 +529,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   <View style={styles.playerNameInner}>
                     {r.inProgress ? <PulsingLiveDot /> : null}
                     <Text style={styles.playerName} numberOfLines={2}>
-                      {r.name}
+                      {r.name}{r.leftEventAt ? ' *' : ''}
                     </Text>
                   </View>
                   <ColorFlag colors={r.colors} />
@@ -616,6 +627,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
               'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
               'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
               'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
+              '* Se fue antes de completar sus enfrentamientos',
             ].join('\n')
           : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'}
       </Text>
@@ -642,6 +654,7 @@ const styles = StyleSheet.create({
   tabUnderlineHidden: { backgroundColor: 'transparent' },
   header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
+  rowLeftEvent: { opacity: 0.5 },
   cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
   tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
   playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },

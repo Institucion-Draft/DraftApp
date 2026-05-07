@@ -15,6 +15,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
+import { resolveGenderedText, type Gender } from '../lib/genderText';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerProfileInEvent'>;
 
@@ -101,6 +102,16 @@ function getStreakCircleSize(index: number, total: number, baseSize = 18, step =
   return baseSize + (index - center) * step;
 }
 
+function formatLeftEventAt(dateIso: string): string {
+  return new Date(dateIso).toLocaleString('es-AR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function PlayerProfileInEventScreen({ route, navigation }: Props) {
   const { eventId, participantId, from: profileFrom = 'EventDetail' } = route.params;
   useLayoutEffect(() => {
@@ -121,6 +132,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [pairingsWon, setPairingsWon] = useState(0);
   const [pairingsCompleted, setPairingsCompleted] = useState(0);
   const [isWorkspaceOrganizer, setIsWorkspaceOrganizer] = useState(false);
+  const [isCurrentUserOrganizer, setIsCurrentUserOrganizer] = useState(false);
+  const [leftEventAt, setLeftEventAt] = useState<string | null>(null);
+  const [profileGender, setProfileGender] = useState<Gender | null>(null);
 
   const [tab, setTab] = useState<'official' | 'revenge'>('official');
   const [showRevengeTabs, setShowRevengeTabs] = useState(false);
@@ -134,7 +148,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
   const load = useCallback(async () => {
     const meRes = await supabase.auth.getUser();
-    setMyUserId(meRes.data.user?.id ?? null);
+    const currentUserId = meRes.data.user?.id ?? null;
+    setMyUserId(currentUserId);
 
     const { data: pRow, error: pErr } = await supabase
       .from('event_participants')
@@ -142,10 +157,12 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         `
         id,
         user_id,
+        left_event_at,
         self_evaluation,
         users!event_participants_user_id_fkey (
           display_name,
           username,
+          gender,
           custom_avatar_path,
           default_avatars (storage_path)
         )
@@ -164,6 +181,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const { data: evRow } = await supabase.from('draft_events').select('workspace_id').eq('id', eventId).maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
     const uid = pRow.user_id as string;
+    setLeftEventAt((pRow as { left_event_at?: string | null }).left_event_at ?? null);
     setWorkspaceStreak([]);
     if (wsId) {
       const orgRes = await supabase
@@ -173,18 +191,31 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         .eq('user_id', uid)
         .maybeSingle();
       setIsWorkspaceOrganizer(!orgRes.error && orgRes.data?.role === 'organizer');
+      if (currentUserId) {
+        const currentOrgRes = await supabase
+          .from('workspace_members')
+          .select('role')
+          .eq('workspace_id', wsId)
+          .eq('user_id', currentUserId)
+          .maybeSingle();
+        setIsCurrentUserOrganizer(!currentOrgRes.error && currentOrgRes.data?.role === 'organizer');
+      } else {
+        setIsCurrentUserOrganizer(false);
+      }
     } else {
       setIsWorkspaceOrganizer(false);
+      setIsCurrentUserOrganizer(false);
     }
 
     const u = relationOne(
       pRow.users as
-        | { display_name: string; username: string }
-        | { display_name: string; username: string }[]
+        | { display_name: string; username: string; gender?: Gender | null }
+        | { display_name: string; username: string; gender?: Gender | null }[]
         | null
     );
     setUserId(pRow.user_id as string);
     setDisplayName(u?.display_name || u?.username || 'Jugador');
+    setProfileGender(u?.gender ?? null);
     setSelfEval((pRow as { self_evaluation: number | null }).self_evaluation ?? null);
 
     if (wsId) {
@@ -455,6 +486,47 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   );
 
   const isSelf = !!myUserId && myUserId === userId;
+  const leftWord = resolveGenderedText(profileGender, 'ido', 'ida');
+  const markAsLeftLabel = `Marcar como ${leftWord}`;
+
+  const markAsLeft = async (isSelfAction: boolean) => {
+    if (!myUserId) return;
+    const actorName = displayName || 'este jugador';
+    const confirmation = isSelfAction
+      ? `Si te marcás como ${leftWord}, no vas a poder revertirlo vos mismo (solo el organizer puede). Tus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`
+      : `Vas a marcar a ${actorName} como ${leftWord} del evento. Sus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`;
+    Alert.alert(isSelfAction ? 'Me estoy yendo' : markAsLeftLabel, confirmation, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Confirmar',
+        onPress: async () => {
+          const { error } = await supabase
+            .from('event_participants')
+            .update({ left_event_at: new Date().toISOString(), left_event_by: myUserId })
+            .eq('id', participantId);
+          if (error) {
+            Alert.alert('Error', error.message ?? 'No se pudo marcar como ido.');
+            return;
+          }
+          await supabase.rpc('compute_event_champion', { p_event_id: eventId });
+          await load();
+        },
+      },
+    ]);
+  };
+
+  const revertLeft = async () => {
+    const { error } = await supabase
+      .from('event_participants')
+      .update({ left_event_at: null, left_event_by: null })
+      .eq('id', participantId);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'No se pudo revertir el estado.');
+      return;
+    }
+    await supabase.rpc('compute_event_champion', { p_event_id: eventId });
+    await load();
+  };
 
   if (loading) {
     return (
@@ -648,6 +720,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           borderWidth={5}
         />
         <Text style={styles.name}>{displayName}</Text>
+        {leftEventAt ? (
+          <View style={styles.leftEventChip}>
+            <Text style={styles.leftEventChipText}>{isSelf ? 'Te fuiste' : 'Se fue'}</Text>
+          </View>
+        ) : null}
         <View style={styles.heroChipsColumn}>
           {isWorkspaceOrganizer ? (
             <View style={styles.orgChip}>
@@ -699,7 +776,41 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       ) : null}
 
       {showRevengeTabs ? (tab === 'official' ? renderOfficialContent() : renderRevengeContent()) : renderOfficialContent()}
-
+      <View style={styles.leaveActionWrap}>
+        {isSelf ? (
+          leftEventAt ? (
+            <>
+              <Text style={styles.leftEventText}>
+                Te marcaste como {leftWord} el {formatLeftEventAt(leftEventAt)}
+              </Text>
+              {isCurrentUserOrganizer ? (
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
+                  <Text style={styles.primaryBtnTxt}>Revertir</Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          ) : (
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => void markAsLeft(true)}>
+              <Text style={styles.secondaryBtnTxt}>Me estoy yendo</Text>
+            </TouchableOpacity>
+          )
+        ) : isCurrentUserOrganizer ? (
+          leftEventAt ? (
+            <>
+              <Text style={styles.leftEventText}>
+                {displayName} se marcó como {leftWord} el {formatLeftEventAt(leftEventAt)}
+              </Text>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
+                <Text style={styles.primaryBtnTxt}>Revertir</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => void markAsLeft(false)}>
+              <Text style={styles.secondaryBtnTxt}>{markAsLeftLabel}</Text>
+            </TouchableOpacity>
+          )
+        ) : null}
+      </View>
     </ScrollView>
   );
 }
@@ -724,6 +835,16 @@ const styles = StyleSheet.create({
   profileStreakDotTxt: { color: '#fff', fontSize: 10, fontWeight: '700' },
   profileStreakEmpty: { color: '#6B7280', fontSize: 11, fontWeight: '600' },
   heroChipsColumn: { marginTop: 10, alignItems: 'center', gap: 16, width: '100%' },
+  leftEventChip: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+  },
+  leftEventChipText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
   orgChip: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -772,6 +893,24 @@ const styles = StyleSheet.create({
   },
   winRateLabel: { fontSize: 9, color: '#B45309', fontWeight: '600' },
   winRateValue: { fontSize: 14, color: '#B45309', fontWeight: '800' },
+  leaveActionWrap: { marginTop: 12, marginBottom: 8, gap: 8 },
+  secondaryBtn: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  secondaryBtnTxt: { color: '#374151', fontSize: 14, fontWeight: '600' },
+  primaryBtn: {
+    backgroundColor: '#3B82F6',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  primaryBtnTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  leftEventText: { color: '#6B7280', fontSize: 13, fontWeight: '600' },
   muted: { color: '#6B7280', fontSize: 15 },
   stars: { fontSize: 22, color: '#F59E0B', marginBottom: 14, letterSpacing: 2 },
   selfBlock: { marginTop: 24 },
