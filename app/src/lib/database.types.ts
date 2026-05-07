@@ -124,7 +124,7 @@ export type Match = {
   id: string;
   pairing_id: string;
   match_number: number;
-  match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant';
+  match_type: 'draft' | 'revenge' | 'final' | 'two_headed_giant' | 'tiebreak';
   winner_participant_id: string | null;
   life_tracker_user_id: string | null;
   ended_by_surrender: boolean;
