@@ -19,6 +19,7 @@ export type MainStackParamList = {
   EventsList: { workspaceId: string };
   CreateEvent: { workspaceId: string };
   EventDetail: { eventId: string };
+  ProDeC: { eventId: string };
   EditEvent: { eventId: string };
   EventCheckIn: {
     eventId: string;

@@ -22,6 +22,7 @@ import EditVenueScreen from '../screens/EditVenueScreen';
 import EventsListScreen from '../screens/EventsListScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
+import ProDeCScreen from '../screens/ProDeCScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import EventCheckInScreen from '../screens/EventCheckInScreen';
 import PlayerProfileInEventScreen from '../screens/PlayerProfileInEventScreen';
@@ -136,6 +137,7 @@ export default function MainNavigator() {
         <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: 'Eventos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CreateEvent" component={CreateEventScreen} options={{ title: 'Nuevo evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ProDeC" component={ProDeCScreen} options={{ title: 'ProDeC', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Mi mazo', headerBackTitle: 'Atrás' }} />
         <Stack.Screen

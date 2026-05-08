@@ -12,12 +12,15 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
+import { MTG_COLOR_HEX } from '../components/ColorFlag';
+import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
@@ -112,6 +115,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
+  const [prodeCVoteCount, setProdeCVoteCount] = useState<number | null>(null);
+  const [prodeCCompact, setProdeCCompact] = useState(false);
   const [cubeName, setCubeName] = useState<string | null>(null);
   const [venueName, setVenueName] = useState<string | null>(null);
   const [championName, setChampionName] = useState<string | null>(null);
@@ -127,6 +132,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [, setDraftDurationTick] = useState(0);
 
   const load = useCallback(async () => {
+    setProdeCVoteCount(null);
     const { data, error } = await supabase
       .from('draft_events')
       .select(
@@ -289,6 +295,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     } else {
       setParticipantColors({});
     }
+
+    const predCountRes = await supabase
+      .from('event_color_predictions')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('event_id', e.id);
+    if (predCountRes.error) {
+      if (__DEV__) console.warn('[EventDetail] prodec count', predCountRes.error);
+      setProdeCVoteCount(0);
+    } else {
+      setProdeCVoteCount(predCountRes.count ?? 0);
+    }
   }, [eventId]);
 
   useFocusEffect(
@@ -307,6 +324,15 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         cancelled = true;
       };
     }, [load])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!myUserId || !eventId) return;
+      void AsyncStorage.getItem(`prodec_detail_compact_${myUserId}_${eventId}`).then((v) =>
+        setProdeCCompact(v === '1')
+      );
+    }, [myUserId, eventId])
   );
 
   useEffect(() => {
@@ -597,6 +623,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const championWinRate =
     formatWinRate(championOfficialWins, championOfficialPlayed);
 
+  const showProDeCEntry =
+    isWorkspaceMember &&
+    participantCount > 0 &&
+    prodeCVoteCount != null &&
+    prodeCVoteCount >= participantCount;
+
   const goEnfrentamientos = () => {
     if (myParticipantId && !hasDeclaredColors && playingOrDone) {
       navigation.navigate('EventCheckIn', { eventId: event.id, returnTo: 'EventDetail' });
@@ -875,6 +907,26 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         })}
       </View>
 
+      {showProDeCEntry ? (
+        <View style={styles.block}>
+          <TouchableOpacity
+            style={[styles.prodecPill, prodeCCompact && styles.prodecPillCompact]}
+            onPress={() => navigation.navigate('ProDeC', { eventId: event.id })}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.prodecStripePack, prodeCCompact && styles.prodecStripePackCompact]}>
+              {(['W', 'U', 'B', 'R', 'G'] as const).map((c) => (
+                <View key={c} style={[styles.prodecStripe, { backgroundColor: MTG_COLOR_HEX[c] }]} />
+              ))}
+            </View>
+            <View style={styles.prodecTitleRow}>
+              <Text style={[styles.prodecPillLabel, prodeCCompact && styles.prodecPillLabelCompact]}>ProDe</Text>
+              <ProDeCManaC size={prodeCCompact ? 26 : 34} />
+            </View>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <View style={[styles.block, styles.blockLast]}>
         <TouchableOpacity
           style={styles.placeholderBtn}
@@ -946,6 +998,32 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   dangerTxt: { color: '#DC2626', fontSize: 15, fontWeight: '600' },
+  prodecPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  prodecPillCompact: { paddingVertical: 8, paddingHorizontal: 12, gap: 8 },
+  prodecStripePack: {
+    flexDirection: 'row',
+    height: 28,
+    borderRadius: 6,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+  },
+  prodecStripePackCompact: { height: 20 },
+  prodecStripe: { flex: 1, minWidth: 4 },
+  prodecTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  prodecPillLabel: { fontSize: 18, fontWeight: '800', color: '#111' },
+  prodecPillLabelCompact: { fontSize: 14 },
   participantRow: {
     flexDirection: 'row',
     alignItems: 'center',
