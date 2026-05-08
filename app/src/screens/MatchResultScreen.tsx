@@ -26,6 +26,10 @@ type PairingRow = {
   participant_b_id: string;
   official_winner_participant_id: string | null;
   tiebreak_winner_participant_id: string | null;
+  super_cup_winner_participant_id: string | null;
+  super_cup_resolved_at: string | null;
+  revenge_cup_winner_participant_id: string | null;
+  revenge_cup_resolved_at: string | null;
 };
 
 type ParticipantRow = {
@@ -65,6 +69,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [tiebreakCompletedCount, setTiebreakCompletedCount] = useState(0);
   const [tiebreakWinsA, setTiebreakWinsA] = useState(0);
   const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
+  const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
+  const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -84,7 +90,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const pRes = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, tiebreak_winner_participant_id'
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
       )
       .eq('id', m.pairing_id)
       .maybeSingle();
@@ -95,8 +101,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     }
     const p = pRes.data as PairingRow;
     setPairing(p);
+    setSuperCupWinnerName(null);
+    setRevengeCupWinnerName(null);
 
-    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes] =
+    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes, superCupWinnerRes, revengeCupWinnerRes] =
       await Promise.all([
       supabase
         .from('event_participants')
@@ -137,13 +145,41 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         .eq('pairing_id', p.id)
         .eq('status', 'completed')
         .eq('match_type', 'tiebreak'),
+      p.super_cup_winner_participant_id
+        ? supabase
+            .from('event_participants')
+            .select(
+              `
+              users!event_participants_user_id_fkey (
+                display_name
+              )
+            `
+            )
+            .eq('id', p.super_cup_winner_participant_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null } as const),
+      p.revenge_cup_winner_participant_id
+        ? supabase
+            .from('event_participants')
+            .select(
+              `
+              users!event_participants_user_id_fkey (
+                display_name
+              )
+            `
+            )
+            .eq('id', p.revenge_cup_winner_participant_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null } as const),
     ]);
     if (
       partsRes.error ||
       winsRes.error ||
       tiebreakWinsRes.error ||
       completedCountRes.error ||
-      tiebreakCompletedRes.error
+      tiebreakCompletedRes.error ||
+      superCupWinnerRes.error ||
+      revengeCupWinnerRes.error
     ) {
       Alert.alert('Error', 'No se pudo cargar el estado del resultado.');
       setLoading(false);
@@ -160,6 +196,16 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setTiebreakWinsB(
       (tiebreakWinsRes.data ?? []).filter((x) => x.winner_participant_id === p.participant_b_id).length
     );
+    const superWinnerUser = relationOne(
+      (superCupWinnerRes.data as { users?: { display_name?: string | null } | { display_name?: string | null }[] | null } | null)
+        ?.users
+    );
+    const revengeWinnerUser = relationOne(
+      (revengeCupWinnerRes.data as { users?: { display_name?: string | null } | { display_name?: string | null }[] | null } | null)
+        ?.users
+    );
+    setSuperCupWinnerName(superWinnerUser?.display_name ?? null);
+    setRevengeCupWinnerName(revengeWinnerUser?.display_name ?? null);
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
     setTiebreakCompletedCount(tiebreakCompletedRes.count ?? 0);
     setLoading(false);
@@ -218,22 +264,38 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const durSs = String(durSec % 60).padStart(2, '0');
   const showRematchBtn = !(match.match_type === 'tiebreak' && pairing.tiebreak_winner_participant_id != null);
 
-  const scoreBlockLine1 =
+  const isOfficialOpen =
+    (match.match_type === 'draft' || match.match_type === 'final') && winsA < 2 && winsB < 2;
+  const matchEndedAt = match.ended_at ? new Date(match.ended_at).getTime() : 0;
+  const superCupTriggeredHere =
+    match.match_type === 'revenge' &&
+    pairing.super_cup_resolved_at != null &&
+    Math.abs(new Date(pairing.super_cup_resolved_at).getTime() - matchEndedAt) < 5000;
+  const revengeCupTriggeredHere =
+    match.match_type === 'revenge' &&
+    pairing.revenge_cup_resolved_at != null &&
+    Math.abs(new Date(pairing.revenge_cup_resolved_at).getTime() - matchEndedAt) < 5000;
+  const scoreLine1 =
     match.match_type === 'tiebreak'
       ? `${aName}: ${tiebreakWinsA} · ${bName}: ${tiebreakWinsB}`
       : `${aName}: ${winsA} · ${bName}: ${winsB}`;
-  const scoreBlockLine2 =
-    match.match_type === 'tiebreak'
-      ? tiebreakWinsA >= 2 || tiebreakWinsB >= 2
-        ? `${tiebreakWinsA >= 2 ? aName : bName} gana el desempate`
-        : 'El desempate sigue abierto'
-      : match.match_type === 'revenge'
-        ? winsA >= 2 || winsB >= 2
-          ? `${winsA >= 2 ? aName : bName} ganó el enfrentamiento`
-          : 'El enfrentamiento sigue abierto'
-        : winsA >= 2 || winsB >= 2
-          ? `${winsA >= 2 ? aName : bName} gana el enfrentamiento`
-          : 'El enfrentamiento sigue abierto';
+  const extraLines: string[] = [];
+  if (match.match_type === 'tiebreak') {
+    if (tiebreakWinsA >= 2 || tiebreakWinsB >= 2) {
+      extraLines.push(`${tiebreakWinsA >= 2 ? aName : bName} gana el desempate`);
+    } else {
+      extraLines.push('El desempate sigue abierto');
+    }
+  } else if (match.match_type === 'revenge') {
+    if (superCupTriggeredHere) {
+      extraLines.push(`${superCupWinnerName ?? '...'} gana la Super Copa 🏆`);
+    }
+    if (revengeCupTriggeredHere) {
+      extraLines.push(`${revengeCupWinnerName ?? '...'} gana la Copa Venganza 🏆`);
+    }
+  } else if (!isOfficialOpen) {
+    extraLines.push(`${winsA >= 2 ? aName : bName} gana el enfrentamiento`);
+  }
 
   const createRematch = async () => {
     const countRes = await supabase
@@ -309,8 +371,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       </View>
 
       <View style={styles.block}>
-        <Text style={styles.meta}>{scoreBlockLine1}</Text>
-        <Text style={styles.meta}>{scoreBlockLine2}</Text>
+        <Text style={styles.meta}>{scoreLine1}</Text>
+        {extraLines.map((line, idx) => (
+          <Text key={idx} style={styles.meta}>{line}</Text>
+        ))}
       </View>
 
       <View style={styles.actions}>
