@@ -74,7 +74,7 @@ type RevengeItemView = {
   pairingId: string;
   matchNumber: number;
   revengeOrder: number;
-  status: 'in_progress' | 'completed' | 'aborted';
+  status: 'in_progress' | 'completed';
   aName: string;
   bName: string;
   aUserId: string;
@@ -91,6 +91,8 @@ type RevengeGroupView = {
   pairingId: string;
   aName: string;
   bName: string;
+  aUserId: string;
+  bUserId: string;
   winsA: number;
   winsB: number;
   items: RevengeItemView[];
@@ -108,6 +110,7 @@ function shortName(name: string): string {
 export default function PairingsListScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
   const isFocused = useIsFocused();
+  const [myUserId, setMyUserId] = useState<string | null>(null);
   const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
   const [items, setItems] = useState<ItemView[]>([]);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
@@ -135,7 +138,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
   const load = useCallback(async (): Promise<boolean> => {
     const meRes = await supabase.auth.getUser();
-    const myUserId = meRes.data.user?.id ?? null;
+    const currentUserId = meRes.data.user?.id ?? null;
+    setMyUserId(currentUserId);
 
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
       supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
@@ -263,8 +267,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const winnerUserId = winnerParticipant?.user_id ?? null;
 
       const mine =
-        !!myUserId &&
-        (pa?.user_id === myUserId || pb?.user_id === myUserId);
+        !!currentUserId &&
+        (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
       const inProgressMatchId = inProgressMatchByPairing.get(pairing.id);
       let liveScoreA: number | null = null;
       let liveScoreB: number | null = null;
@@ -317,6 +321,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const revengeMapped: RevengeItemView[] = [];
     for (const m of safeMatches) {
       if (m.match_type !== 'revenge') continue;
+      if (m.status === 'aborted') continue;
       const pairing = pairingById.get(m.pairing_id);
       if (!pairing) continue;
       const pa = pMap.get(pairing.participant_a_id);
@@ -327,7 +332,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const bName = ub?.display_name || ub?.username || 'Jugador B';
       const aUserId = pa?.user_id ?? '';
       const bUserId = pb?.user_id ?? '';
-      if (m.status !== 'in_progress' && m.status !== 'completed' && m.status !== 'aborted') {
+      if (m.status !== 'in_progress' && m.status !== 'completed') {
         continue;
       }
       const st = m.status;
@@ -336,7 +341,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const wu = relationOne(winnerParticipant?.users);
       const winnerName = wu?.display_name || wu?.username || null;
       const mine =
-        !!myUserId && (pa?.user_id === myUserId || pb?.user_id === myUserId);
+        !!currentUserId && (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
       let liveScoreA: number | null = null;
       let liveScoreB: number | null = null;
       if (m.status === 'in_progress') {
@@ -377,8 +382,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setRevengeItems(revengeMapped);
 
     let needsCheckIn = false;
-    if (eventStatus === 'playing' && myUserId) {
-      const myP = participants.find((p) => p.user_id === myUserId);
+    if (eventStatus === 'playing' && currentUserId) {
+      const myP = participants.find((p) => p.user_id === currentUserId);
       if (myP?.id) {
         const cr = await supabase
           .from('participant_colors')
@@ -446,29 +451,44 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     await load();
     setRefreshing(false);
   }, [load]);
+  const liveRevengeItems = revengeItems
+    .filter((item) => item.status === 'in_progress')
+    .sort((x, y) => {
+      if (x.mine && !y.mine) return -1;
+      if (!x.mine && y.mine) return 1;
+      return 0;
+    });
   const revengeGroups: RevengeGroupView[] = [];
   const groupByPairing = new Map<string, RevengeGroupView>();
   for (const item of revengeItems) {
+    if (item.status !== 'completed') continue;
     const existing = groupByPairing.get(item.pairingId);
     if (existing) {
       existing.items.push(item);
-      if (item.status === 'completed') {
-        if (item.winnerName === item.aName) existing.winsA += 1;
-        if (item.winnerName === item.bName) existing.winsB += 1;
-      }
+      if (item.winnerName === item.aName) existing.winsA += 1;
+      if (item.winnerName === item.bName) existing.winsB += 1;
       continue;
     }
     const next: RevengeGroupView = {
       pairingId: item.pairingId,
       aName: item.aName,
       bName: item.bName,
-      winsA: item.status === 'completed' && item.winnerName === item.aName ? 1 : 0,
-      winsB: item.status === 'completed' && item.winnerName === item.bName ? 1 : 0,
+      aUserId: item.aUserId,
+      bUserId: item.bUserId,
+      winsA: item.winnerName === item.aName ? 1 : 0,
+      winsB: item.winnerName === item.bName ? 1 : 0,
       items: [item],
     };
     groupByPairing.set(item.pairingId, next);
     revengeGroups.push(next);
   }
+  revengeGroups.sort((x, y) => {
+    const xMine = !!myUserId && (x.aUserId === myUserId || x.bUserId === myUserId);
+    const yMine = !!myUserId && (y.aUserId === myUserId || y.bUserId === myUserId);
+    if (xMine && !yMine) return -1;
+    if (!xMine && yMine) return 1;
+    return 0;
+  });
 
   if (loading) {
     return (
@@ -580,14 +600,73 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         <FlatList
           data={revengeGroups}
           keyExtractor={(it) => it.pairingId}
-          contentContainerStyle={revengeGroups.length === 0 ? styles.emptyWrap : styles.listWrap}
-          ListEmptyComponent={<Text style={styles.empty}>Todavía no hay venganzas.</Text>}
+          contentContainerStyle={
+            revengeGroups.length === 0 && liveRevengeItems.length === 0 ? styles.emptyWrap : styles.listWrap
+          }
+          ListEmptyComponent={
+            liveRevengeItems.length === 0 ? <Text style={styles.empty}>Todavía no hay venganzas.</Text> : null
+          }
+          ListHeaderComponent={
+            liveRevengeItems.length > 0 ? (
+              <>
+                {liveRevengeItems.map((item) => (
+                  <TouchableOpacity
+                    key={item.matchId}
+                    style={styles.card}
+                    onPress={() =>
+                      navigation.navigate('PairingDetail', { pairingId: item.pairingId, fromTab: 'revenge' })
+                    }
+                  >
+                    <View style={styles.compactRow}>
+                      <View style={styles.inlinePlayer}>
+                        <PlayerAvatar
+                          userId={item.aUserId}
+                          participantId={item.participantAId}
+                          size="small"
+                          withColorBorder
+                          borderWidth={3}
+                        />
+                        <Text style={styles.name}>{item.aName}</Text>
+                      </View>
+                      <View style={styles.scoreWrap}>
+                        <Text style={styles.scoreNum}>
+                          {item.liveScoreA ?? 20} <Text style={styles.vs}>vs</Text> {item.liveScoreB ?? 20}
+                        </Text>
+                      </View>
+                      <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
+                        <Text style={styles.nameRight}>{item.bName}</Text>
+                        <PlayerAvatar
+                          userId={item.bUserId}
+                          participantId={item.participantBId}
+                          size="small"
+                          withColorBorder
+                          borderWidth={3}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.footer}>
+                      <Text style={styles.liveCentered}>Venganza N°{item.revengeOrder} · ● EN VIVO</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </>
+            ) : null
+          }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item: group }) => (
             <View style={styles.groupWrap}>
-              <Text style={styles.groupHeader}>
-                {shortName(group.aName)} {group.winsA} - {group.winsB} {shortName(group.bName)}
-              </Text>
+              {(() => {
+                const currentUserIsB = !!myUserId && group.bUserId === myUserId;
+                const leftName = currentUserIsB ? group.bName : group.aName;
+                const leftWins = currentUserIsB ? group.winsB : group.winsA;
+                const rightName = currentUserIsB ? group.aName : group.bName;
+                const rightWins = currentUserIsB ? group.winsA : group.winsB;
+                return (
+                  <Text style={styles.groupHeader}>
+                    {shortName(leftName)} {leftWins} - {rightWins} {shortName(rightName)}
+                  </Text>
+                );
+              })()}
               {group.items.map((item) => (
                 <TouchableOpacity
                   key={item.matchId}
@@ -608,13 +687,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       <Text style={styles.name}>{item.aName}</Text>
                     </View>
                     <View style={styles.scoreWrap}>
-                      {item.status === 'in_progress' ? (
-                        <Text style={styles.scoreNum}>
-                          {item.liveScoreA ?? 20} <Text style={styles.vs}>vs</Text> {item.liveScoreB ?? 20}
-                        </Text>
-                      ) : (
-                        <Text style={styles.scoreNumIdle}>vs</Text>
-                      )}
+                      <Text style={styles.scoreNumIdle}>vs</Text>
                     </View>
                     <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
                       <Text style={styles.nameRight}>{item.bName}</Text>
@@ -628,11 +701,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     </View>
                   </View>
                   <View style={styles.footer}>
-                    {item.status === 'in_progress' ? (
-                      <Text style={styles.liveCentered}>Venganza N°{item.revengeOrder} · ● EN VIVO</Text>
-                    ) : item.status === 'aborted' ? (
-                      <Text style={styles.status}>Venganza N°{item.revengeOrder} · Abortada</Text>
-                    ) : item.winnerName ? (
+                    {item.winnerName ? (
                       <Text style={styles.winnerTxt}>Venganza N°{item.revengeOrder} - Ganó {item.winnerName}</Text>
                     ) : (
                       <Text style={styles.status}>Venganza N°{item.revengeOrder} · Completada</Text>
