@@ -17,14 +17,16 @@ import type { MtgColor } from '../lib/database.types';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventCheckIn'>;
 
-const COLOR_OPTIONS: { key: MtgColor; bg: string; text: string }[] = [
+/** Mazo: solo W/U/B/R/G (sin incoloro en la app). */
+const DECK_COLOR_OPTIONS: { key: MtgColor; bg: string; text: string }[] = [
   { key: 'W', bg: '#F8FAFC', text: '#111827' },
   { key: 'U', bg: '#DBEAFE', text: '#1E3A8A' },
   { key: 'B', bg: '#1F2937', text: '#F9FAFB' },
   { key: 'R', bg: '#FEE2E2', text: '#991B1B' },
   { key: 'G', bg: '#DCFCE7', text: '#166534' },
-  { key: 'C', bg: '#E5E7EB', text: '#374151' },
 ];
+
+const PRODEC_COLOR_OPTIONS = DECK_COLOR_OPTIONS;
 
 type ParticipantRow = { id: string; self_evaluation: number | null };
 
@@ -65,11 +67,13 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
   const [baselineColors, setBaselineColors] = useState<MtgColor[] | null>(null);
   const [selfEval, setSelfEval] = useState<number | null>(null);
   const [isFirstDeclaration, setIsFirstDeclaration] = useState(true);
-  /** Solo primera declaración: paso 1 = colores, paso 2 = valoración. */
-  const [wizardStep, setWizardStep] = useState<1 | 2>(1);
+  /** Solo primera declaración: 1 = colores, 2 = ProDeC, 3 = valoración. */
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [predictedColor, setPredictedColor] = useState<MtgColor | null>(null);
 
   useEffect(() => {
     setWizardStep(1);
+    setPredictedColor(null);
   }, [eventId, user?.id]);
 
   useEffect(() => {
@@ -100,11 +104,32 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
           setSelectedColors([]);
           setBaselineColors([]);
           setIsFirstDeclaration(true);
+          const predRes = await supabase
+            .from('event_color_predictions')
+            .select('predicted_color')
+            .eq('event_id', eventId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (!predRes.error && predRes.data?.predicted_color) {
+            setPredictedColor(predRes.data.predicted_color as MtgColor);
+          }
         } else {
-          const loaded = (colorsRes.data ?? []).map((c) => c.color as MtgColor);
+          const loaded = (colorsRes.data ?? []).map((c) => c.color as MtgColor).filter((c) => c !== 'C');
           setSelectedColors(loaded);
           setBaselineColors([...loaded]);
-          setIsFirstDeclaration(loaded.length === 0);
+          const first = loaded.length === 0;
+          setIsFirstDeclaration(first);
+          if (first) {
+            const predRes = await supabase
+              .from('event_color_predictions')
+              .select('predicted_color')
+              .eq('event_id', eventId)
+              .eq('user_id', user.id)
+              .maybeSingle();
+            if (!predRes.error && predRes.data?.predicted_color) {
+              setPredictedColor(predRes.data.predicted_color as MtgColor);
+            }
+          }
         }
       }
       setLoading(false);
@@ -116,7 +141,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
   };
 
   const sortedColors = useMemo(
-    () => COLOR_OPTIONS.map((o) => o.key).filter((k) => selectedColors.includes(k)),
+    () => DECK_COLOR_OPTIONS.map((o) => o.key).filter((k) => selectedColors.includes(k)),
     [selectedColors]
   );
 
@@ -179,6 +204,23 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       }
     }
 
+    if (predictedColor && user?.id) {
+      const predUpsert = await supabase.from('event_color_predictions').upsert(
+        {
+          event_id: eventId,
+          user_id: user.id,
+          predicted_color: predictedColor,
+          voted_at: new Date().toISOString(),
+        },
+        { onConflict: 'event_id,user_id' }
+      );
+      if (predUpsert.error) {
+        setSaving(false);
+        Alert.alert('Error', predUpsert.error.message ?? 'No se pudo guardar tu predicción ProDeC.');
+        return;
+      }
+    }
+
     setSaving(false);
     setBaselineColors([...sortedColors]);
     navigateAfterSave();
@@ -224,6 +266,14 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     setWizardStep(2);
   };
 
+  const onProDecContinue = () => {
+    if (predictedColor == null) {
+      Alert.alert('Revisá los datos', 'Elegí un color para continuar.');
+      return;
+    }
+    setWizardStep(3);
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -240,7 +290,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         <Text style={styles.title}>¿Qué colores sos?</Text>
         <Text style={styles.label}>Colores jugados</Text>
         <View style={styles.colorsWrap}>
-          {COLOR_OPTIONS.map((opt) => {
+          {DECK_COLOR_OPTIONS.map((opt) => {
             const active = selectedColors.includes(opt.key);
             return (
               <TouchableOpacity
@@ -261,6 +311,32 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
   }
 
   if (showWizard && wizardStep === 2) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+        <Text style={styles.title}>¿Cuál pensás que fue el color más pickeado?</Text>
+        <Text style={styles.label}>Tu predicción</Text>
+        <View style={styles.colorsWrap}>
+          {PRODEC_COLOR_OPTIONS.map((opt) => {
+            const active = predictedColor === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.colorPill, { backgroundColor: opt.bg }, active && styles.colorPillActive]}
+                onPress={() => setPredictedColor(opt.key)}
+              >
+                <Text style={[styles.colorTxt, { color: opt.text }]}>{opt.key}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TouchableOpacity style={styles.saveBtn} onPress={onProDecContinue}>
+          <Text style={styles.saveBtnTxt}>Continuar</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
+
+  if (showWizard && wizardStep === 3) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>¿Qué tan sólido ves tu mazo hoy?</Text>
@@ -298,7 +374,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       <Text style={styles.title}>Editar colores</Text>
       <Text style={styles.label}>Colores jugados</Text>
       <View style={styles.colorsWrap}>
-        {COLOR_OPTIONS.map((opt) => {
+        {DECK_COLOR_OPTIONS.map((opt) => {
           const active = selectedColors.includes(opt.key);
           return (
             <TouchableOpacity
