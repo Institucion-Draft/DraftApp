@@ -315,13 +315,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const isParticipant = !!myUserId && (a?.user_id === myUserId || b?.user_id === myUserId);
   const inProgressMatch = matches.find((m) => m.status === 'in_progress') ?? null;
   const officialMs = matches
-    .filter((m) => m.match_type === 'draft' || m.match_type === 'final')
+    .filter((m) => (m.match_type === 'draft' || m.match_type === 'final') && m.status !== 'aborted')
     .sort((a, b) => a.match_number - b.match_number);
   const revengeMs = matches
-    .filter((m) => m.match_type === 'revenge')
+    .filter((m) => m.match_type === 'revenge' && m.status !== 'aborted')
     .sort((a, b) => a.match_number - b.match_number);
   const tiebreakMs = matches
-    .filter((m) => m.match_type === 'tiebreak')
+    .filter((m) => m.match_type === 'tiebreak' && m.status !== 'aborted')
     .sort((a, b) => a.match_number - b.match_number);
   const tiebreakWinsA = tiebreakMs.filter(
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
@@ -349,6 +349,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const revengeWinsB = revengeCompleted.filter(
     (m) => m.winner_participant_id === pairing.participant_b_id
   ).length;
+  const startButtonLabel = inProgressMatch
+    ? inProgressMatch.match_type === 'tiebreak'
+      ? 'Retomar desempate en curso'
+      : inProgressMatch.match_type === 'revenge'
+      ? 'Retomar venganza en curso'
+      : 'Retomar partida en curso'
+    : isTiebreakPairing && pairing.tiebreak_winner_participant_id == null
+    ? 'Iniciar desempate'
+    : pairing.official_winner_participant_id != null
+    ? 'Iniciar venganza'
+    : 'Iniciar partida';
+  const showResumeStyle = startButtonLabel.startsWith('Retomar');
 
   const startMatch = async () => {
     if (!pairing) return;
@@ -463,7 +475,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Partidas</Text>
-        {matches.length === 0 && !isTiebreakPairing ? (
+        {officialMs.length === 0 && revengeMs.length === 0 && tiebreakMs.length === 0 && !isTiebreakPairing ? (
           <Text style={styles.muted}>Todavía no hay partidas.</Text>
         ) : (
           <>
@@ -480,7 +492,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                   <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                     <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
                       #{displayNum} ·{' '}
-                      {m.status === 'in_progress' ? '● EN VIVO' : m.status === 'aborted' ? 'Abortado' : 'Completado'}
+                      {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                     </Text>
                     {showLive ? (
                       <Text style={styles.matchLiveScore}>
@@ -503,10 +515,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                     {m.status === 'completed' && !m.winner_participant_id ? (
                       <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
                     ) : null}
-                    {m.status === 'aborted' ? (
-                      <Text style={styles.matchWinner}>Partida abortada.</Text>
-                    ) : null}
-                    {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
+                    {m.status === 'completed' && m.ended_at ? (
                       <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
                     ) : null}
                     {m.status === 'completed' && !m.ended_at ? (
@@ -535,11 +544,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                         <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
                           #{displayNum} ·{' '}
-                          {m.status === 'in_progress'
-                            ? '● EN VIVO'
-                            : m.status === 'aborted'
-                            ? 'Abortado'
-                            : 'Completado'}
+                          {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                         </Text>
                         {showLive ? (
                           <Text style={styles.matchLiveScore}>
@@ -562,10 +567,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         {m.status === 'completed' && !m.winner_participant_id ? (
                           <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
                         ) : null}
-                        {m.status === 'aborted' ? (
-                          <Text style={styles.matchWinner}>Partida abortada.</Text>
-                        ) : null}
-                        {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
+                        {m.status === 'completed' && m.ended_at ? (
                           <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
                         ) : null}
                         {m.status === 'completed' && !m.ended_at ? (
@@ -600,11 +602,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         {m.status === 'completed' && winnerName
                           ? `Venganza N°${revengeNum} - Ganó ${winnerName}`
                           : `Venganza N°${revengeNum} · ${
-                              m.status === 'in_progress'
-                                ? '● EN VIVO'
-                                : m.status === 'aborted'
-                                ? 'Abortado'
-                                : 'Completado'
+                              m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
                             }`}
                       </Text>
                       {showLive ? (
@@ -626,10 +624,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                           ) : null}
                         </View>
                       ) : null}
-                      {m.status === 'aborted' ? (
-                        <Text style={styles.matchWinner}>Partida abortada.</Text>
-                      ) : null}
-                      {(m.status === 'completed' || m.status === 'aborted') && m.ended_at ? (
+                      {m.status === 'completed' && m.ended_at ? (
                         <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
                       ) : null}
                       {m.status === 'completed' && !m.ended_at ? (
@@ -647,12 +642,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       {isParticipant || isOrganizer ? (
         <View style={styles.block}>
           <TouchableOpacity
-            style={[styles.primaryBtn, inProgressMatch ? styles.resumeBtn : null]}
+            style={[styles.primaryBtn, showResumeStyle ? styles.resumeBtn : null]}
             onPress={() => void startMatch()}
           >
-            <Text style={[styles.primaryBtnTxt, inProgressMatch ? styles.resumeBtnTxt : null]}>
-              {inProgressMatch ? 'Retomar partida en curso' : 'Iniciar partida'}
-            </Text>
+            <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>{startButtonLabel}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
