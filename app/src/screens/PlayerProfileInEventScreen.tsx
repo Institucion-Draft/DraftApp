@@ -222,7 +222,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       const wsEventsRes = await supabase
         .from('draft_events')
         .select('id')
-        .eq('workspace_id', wsId);
+        .eq('workspace_id', wsId)
+        .is('deleted_at', null)
+        .is('cancelled_at', null);
 
       const workspaceEventIds = (wsEventsRes.data ?? []).map((row) => row.id as string);
 

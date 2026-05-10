@@ -47,6 +47,9 @@ type EventRow = {
   champion_user_id: string | null;
   event_ended_at: string | null;
   final_pending: boolean | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  deleted_at: string | null;
 };
 
 type ParticipantView = {
@@ -136,7 +139,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, event_ended_at, final_pending'
+        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -365,6 +368,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       return;
     }
     await load();
+  };
+
+  const softDeleteEvent = async () => {
+    if (!event) return;
+    const { error } = await supabase.rpc('soft_delete_event', { p_event_id: event.id });
+    if (error) {
+      Alert.alert('Error', error.message ?? 'No se pudo eliminar el evento.');
+      return;
+    }
+    navigation.goBack();
   };
 
   const finishDraftAndGeneratePairings = async () => {
@@ -637,8 +650,26 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     navigation.navigate('PairingsList', { eventId: event.id });
   };
 
+  const cancelledAtLabel =
+    event.cancelled_at &&
+    new Date(event.cancelled_at).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      {event.status === 'cancelled' ? (
+        <View style={styles.cancelledBanner}>
+          <Text style={styles.cancelledBannerTitle}>Evento cancelado</Text>
+          {cancelledAtLabel ? (
+            <Text style={styles.cancelledBannerMeta}>Cancelado el {cancelledAtLabel}</Text>
+          ) : null}
+        </View>
+      ) : null}
       <View style={styles.header}>
         {eventAvatar ? (
           <Image source={{ uri: eventAvatar }} style={styles.avatar} />
@@ -747,70 +778,108 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {isOrganizer ? (
         <View style={styles.block}>
-          <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
-            <Text style={styles.primaryBtnTxt}>Editar evento</Text>
-          </TouchableOpacity>
-          {event.status === 'scheduled' && !event.draft_started_at ? (
+          {event.status === 'cancelled' ? (
             <TouchableOpacity
-              style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
-              disabled={startDraftDisabled}
-              onPress={() =>
-                Alert.alert('Iniciar draft', '¿Iniciar el draft? Se cierran las inscripciones.', [
-                  { text: 'Volver', style: 'cancel' },
-                  {
-                    text: 'Iniciar',
-                    onPress: () => void patchEvent({ draft_started_at: new Date().toISOString(), status: 'drafting' }),
-                  },
-                ])
-              }
-            >
-              <Text style={styles.secondaryBtnTxt}>Arrancar a draftear</Text>
-            </TouchableOpacity>
-          ) : null}
-          {event.status === 'scheduled' && startDraftDisabled ? (
-            <Text style={styles.disabledHint}>
-              {startDraftDisabledHint}
-            </Text>
-          ) : null}
-          {event.draft_started_at && !event.draft_ended_at ? (
-            <TouchableOpacity
-              style={styles.secondaryBtn}
+              style={styles.dangerBtn}
               onPress={() =>
                 Alert.alert(
-                  'Fin del draft',
-                  '¿Finalizar draft? Queda habilitado Enfrentamientos.',
+                  'Eliminar evento',
+                  '¿Seguro que querés eliminar este evento? Va a quedar oculto de los listados pero los datos se conservan.',
                   [
                     { text: 'Volver', style: 'cancel' },
-                    {
-                      text: 'Finalizar',
-                      onPress: () => void finishDraftAndGeneratePairings(),
-                    },
+                    { text: 'Eliminar', style: 'destructive', onPress: () => void softDeleteEvent() },
                   ]
                 )
               }
             >
-              <Text style={styles.secondaryBtnTxt}>Finalizar draft</Text>
+              <Text style={styles.dangerTxt}>Eliminar evento</Text>
             </TouchableOpacity>
-          ) : null}
-          {(event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id ? (
-            <TouchableOpacity
-              style={styles.secondaryBtn}
-              onPress={() => navigation.navigate('CubeRoulette', { eventId: event.id })}
-            >
-              <Text style={styles.secondaryBtnTxt}>Ruleta</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity
-            style={styles.dangerBtn}
-            onPress={() =>
-              Alert.alert('Cancelar evento', '¿Seguro que querés cancelar este evento?', [
-                { text: 'Volver', style: 'cancel' },
-                { text: 'Cancelar evento', style: 'destructive', onPress: () => void patchEvent({ status: 'cancelled' }) },
-              ])
-            }
-          >
-            <Text style={styles.dangerTxt}>Cancelar evento</Text>
-          </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
+                <Text style={styles.primaryBtnTxt}>Editar evento</Text>
+              </TouchableOpacity>
+              {event.status === 'scheduled' && !event.draft_started_at ? (
+                <TouchableOpacity
+                  style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
+                  disabled={startDraftDisabled}
+                  onPress={() =>
+                    Alert.alert('Iniciar draft', '¿Iniciar el draft? Se cierran las inscripciones.', [
+                      { text: 'Volver', style: 'cancel' },
+                      {
+                        text: 'Iniciar',
+                        onPress: () => void patchEvent({ draft_started_at: new Date().toISOString(), status: 'drafting' }),
+                      },
+                    ])
+                  }
+                >
+                  <Text style={styles.secondaryBtnTxt}>Arrancar a draftear</Text>
+                </TouchableOpacity>
+              ) : null}
+              {event.status === 'scheduled' && startDraftDisabled ? (
+                <Text style={styles.disabledHint}>
+                  {startDraftDisabledHint}
+                </Text>
+              ) : null}
+              {event.draft_started_at && !event.draft_ended_at ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() =>
+                    Alert.alert(
+                      'Fin del draft',
+                      '¿Finalizar draft? Queda habilitado Enfrentamientos.',
+                      [
+                        { text: 'Volver', style: 'cancel' },
+                        {
+                          text: 'Finalizar',
+                          onPress: () => void finishDraftAndGeneratePairings(),
+                        },
+                      ]
+                    )
+                  }
+                >
+                  <Text style={styles.secondaryBtnTxt}>Finalizar draft</Text>
+                </TouchableOpacity>
+              ) : null}
+              {(event.status === 'scheduled' || event.status === 'drafting') && !event.cube_id ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => navigation.navigate('CubeRoulette', { eventId: event.id })}
+                >
+                  <Text style={styles.secondaryBtnTxt}>Ruleta</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={styles.dangerBtn}
+                onPress={() =>
+                  Alert.alert('Cancelar evento', '¿Seguro que querés cancelar este evento?', [
+                    { text: 'Volver', style: 'cancel' },
+                    {
+                      text: 'Cancelar evento',
+                      style: 'destructive',
+                      onPress: () => {
+                        void (async () => {
+                          const me = await supabase.auth.getUser();
+                          const uid = me.data.user?.id;
+                          if (!uid) {
+                            Alert.alert('Error', 'Tenés que iniciar sesión para cancelar el evento.');
+                            return;
+                          }
+                          await patchEvent({
+                            status: 'cancelled',
+                            cancelled_at: new Date().toISOString(),
+                            cancelled_by: uid,
+                          });
+                        })();
+                      },
+                    },
+                  ])
+                }
+              >
+                <Text style={styles.dangerTxt}>Cancelar evento</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ) : null}
 
@@ -945,6 +1014,16 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   muted: { color: '#666', fontSize: 14 },
   scroll: { paddingBottom: 30 },
+  cancelledBanner: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    marginHorizontal: 24,
+    marginTop: 8,
+  },
+  cancelledBannerTitle: { color: '#991B1B', fontWeight: '700', fontSize: 14, textAlign: 'center' },
+  cancelledBannerMeta: { color: '#991B1B', fontWeight: '600', fontSize: 12, textAlign: 'center', marginTop: 6 },
   header: { alignItems: 'center', padding: 24, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
   avatar: { width: 84, height: 84, borderRadius: 16, backgroundColor: '#f3f4f6', marginBottom: 10 },
   avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E0E7FF' },

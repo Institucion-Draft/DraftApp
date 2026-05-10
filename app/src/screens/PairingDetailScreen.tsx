@@ -117,6 +117,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   /** Vidas actuales del match in_progress (si hay). */
   const [inProgressLives, setInProgressLives] = useState<{ a: number; b: number } | null>(null);
   const [isTiebreakPairing, setIsTiebreakPairing] = useState(false);
+  const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -130,6 +131,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (pErr || !pData) {
       Alert.alert('Error', 'No se pudo cargar el enfrentamiento.');
       setPairing(null);
+      setDraftEventStatus(null);
       return;
     }
     const p = pData as PairingInfo;
@@ -205,6 +207,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       final_pending?: boolean | null;
       champion_user_id?: string | null;
     } | null;
+    setDraftEventStatus(ev?.status ?? null);
     let tiebreakHere = false;
     if (
       ev?.status === 'playing' &&
@@ -349,6 +352,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const revengeWinsB = revengeCompleted.filter(
     (m) => m.winner_participant_id === pairing.participant_b_id
   ).length;
+  const eventIsCancelled = draftEventStatus === 'cancelled';
+
   const startButtonLabel = inProgressMatch
     ? inProgressMatch.match_type === 'tiebreak'
       ? 'Retomar desempate en curso'
@@ -364,6 +369,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   const startMatch = async () => {
     if (!pairing) return;
+    if (eventIsCancelled) {
+      Alert.alert('Evento cancelado', 'No se pueden iniciar partidas en un evento cancelado.');
+      return;
+    }
     const details = await findConcurrentInProgressDetailsForPairParticipants({
       eventId: pairing.event_id,
       excludePairingId: pairing.id,
@@ -642,7 +651,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       {isParticipant || isOrganizer ? (
         <View style={styles.block}>
           <TouchableOpacity
-            style={[styles.primaryBtn, showResumeStyle ? styles.resumeBtn : null]}
+            style={[
+              styles.primaryBtn,
+              showResumeStyle ? styles.resumeBtn : null,
+              eventIsCancelled ? styles.primaryBtnDisabled : null,
+            ]}
+            disabled={eventIsCancelled}
             onPress={() => void startMatch()}
           >
             <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>{startButtonLabel}</Text>
@@ -698,6 +712,7 @@ const styles = StyleSheet.create({
   matchDuration: { color: '#4B5563', fontSize: 12, marginTop: 4, fontWeight: '500' },
   matchTime: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 12 },
+  primaryBtnDisabled: { opacity: 0.45 },
   primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
   resumeBtn: { backgroundColor: '#FACC15' },
   resumeBtnTxt: { color: '#111827' },
