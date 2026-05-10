@@ -358,7 +358,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     (m: MatchRow) => {
       if (m.status !== 'in_progress') return null;
       if (!myUserId || !a || !b) return null;
-      if (a.user_id !== myUserId && b.user_id !== myUserId) return null;
+      const isParticipantHere = a.user_id === myUserId || b.user_id === myUserId;
+      if (!isParticipantHere && !isOrganizer) return null;
 
       const isAbortRequestActive = Boolean(
         m.abort_requested_by &&
@@ -370,6 +371,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       const otherRequested = isAbortRequestActive && m.abort_requested_by !== myUserId;
 
       const onTrashPress = () => {
+        if (isOrganizer) {
+          Alert.alert(
+            'Abortar partida',
+            'Vas a abortar la partida como organizer. Va a desaparecer como si nunca hubiera existido.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Sí, abortar', onPress: () => void confirmAbortMatch(m) },
+            ]
+          );
+          return;
+        }
         if (iRequested) return;
         if (otherRequested) {
           Alert.alert(
@@ -397,7 +409,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
       return (
         <View style={styles.matchAbortActions}>
-          <TouchableOpacity style={styles.abortTrashBtn} onPress={onTrashPress} disabled={iRequested}>
+          <TouchableOpacity
+            style={styles.abortTrashBtn}
+            onPress={onTrashPress}
+            disabled={!isOrganizer && iRequested}
+          >
             <Text style={styles.abortTrashEmoji}>🗑️</Text>
           </TouchableOpacity>
           {isAbortRequestActive ? (
@@ -408,7 +424,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         </View>
       );
     },
-    [a, b, myUserId, nowTs, requestAbortMatch, confirmAbortMatch]
+    [a, b, myUserId, nowTs, isOrganizer, requestAbortMatch, confirmAbortMatch]
   );
 
   useLayoutEffect(() => {
