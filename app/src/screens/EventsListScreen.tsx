@@ -78,6 +78,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
         .from('draft_events')
         .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id')
         .eq('workspace_id', workspaceId)
+        .is('deleted_at', null)
         .order('scheduled_for', { ascending: false }),
       supabase.from('cubes').select('id, name').eq('workspace_id', workspaceId),
       supabase.from('venues').select('id, name').eq('workspace_id', workspaceId),

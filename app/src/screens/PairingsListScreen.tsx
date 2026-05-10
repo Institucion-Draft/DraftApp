@@ -58,6 +58,7 @@ type ItemView = PairingRow & {
   liveScoreB: number | null;
   winsA: number;
   winsB: number;
+  inProgressMatchStartedAt: string | null;
 };
 
 type DbMatchRow = {
@@ -67,6 +68,7 @@ type DbMatchRow = {
   winner_participant_id: string | null;
   match_type: string | null;
   match_number: number | null;
+  started_at: string | null;
 };
 
 type RevengeItemView = {
@@ -85,6 +87,7 @@ type RevengeItemView = {
   liveScoreA: number | null;
   liveScoreB: number | null;
   mine: boolean;
+  inProgressMatchStartedAt: string | null;
 };
 
 type RevengeGroupView = {
@@ -105,6 +108,19 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 
 function shortName(name: string): string {
   return name.trim().slice(0, 3);
+}
+
+function LiveMatchDuration({ startedAt }: { startedAt: string | null }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!startedAt) return;
+    const interval = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  if (!startedAt) return null;
+  const elapsed = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  const mm = Math.floor(elapsed / 60);
+  return <Text style={styles.liveDuration}>{`${mm}'`}</Text>;
 }
 
 export default function PairingsListScreen({ route, navigation }: Props) {
@@ -182,7 +198,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? supabase
             .from('matches')
-            .select('id, pairing_id, status, winner_participant_id, match_type, match_number')
+            .select('id, pairing_id, status, winner_participant_id, match_type, match_number, started_at')
             .in('pairing_id', pairingIds)
         : Promise.resolve({ data: [], error: null } as any)
     );
@@ -270,6 +286,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         !!currentUserId &&
         (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
       const inProgressMatchId = inProgressMatchByPairing.get(pairing.id);
+      const inProgressMatchStartedAt = inProgressMatchId
+        ? safeMatches.find((m) => m.id === inProgressMatchId)?.started_at ?? null
+        : null;
       let liveScoreA: number | null = null;
       let liveScoreB: number | null = null;
       if (inProgressMatchId) {
@@ -301,6 +320,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         liveScoreB,
         winsA,
         winsB,
+        inProgressMatchStartedAt,
       };
     });
 
@@ -364,6 +384,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         liveScoreA,
         liveScoreB,
         mine,
+        inProgressMatchStartedAt: m.status === 'in_progress' ? m.started_at : null,
       });
     }
     revengeMapped.sort((x, y) => {
@@ -572,26 +593,34 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 </View>
               </View>
               <View style={styles.footer}>
-                {item.status === 'in_progress' ? (
-                  <Text style={styles.liveCentered}>● EN VIVO</Text>
-                ) : (
-                  <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
-                )}
-                {item.winnerName &&
-                item.winnerUserId &&
-                item.official_winner_participant_id ? (
-                  <View style={styles.winnerWrap}>
-                    <PlayerAvatar
-                      userId={item.winnerUserId}
-                      participantId={item.official_winner_participant_id}
-                      size="small"
-                      withColorBorder
-                      borderWidth={3}
-                      style={styles.winnerAvatarWrap}
-                    />
-                    <Text style={styles.winnerTxt}>Ganó: {item.winnerName}</Text>
-                  </View>
-                ) : null}
+                <View style={styles.footerLeft}>
+                  {item.inProgressMatchStartedAt ? (
+                    <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+                  ) : null}
+                </View>
+                <View style={styles.footerCenter}>
+                  {item.status === 'in_progress' ? (
+                    <Text style={styles.liveCentered}>● EN VIVO</Text>
+                  ) : (
+                    <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
+                  )}
+                  {item.winnerName &&
+                  item.winnerUserId &&
+                  item.official_winner_participant_id ? (
+                    <View style={styles.winnerWrap}>
+                      <PlayerAvatar
+                        userId={item.winnerUserId}
+                        participantId={item.official_winner_participant_id}
+                        size="small"
+                        withColorBorder
+                        borderWidth={3}
+                        style={styles.winnerAvatarWrap}
+                      />
+                      <Text style={styles.winnerTxt}>Ganó: {item.winnerName}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <View style={styles.footerRight} />
               </View>
             </TouchableOpacity>
           )}
@@ -645,7 +674,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       </View>
                     </View>
                     <View style={styles.footer}>
-                      <Text style={styles.liveCentered}>Venganza N°{item.revengeOrder} · ● EN VIVO</Text>
+                      <View style={styles.footerLeft}>
+                        {item.inProgressMatchStartedAt ? (
+                          <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+                        ) : null}
+                      </View>
+                      <View style={styles.footerCenter}>
+                        <Text style={styles.liveCentered}>
+                          Venganza N°{item.revengeOrder} · ● EN VIVO
+                        </Text>
+                      </View>
+                      <View style={styles.footerRight} />
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -769,9 +808,20 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   bo3Filled: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  footer: { marginTop: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e8e8e8', paddingTop: 6 },
+  footer: {
+    marginTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e8e8e8',
+    paddingTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  footerLeft: { flex: 1, alignItems: 'flex-start' },
+  footerCenter: { flex: 1, alignItems: 'center' },
+  footerRight: { flex: 1 },
   status: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
   liveCentered: { color: '#3B82F6', fontWeight: '800', fontSize: 12, textAlign: 'center' },
   winnerWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   winnerTxt: { color: '#166534', fontWeight: '600', fontSize: 12 },
+  liveDuration: { fontSize: 11, color: '#6B7280', marginTop: 2 },
 });
