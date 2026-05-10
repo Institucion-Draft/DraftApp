@@ -298,7 +298,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               const streak = lastFive.map((m) =>
                 participantSet.has(String(m.winner_participant_id)) ? 'V' : 'D'
               ) as Array<'V' | 'D'>;
-              setWorkspaceStreak(streak);
+              setWorkspaceStreak([...streak].reverse());
               if (__DEV__) {
                 console.log('[profile streak] streak matches used:', lastFive.length);
               }
