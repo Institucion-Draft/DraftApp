@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,8 @@ import {
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
 
+const ABORT_WINDOW_MS = 3 * 60 * 1000;
+
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingDetail'>;
 
 type PairingInfo = {
@@ -46,6 +48,8 @@ type MatchRow = {
   ended_by_surrender: boolean;
   started_at: string;
   ended_at: string | null;
+  abort_requested_by: string | null;
+  abort_requested_at: string | null;
 };
 
 type ParticipantRow = {
@@ -118,6 +122,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [inProgressLives, setInProgressLives] = useState<{ a: number; b: number } | null>(null);
   const [isTiebreakPairing, setIsTiebreakPairing] = useState(false);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -162,7 +167,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('matches')
         .select(
-          'id, match_number, match_type, status, winner_participant_id, ended_by_surrender, started_at, ended_at'
+          'id, match_number, match_type, status, winner_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
         )
         .eq('pairing_id', p.id)
         .order('match_number', { ascending: true }),
@@ -262,6 +267,33 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   }, [pairingId]);
 
+  useEffect(() => {
+    const id = setInterval(() => setNowTs(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`pairing-matches:${pairingId}:${Date.now()}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'matches',
+          filter: `pairing_id=eq.${pairingId}`,
+        },
+        () => {
+          void load();
+        }
+      )
+      .subscribe();
+    return () => {
+      void channel.unsubscribe();
+      void supabase.removeChannel(channel);
+    };
+  }, [pairingId, load]);
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -285,6 +317,99 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  const requestAbortMatch = useCallback(
+    async (m: MatchRow) => {
+      if (!myUserId) return;
+      const { error } = await supabase
+        .from('matches')
+        .update({ abort_requested_by: myUserId, abort_requested_at: new Date().toISOString() })
+        .eq('id', m.id);
+      if (error) {
+        Alert.alert('Error', error.message ?? 'No se pudo solicitar el aborto.');
+        return;
+      }
+      await load();
+    },
+    [myUserId, load]
+  );
+
+  const confirmAbortMatch = useCallback(
+    async (m: MatchRow) => {
+      const { error } = await supabase
+        .from('matches')
+        .update({
+          status: 'aborted',
+          ended_at: new Date().toISOString(),
+          abort_requested_by: null,
+          abort_requested_at: null,
+        })
+        .eq('id', m.id);
+      if (error) {
+        Alert.alert('Error', error.message ?? 'No se pudo abortar la partida.');
+        return;
+      }
+      await load();
+    },
+    [load]
+  );
+
+  const renderMatchAbortControl = useCallback(
+    (m: MatchRow) => {
+      if (m.status !== 'in_progress') return null;
+      if (!myUserId || !a || !b) return null;
+      if (a.user_id !== myUserId && b.user_id !== myUserId) return null;
+
+      const isAbortRequestActive = Boolean(
+        m.abort_requested_by &&
+          m.abort_requested_at &&
+          nowTs - new Date(m.abort_requested_at).getTime() < ABORT_WINDOW_MS
+      );
+
+      const iRequested = isAbortRequestActive && m.abort_requested_by === myUserId;
+      const otherRequested = isAbortRequestActive && m.abort_requested_by !== myUserId;
+
+      const onTrashPress = () => {
+        if (iRequested) return;
+        if (otherRequested) {
+          Alert.alert(
+            'Confirmar aborto',
+            '¿Confirmás abortar la partida? Va a desaparecer como si nunca hubiera existido.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Sí, abortar', onPress: () => void confirmAbortMatch(m) },
+            ]
+          );
+          return;
+        }
+        const otherP = myUserId === a.user_id ? b : a;
+        const ou = relationOne(otherP.users);
+        const otherName = ou?.display_name || ou?.username || 'el otro jugador';
+        Alert.alert(
+          'Solicitar aborto',
+          `¿Solicitar abortar partida? ${otherName} tiene 3 minutos para aceptar la solicitud.`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Solicitar', onPress: () => void requestAbortMatch(m) },
+          ]
+        );
+      };
+
+      return (
+        <View style={styles.matchAbortActions}>
+          <TouchableOpacity style={styles.abortTrashBtn} onPress={onTrashPress} disabled={iRequested}>
+            <Text style={styles.abortTrashEmoji}>🗑️</Text>
+          </TouchableOpacity>
+          {isAbortRequestActive ? (
+            <Text style={[styles.abortBadge, otherRequested ? styles.abortBadgeAlert : styles.abortBadgeMuted]}>
+              1/2
+            </Text>
+          ) : null}
+        </View>
+      );
+    },
+    [a, b, myUserId, nowTs, requestAbortMatch, confirmAbortMatch]
+  );
 
   useLayoutEffect(() => {
     if (!pairing?.event_id) return;
@@ -499,37 +624,40 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                   m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                 return (
                   <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
-                    <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                      #{displayNum} ·{' '}
-                      {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
-                    </Text>
-                    {showLive ? (
-                      <Text style={styles.matchLiveScore}>
-                        {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                    <View style={styles.matchRowMain}>
+                      <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                        #{displayNum} ·{' '}
+                        {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                       </Text>
-                    ) : null}
-                    {m.status === 'in_progress' ? (
-                      <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
-                    ) : null}
-                    {m.status === 'completed' && m.winner_participant_id ? (
-                      <View>
-                        <Text style={styles.matchWinner}>
-                          Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                      {showLive ? (
+                        <Text style={styles.matchLiveScore}>
+                          {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
                         </Text>
-                        {durationLabel ? (
-                          <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
-                        ) : null}
-                      </View>
-                    ) : null}
-                    {m.status === 'completed' && !m.winner_participant_id ? (
-                      <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
-                    ) : null}
-                    {m.status === 'completed' && m.ended_at ? (
-                      <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
-                    ) : null}
-                    {m.status === 'completed' && !m.ended_at ? (
-                      <Text style={styles.matchTime}>Cierre pendiente.</Text>
-                    ) : null}
+                      ) : null}
+                      {m.status === 'in_progress' ? (
+                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
+                      ) : null}
+                      {m.status === 'completed' && m.winner_participant_id ? (
+                        <View>
+                          <Text style={styles.matchWinner}>
+                            Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                          </Text>
+                          {durationLabel ? (
+                            <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                          ) : null}
+                        </View>
+                      ) : null}
+                      {m.status === 'completed' && !m.winner_participant_id ? (
+                        <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                      ) : null}
+                      {m.status === 'completed' && m.ended_at ? (
+                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+                      ) : null}
+                      {m.status === 'completed' && !m.ended_at ? (
+                        <Text style={styles.matchTime}>Cierre pendiente.</Text>
+                      ) : null}
+                    </View>
+                    {renderMatchAbortControl(m)}
                   </View>
                 );
               })
@@ -551,37 +679,40 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                     return (
                       <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
-                        <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                          #{displayNum} ·{' '}
-                          {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
-                        </Text>
-                        {showLive ? (
-                          <Text style={styles.matchLiveScore}>
-                            {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                        <View style={styles.matchRowMain}>
+                          <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                            #{displayNum} ·{' '}
+                            {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                           </Text>
-                        ) : null}
-                        {m.status === 'in_progress' ? (
-                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
-                        ) : null}
-                        {m.status === 'completed' && m.winner_participant_id ? (
-                          <View>
-                            <Text style={styles.matchWinner}>
-                              Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                          {showLive ? (
+                            <Text style={styles.matchLiveScore}>
+                              {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
                             </Text>
-                            {durationLabel ? (
-                              <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
-                            ) : null}
-                          </View>
-                        ) : null}
-                        {m.status === 'completed' && !m.winner_participant_id ? (
-                          <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
-                        ) : null}
-                        {m.status === 'completed' && m.ended_at ? (
-                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
-                        ) : null}
-                        {m.status === 'completed' && !m.ended_at ? (
-                          <Text style={styles.matchTime}>Cierre pendiente.</Text>
-                        ) : null}
+                          ) : null}
+                          {m.status === 'in_progress' ? (
+                            <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
+                          ) : null}
+                          {m.status === 'completed' && m.winner_participant_id ? (
+                            <View>
+                              <Text style={styles.matchWinner}>
+                                Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                              </Text>
+                              {durationLabel ? (
+                                <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                              ) : null}
+                            </View>
+                          ) : null}
+                          {m.status === 'completed' && !m.winner_participant_id ? (
+                            <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                          ) : null}
+                          {m.status === 'completed' && m.ended_at ? (
+                            <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+                          ) : null}
+                          {m.status === 'completed' && !m.ended_at ? (
+                            <Text style={styles.matchTime}>Cierre pendiente.</Text>
+                          ) : null}
+                        </View>
+                        {renderMatchAbortControl(m)}
                       </View>
                     );
                   })
@@ -607,38 +738,41 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       : null;
                   return (
                     <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
-                      <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                        {m.status === 'completed' && winnerName
-                          ? `Venganza N°${revengeNum} - Ganó ${winnerName}`
-                          : `Venganza N°${revengeNum} · ${
-                              m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
-                            }`}
-                      </Text>
-                      {showLive ? (
-                        <Text style={styles.matchLiveScore}>
-                          {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                      <View style={styles.matchRowMain}>
+                        <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                          {m.status === 'completed' && winnerName
+                            ? `Venganza N°${revengeNum} - Ganó ${winnerName}`
+                            : `Venganza N°${revengeNum} · ${
+                                m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
+                              }`}
                         </Text>
-                      ) : null}
-                      {m.status === 'in_progress' ? (
-                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
-                      ) : null}
-                      {m.status === 'completed' && winnerName && revengeDurationLabel ? (
-                        <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
-                      ) : null}
-                      {m.status === 'completed' && !winnerName ? (
-                        <View>
-                          <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
-                          {revengeDurationLabel ? (
-                            <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
-                          ) : null}
-                        </View>
-                      ) : null}
-                      {m.status === 'completed' && m.ended_at ? (
-                        <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
-                      ) : null}
-                      {m.status === 'completed' && !m.ended_at ? (
-                        <Text style={styles.matchTime}>Cierre pendiente.</Text>
-                      ) : null}
+                        {showLive ? (
+                          <Text style={styles.matchLiveScore}>
+                            {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                          </Text>
+                        ) : null}
+                        {m.status === 'in_progress' ? (
+                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
+                        ) : null}
+                        {m.status === 'completed' && winnerName && revengeDurationLabel ? (
+                          <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
+                        ) : null}
+                        {m.status === 'completed' && !winnerName ? (
+                          <View>
+                            <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+                            {revengeDurationLabel ? (
+                              <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                        {m.status === 'completed' && m.ended_at ? (
+                          <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+                        ) : null}
+                        {m.status === 'completed' && !m.ended_at ? (
+                          <Text style={styles.matchTime}>Cierre pendiente.</Text>
+                        ) : null}
+                      </View>
+                      {renderMatchAbortControl(m)}
                     </View>
                   );
                 })}
@@ -698,6 +832,8 @@ const styles = StyleSheet.create({
   revengeCounter: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
   meta: { fontSize: 14, color: '#666', marginBottom: 4 },
   matchRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     borderWidth: 1,
     borderColor: '#E5E7EB',
     borderRadius: 8,
@@ -705,6 +841,25 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 8,
   },
+  matchRowMain: { flex: 1, minWidth: 0 },
+  matchAbortActions: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginLeft: 'auto',
+    alignSelf: 'flex-start',
+  },
+  abortTrashBtn: { padding: 4, alignSelf: 'flex-start' },
+  abortTrashEmoji: { fontSize: 14 },
+  abortBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+  },
+  abortBadgeMuted: { backgroundColor: '#E5E7EB', color: '#6B7280' },
+  abortBadgeAlert: { backgroundColor: '#FEE2E2', color: '#DC2626' },
   matchRowLive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
   matchLiveTxt: { color: '#1D4ED8', fontWeight: '700' },
   matchLiveScore: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 4 },

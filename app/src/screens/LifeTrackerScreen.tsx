@@ -620,31 +620,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     ]);
   };
 
-  const onAbort = () => {
-    Alert.alert('Abortar partida', '¿Abortar la partida? No se contará en estadísticas.', [
-      { text: 'Cancelar', style: 'cancel', onPress: () => clearPendingAdjustments() },
-      {
-        text: 'Abortar',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase
-            .from('matches')
-            .update({ status: 'aborted', ended_at: new Date().toISOString() })
-            .eq('id', matchId);
-          if (error) {
-            Alert.alert('Error', error.message ?? 'No se pudo abortar la partida.');
-            return;
-          }
-          if (pairing) {
-            navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab });
-          } else {
-            navigation.goBack();
-          }
-        },
-      },
-    ]);
-  };
-
   const takeControl = async () => {
     const uid = myUserIdRef.current;
     if (!uid) return;
@@ -830,10 +805,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      <TouchableOpacity style={styles.menuBtn} onPress={onAbort}>
-        <Text style={styles.menuTxt}>...</Text>
-      </TouchableOpacity>
-
       {renderPlayerHalf(
         layoutAB.top,
         true,
@@ -872,8 +843,6 @@ const styles = StyleSheet.create({
   linkBtn: { marginTop: 6 },
   concurrentBackBtn: { marginTop: 18 },
   linkTxt: { color: '#3B82F6', fontWeight: '700' },
-  menuBtn: { position: 'absolute', right: 16, top: 16, zIndex: 3, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#00000020', borderRadius: 8 },
-  menuTxt: { color: '#111', fontWeight: '700' },
   half: { flex: 1, minHeight: 300, padding: 16, justifyContent: 'center', position: 'relative' },
   rotated: { transform: [{ rotate: '180deg' }] },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
