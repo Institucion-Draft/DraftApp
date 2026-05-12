@@ -45,6 +45,9 @@ type EventRow = {
   draft_started_at: string | null;
   draft_ended_at: string | null;
   champion_user_id: string | null;
+  champion_decided_by: string | null;
+  polemica_winners: string[] | null;
+  recognition_winners: string[] | null;
   event_ended_at: string | null;
   final_pending: boolean | null;
   cancelled_at: string | null;
@@ -81,6 +84,24 @@ type PairingInsert = {
   data_source: 'app';
 };
 
+type TiebreakGroupParticipantRow = {
+  participant_id: string;
+  user_id: string;
+  seed: number;
+  users:
+    | { display_name: string | null }
+    | { display_name: string | null }[]
+    | null;
+};
+
+type ActiveTiebreakGroupState = {
+  id: string;
+  group_type: string;
+  round_number: number;
+  champion_user_id: string | null;
+  participants: TiebreakGroupParticipantRow[];
+};
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -104,6 +125,15 @@ function formatWinRate(wins: number, total: number): string {
     return `${Math.round(roundedOneDecimal)}%`;
   }
   return `${roundedOneDecimal.toFixed(1).replace('.', ',')}%`;
+}
+
+/** Lista legible en español: "A, B y C". */
+function formatNamesList(names: string[]): string {
+  const n = names.filter(Boolean);
+  if (n.length === 0) return '';
+  if (n.length === 1) return n[0]!;
+  if (n.length === 2) return `${n[0]} y ${n[1]}`;
+  return `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}`;
 }
 
 export default function EventDetailScreen({ route, navigation }: Props) {
@@ -131,6 +161,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     nameA: string;
     nameB: string;
   } | null>(null);
+  const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
+  const [tiebreakVsNav, setTiebreakVsNav] = useState<{ pairingId: string; opponentName: string }[]>([]);
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
 
@@ -139,7 +171,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
+        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -147,11 +179,15 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     if (error || !data) {
       Alert.alert('Error', 'No se pudo cargar el evento.');
       setEvent(null);
+      setActiveTiebreakGroup(null);
+      setTiebreakVsNav([]);
       return;
     }
     const e = data as EventRow;
     setEvent(e);
     setTiebreakBanner(null);
+    setActiveTiebreakGroup(null);
+    setTiebreakVsNav([]);
     setChampionName(null);
     setChampionGender(null);
     setChampionOfficialWins(0);
@@ -217,6 +253,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       if (__DEV__) {
         console.error('Error cargando participantes del evento:', partsRes.error);
       }
+      setActiveTiebreakGroup(null);
       Alert.alert(
         'Error',
         partsRes.error.message ?? 'No se pudieron cargar los participantes.'
@@ -227,7 +264,67 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const p = (partsRes.data ?? []) as ParticipantView[];
     setParticipants(p);
 
+    let multiTiebreakGroup: ActiveTiebreakGroupState | null = null;
+    const activeGroupRes = await supabase
+      .from('event_tiebreak_groups')
+      .select('id, group_type, round_number, champion_user_id')
+      .eq('event_id', e.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (!activeGroupRes.error && activeGroupRes.data) {
+      const ag = activeGroupRes.data as {
+        id: string;
+        group_type: string;
+        round_number: number;
+        champion_user_id: string | null;
+      };
+      const gpRes = await supabase
+        .from('event_tiebreak_group_participants')
+        .select('participant_id, user_id, seed, users:user_id (display_name)')
+        .eq('group_id', ag.id);
+      if (!gpRes.error && gpRes.data) {
+        multiTiebreakGroup = {
+          ...ag,
+          participants: gpRes.data as TiebreakGroupParticipantRow[],
+        };
+      }
+    }
+    setActiveTiebreakGroup(multiTiebreakGroup);
+
+    const groupHasChampionOnRow =
+      multiTiebreakGroup?.champion_user_id != null &&
+      String(multiTiebreakGroup.champion_user_id).trim() !== '';
+    const vsNav: { pairingId: string; opponentName: string }[] = [];
+    if (multiTiebreakGroup && !groupHasChampionOnRow && currentUserId) {
+      const meGp = multiTiebreakGroup.participants.find((x) => x.user_id === currentUserId);
+      if (meGp) {
+        const prRes = await supabase
+          .from('pairings')
+          .select('id, participant_a_id, participant_b_id')
+          .eq('event_id', e.id);
+        if (!prRes.error && prRes.data) {
+          for (const opp of multiTiebreakGroup.participants) {
+            if (opp.participant_id === meGp.participant_id) continue;
+            const row = (prRes.data as { id: string; participant_a_id: string; participant_b_id: string }[]).find(
+              (r) =>
+                (r.participant_a_id === meGp.participant_id && r.participant_b_id === opp.participant_id) ||
+                (r.participant_b_id === meGp.participant_id && r.participant_a_id === opp.participant_id)
+            );
+            if (row) {
+              vsNav.push({
+                pairingId: row.id,
+                opponentName: relationOne(opp.users)?.display_name?.trim() || 'Jugador',
+              });
+            }
+          }
+        }
+      }
+    }
+    setTiebreakVsNav(vsNav);
+
     if (
+      !multiTiebreakGroup &&
       e.status === 'playing' &&
       e.final_pending === true &&
       !e.champion_user_id &&
@@ -636,6 +733,33 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const championWinRate =
     formatWinRate(championOfficialWins, championOfficialPlayed);
 
+  const multiTiebreakBannerVisible =
+    activeTiebreakGroup != null &&
+    (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
+
+  const showTiebreakPendingBanner =
+    multiTiebreakBannerVisible ||
+    (event.status === 'playing' && event.final_pending && !event.champion_user_id);
+
+  const participantNamesOrdered = activeTiebreakGroup
+    ? [...activeTiebreakGroup.participants]
+        .sort((x, y) => x.seed - y.seed)
+        .map((row) => relationOne(row.users)?.display_name?.trim() || 'Jugador')
+    : [];
+  const namesJoined = formatNamesList(participantNamesOrdered);
+
+  let multiTiebreakBodyMain = '';
+  if (activeTiebreakGroup && multiTiebreakBannerVisible) {
+    const n = activeTiebreakGroup.participants.length;
+    if (n === 3) {
+      multiTiebreakBodyMain = `Triple empate entre ${namesJoined}`;
+    } else if (n === 4) {
+      multiTiebreakBodyMain = `Cuádruple empate entre ${namesJoined}`;
+    } else {
+      multiTiebreakBodyMain = `Empate entre ${namesJoined}`;
+    }
+  }
+
   const showProDeCEntry =
     isWorkspaceMember &&
     participantCount > 0 &&
@@ -683,28 +807,61 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <Text style={styles.meta}>Tipo de evento: {getEventTypeLabel(event.event_type)}</Text>
       </View>
 
-      {event.status === 'playing' && event.final_pending && !event.champion_user_id ? (
+      {showTiebreakPendingBanner ? (
         <View style={styles.tiebreakNotice}>
           <Text style={styles.tiebreakNoticeTitle}>Desempate pendiente</Text>
-          <Text style={styles.tiebreakNoticeBody}>
-            Hay empate por el primer lugar.
-            {tiebreakBanner
-              ? ` El desempate (BO3) se juega en el enfrentamiento entre ${tiebreakBanner.nameA} y ${tiebreakBanner.nameB}.`
-              : ' Cuando el empatado sea entre dos jugadores, vas a poder abrir ese enfrentamiento desde acá.'}
-          </Text>
-          {tiebreakBanner ? (
-            <TouchableOpacity
-              style={styles.tiebreakNoticeBtn}
-              onPress={() =>
-                navigation.navigate('PairingDetail', {
-                  pairingId: tiebreakBanner.pairingId,
-                  fromTab: 'official',
-                })
-              }
-            >
-              <Text style={styles.tiebreakNoticeBtnTxt}>Ir al desempate</Text>
-            </TouchableOpacity>
-          ) : null}
+          {activeTiebreakGroup && multiTiebreakBannerVisible ? (
+            <>
+              <Text style={styles.tiebreakNoticeBody}>{multiTiebreakBodyMain}</Text>
+              {tiebreakVsNav.length > 0 ? (
+                <View style={styles.tiebreakVsRow}>
+                  {tiebreakVsNav.map((v) => (
+                    <TouchableOpacity
+                      key={v.pairingId}
+                      style={styles.tiebreakVsBtn}
+                      onPress={() =>
+                        navigation.navigate('PairingDetail', {
+                          pairingId: v.pairingId,
+                          fromTab: 'official',
+                        })
+                      }
+                    >
+                      <Text style={styles.tiebreakVsBtnTxt}>vs {v.opponentName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.tiebreakNoticeBtn}
+                  onPress={() => navigation.navigate('PairingsList', { eventId: event.id })}
+                >
+                  <Text style={styles.tiebreakNoticeBtnTxt}>Ver enfrentamientos</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={styles.tiebreakNoticeBody}>
+                Hay empate por el primer lugar.
+                {tiebreakBanner
+                  ? ` El desempate (BO3) se juega en el enfrentamiento entre ${tiebreakBanner.nameA} y ${tiebreakBanner.nameB}.`
+                  : ' Cuando el empatado sea entre dos jugadores, vas a poder abrir ese enfrentamiento desde acá.'}
+              </Text>
+              {tiebreakBanner ? (
+                <TouchableOpacity
+                  style={styles.tiebreakNoticeBtn}
+                  onPress={() =>
+                    navigation.navigate('PairingDetail', {
+                      pairingId: tiebreakBanner.pairingId,
+                      fromTab: 'official',
+                    })
+                  }
+                >
+                  <Text style={styles.tiebreakNoticeBtnTxt}>Ir al desempate</Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
         </View>
       ) : null}
 
@@ -937,6 +1094,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           const u = relationOne(p.users);
           const uname = u?.display_name || u?.username || 'sin nombre';
           const participantChampionLabel = resolveGenderedText(u?.gender, 'Campeón', 'Campeona');
+          const polemicaSet = new Set((event?.polemica_winners ?? []).filter(Boolean).map(String));
+          const recognitionSet = new Set((event?.recognition_winners ?? []).filter(Boolean).map(String));
           return (
             <TouchableOpacity
               key={p.id}
@@ -962,6 +1121,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   {event.champion_user_id && p.user_id === event.champion_user_id ? (
                     <View style={styles.championBadge}>
                       <Text style={styles.championBadgeText}>{participantChampionLabel}</Text>
+                    </View>
+                  ) : null}
+                  {polemicaSet.has(p.user_id) ? (
+                    <View style={styles.polemicaBadge}>
+                      <Text style={styles.polemicaBadgeText}>🏆 Copa Polémica</Text>
+                    </View>
+                  ) : null}
+                  {recognitionSet.has(p.user_id) ? (
+                    <View style={styles.recognitionBadge}>
+                      <Text style={styles.recognitionBadgeText}>🏅 Copa Reconocimiento</Text>
                     </View>
                   ) : null}
                   {p.left_event_at ? (
@@ -1051,6 +1220,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tiebreakNoticeBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  tiebreakVsRow: {
+    flexDirection: 'row',
+    marginTop: 12,
+    gap: 6,
+  },
+  tiebreakVsBtn: {
+    flex: 1,
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  tiebreakVsBtnTxt: { color: '#fff', fontWeight: '700', textAlign: 'center', fontSize: 13 },
   block: { paddingHorizontal: 24, paddingTop: 18 },
   blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 10 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginBottom: 10 },
@@ -1152,6 +1334,24 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   championBadgeText: { fontSize: 11, fontWeight: '700', color: '#B45309' },
+  polemicaBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#FEE2E2',
+    borderColor: '#DC2626',
+  },
+  polemicaBadgeText: { fontSize: 11, fontWeight: '700', color: '#991B1B' },
+  recognitionBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#DBEAFE',
+    borderColor: '#3B82F6',
+  },
+  recognitionBadgeText: { fontSize: 11, fontWeight: '700', color: '#1E40AF' },
   leftEventChip: {
     paddingHorizontal: 8,
     paddingVertical: 3,

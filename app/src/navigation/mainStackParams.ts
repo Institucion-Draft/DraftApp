@@ -43,5 +43,5 @@ export type MainStackParamList = {
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
   LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge' };
   MatchResult: { matchId: string };
-  Standings: { eventId: string };
+  Standings: { eventId: string; showPodiumIntro?: boolean };
 };

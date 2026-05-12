@@ -21,7 +21,7 @@ import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
 import { type Gender } from '../lib/genderText';
-import { computePodium, type PodiumState } from '../lib/podium';
+import { computePodium, type PodiumState, type ActiveTiebreakGroupPodiumInput, type TiebreakMatchPodiumInput } from '../lib/podium';
 
 /** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
 const PODIUM_COL_WIDTH = 132;
@@ -223,7 +223,7 @@ type Bo3Footer = {
 type EventFooterStats = { torneo: string | null; bo3: Bo3Footer | null };
 
 export default function StandingsScreen({ route, navigation }: Props) {
-  const { eventId } = route.params;
+  const { eventId, showPodiumIntro } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<RowView[]>([]);
@@ -243,7 +243,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [navigation, eventId]);
 
   const load = useCallback(async () => {
-    const [partsRes, pairingsRes, eventRes] = await Promise.all([
+    const [partsRes, pairingsRes, eventRes, tiebreakGroupRes] = await Promise.all([
       supabase
         .from('event_participants')
         .select(
@@ -268,7 +268,21 @@ export default function StandingsScreen({ route, navigation }: Props) {
           'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
         )
         .eq('event_id', eventId),
-      supabase.from('draft_events').select('status, champion_user_id').eq('id', eventId).maybeSingle(),
+      supabase
+        .from('draft_events')
+        .select(
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners'
+        )
+        .eq('id', eventId)
+        .maybeSingle(),
+      supabase
+        .from('event_tiebreak_groups')
+        .select('id, champion_user_id, status, group_type, round_number, created_at')
+        .eq('event_id', eventId)
+        .in('status', ['active', 'resolved'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (partsRes.error || pairingsRes.error) {
       setRows([]);
@@ -313,7 +327,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? await supabase
             .from('matches')
-            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at, match_type')
+            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at, match_type, tiebreak_round')
             .in('pairing_id', pairingIds)
         : { data: [], error: null };
 
@@ -338,6 +352,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     const eventStatus = eventRes.data?.status as string | undefined;
     const championUserId = (eventRes.data as { champion_user_id?: string | null } | null)?.champion_user_id ?? null;
+    const championDecidedBy =
+      (eventRes.data as { champion_decided_by?: string | null } | null)?.champion_decided_by ?? null;
+    const polemicaWinners = ((eventRes.data as { polemica_winners?: string[] | null } | null)?.polemica_winners ??
+      []) as string[];
+    const recognitionWinners = ((eventRes.data as { recognition_winners?: string[] | null } | null)
+      ?.recognition_winners ?? []) as string[];
     setEventStatusStored(eventStatus ?? null);
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
@@ -424,7 +444,61 @@ export default function StandingsScreen({ route, navigation }: Props) {
         ),
       }));
 
-    setPodiumState(computePodium(podiumPlayers, pairingRemain, participants.length, championUserId));
+    let podiumTiebreakGroup: ActiveTiebreakGroupPodiumInput | null = null;
+    let podiumTiebreakMatches: TiebreakMatchPodiumInput[] = [];
+    if (!tiebreakGroupRes.error && tiebreakGroupRes.data) {
+      const tgRow = tiebreakGroupRes.data as {
+        id: string;
+        champion_user_id: string | null;
+        status: string;
+        group_type: string;
+        round_number: number;
+      };
+      const gpRes = await supabase
+        .from('event_tiebreak_group_participants')
+        .select('participant_id, user_id, seed')
+        .eq('group_id', tgRow.id);
+      if (!gpRes.error && gpRes.data && (gpRes.data as { participant_id: string }[]).length > 0) {
+        podiumTiebreakGroup = {
+          id: tgRow.id,
+          group_type: tgRow.group_type === 'bracket' ? 'bracket' : 'round_robin',
+          round_number: tgRow.round_number ?? 1,
+          champion_user_id: tgRow.champion_user_id,
+          participants: gpRes.data as { participant_id: string; user_id: string; seed: number }[],
+        };
+      }
+      const prById = new Map((pairings as { id: string }[]).map((pr) => [String(pr.id), pr]));
+      for (const m of matches as any[]) {
+        if (m.match_type !== 'tiebreak' || m.status !== 'completed') continue;
+        if (m.winner_participant_id == null || String(m.winner_participant_id).length === 0) continue;
+        const pr = prById.get(String(m.pairing_id)) as
+          | { id: string; participant_a_id: string; participant_b_id: string }
+          | undefined;
+        if (!pr) continue;
+        podiumTiebreakMatches.push({
+          pairing_id: String(m.pairing_id),
+          participant_a_id: String(pr.participant_a_id),
+          participant_b_id: String(pr.participant_b_id),
+          winner_participant_id: String(m.winner_participant_id),
+          ended_at: m.ended_at != null ? String(m.ended_at) : null,
+          tiebreak_round: m.tiebreak_round != null ? Number(m.tiebreak_round) : null,
+        });
+      }
+    }
+
+    setPodiumState(
+      computePodium(
+        podiumPlayers,
+        pairingRemain,
+        participants.length,
+        championUserId,
+        podiumTiebreakGroup,
+        podiumTiebreakMatches,
+        championDecidedBy,
+        polemicaWinners,
+        recognitionWinners
+      )
+    );
 
     const lifeEvents = (lifeRes.data ?? []) as LifeEvRow[];
     const lifeByMatchId = new Map<string, LifeEvRow[]>();
@@ -445,7 +519,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
       const pairingSet = new Set(playerPairings.map((x: any) => x.id));
       const playerMatches = matches.filter((m: any) => pairingSet.has(m.pairing_id));
-      const completedMatches = playerMatches.filter((m: any) => !!m.winner_participant_id);
+      const completedMatches = playerMatches.filter(
+        (m: any) =>
+          !!m.winner_participant_id &&
+          (m.match_type === 'draft' || m.match_type === 'final')
+      );
       const pg = completedMatches.filter((m: any) => m.winner_participant_id === pid).length;
       const pj = completedMatches.length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
@@ -458,6 +536,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
       const matchDmvs: number[] = [];
       for (const m of playerMatches) {
+        if (m.match_type !== 'draft' && m.match_type !== 'final') continue;
         if (m.status !== 'completed') continue;
         const mid = String(m.id);
         const evs = lifeByMatchId.get(mid) ?? [];
@@ -564,6 +643,18 @@ export default function StandingsScreen({ route, navigation }: Props) {
           void load();
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_tiebreak_groups',
+          filter: `event_id=eq.${eventId}`,
+        },
+        () => {
+          void load();
+        }
+      )
       .subscribe();
     standingsChannelRef.current = channel;
     return () => {
@@ -602,6 +693,27 @@ export default function StandingsScreen({ route, navigation }: Props) {
       if (dismissT) clearTimeout(dismissT);
     };
   }, [eventId, eventStatusStored]);
+
+  useEffect(() => {
+    if (!showPodiumIntro || eventStatusStored !== 'completed') return;
+    let cancelled = false;
+    setShowConfettiOnce(true);
+    void (async () => {
+      try {
+        await AsyncStorage.setItem(`confetti_seen_${eventId}`, '1');
+      } catch {
+        // ignore
+      }
+    })();
+    navigation.setParams({ eventId, showPodiumIntro: undefined });
+    const t = setTimeout(() => {
+      if (!cancelled) setShowConfettiOnce(false);
+    }, 4500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [showPodiumIntro, eventStatusStored, eventId, navigation]);
 
   if (loading) {
     return (
@@ -648,7 +760,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           withColorBorder
           borderWidth={avatarBorder}
         />
-        {stoolId === pl.participantId ? (
+        {(pl.onStool === true || stoolId === pl.participantId) ? (
           <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
             🪑
           </Text>

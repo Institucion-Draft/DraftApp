@@ -262,7 +262,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const durSec = Math.max(0, Math.floor(durationMs / 1000));
   const durMm = String(Math.floor(durSec / 60)).padStart(2, '0');
   const durSs = String(durSec % 60).padStart(2, '0');
-  const showRematchBtn = !(match.match_type === 'tiebreak' && pairing.tiebreak_winner_participant_id != null);
+  const showRematchBtn = match.match_type !== 'tiebreak';
 
   const isOfficialOpen =
     (match.match_type === 'draft' || match.match_type === 'final') && winsA < 2 && winsB < 2;
@@ -280,13 +280,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       ? `${aName}: ${tiebreakWinsA} · ${bName}: ${tiebreakWinsB}`
       : `${aName}: ${winsA} · ${bName}: ${winsB}`;
   const extraLines: string[] = [];
-  if (match.match_type === 'tiebreak') {
-    if (tiebreakWinsA >= 2 || tiebreakWinsB >= 2) {
-      extraLines.push(`${tiebreakWinsA >= 2 ? aName : bName} gana el desempate`);
-    } else {
-      extraLines.push('El desempate sigue abierto');
-    }
-  } else if (match.match_type === 'revenge') {
+  if (match.match_type === 'revenge') {
     if (superCupTriggeredHere) {
       extraLines.push(`${superCupWinnerName ?? '...'} gana la Super Copa 🏆`);
     }
@@ -370,12 +364,16 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         <Text style={styles.sub}>Duración: {durMm}:{durSs}</Text>
       </View>
 
-      <View style={styles.block}>
-        <Text style={styles.meta}>{scoreLine1}</Text>
-        {extraLines.map((line, idx) => (
-          <Text key={idx} style={styles.meta}>{line}</Text>
-        ))}
-      </View>
+      {match.match_type !== 'tiebreak' ? (
+        <View style={styles.block}>
+          <Text style={styles.meta}>{scoreLine1}</Text>
+          {extraLines.map((line, idx) => (
+            <Text key={idx} style={styles.meta}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.actions}>
         {showRematchBtn ? (
@@ -383,12 +381,25 @@ export default function MatchResultScreen({ route, navigation }: Props) {
             <Text style={styles.primaryTxt}>{rematchLabel}</Text>
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
-          <Text style={styles.secondaryTxt}>Enfrentamientos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>
-          <Text style={styles.secondaryTxt}>Volver al evento</Text>
-        </TouchableOpacity>
+        {match.match_type === 'tiebreak' ? (
+          <>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
+              <Text style={styles.primaryTxt}>Enfrentamientos</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>
+              <Text style={styles.primaryTxt}>Volver al evento</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
+              <Text style={styles.secondaryTxt}>Enfrentamientos</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>
+              <Text style={styles.secondaryTxt}>Volver al evento</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );

@@ -43,6 +43,7 @@ type MatchRow = {
   id: string;
   match_number: number;
   match_type: string;
+  tiebreak_round: number | null;
   status: 'in_progress' | 'completed' | 'aborted';
   winner_participant_id: string | null;
   ended_by_surrender: boolean;
@@ -50,6 +51,21 @@ type MatchRow = {
   ended_at: string | null;
   abort_requested_by: string | null;
   abort_requested_at: string | null;
+};
+
+type TiebreakGroupParticipantRow = {
+  participant_id: string;
+  user_id: string;
+  seed: number;
+};
+
+type ActiveTiebreakGroupState = {
+  id: string;
+  group_type: string;
+  round_number: number;
+  status: string;
+  champion_user_id: string | null;
+  participants: TiebreakGroupParticipantRow[];
 };
 
 type ParticipantRow = {
@@ -120,7 +136,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   /** Vidas actuales del match in_progress (si hay). */
   const [inProgressLives, setInProgressLives] = useState<{ a: number; b: number } | null>(null);
-  const [isTiebreakPairing, setIsTiebreakPairing] = useState(false);
+  /** Empate a 2 vías (sin fila en event_tiebreak_groups). */
+  const [legacyTwoWayTiebreak, setLegacyTwoWayTiebreak] = useState(false);
+  const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
   const firstRef = useRef(true);
@@ -137,12 +155,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudo cargar el enfrentamiento.');
       setPairing(null);
       setDraftEventStatus(null);
+      setActiveTiebreakGroup(null);
+      setLegacyTwoWayTiebreak(false);
       return;
     }
     const p = pData as PairingInfo;
     setPairing(p);
 
-    const [meRes, eventRes, partRes, matchesRes, allPlayersRes, allPairingsRes] = await Promise.all([
+    const [meRes, eventRes, partRes, matchesRes, allPlayersRes, allPairingsRes, tiebreakGroupRes] = await Promise.all([
       supabase.auth.getUser(),
       supabase
         .from('draft_events')
@@ -167,7 +187,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('matches')
         .select(
-          'id, match_number, match_type, status, winner_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
+          'id, match_number, match_type, tiebreak_round, status, winner_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
         )
         .eq('pairing_id', p.id)
         .order('match_number', { ascending: true }),
@@ -176,6 +196,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         .from('pairings')
         .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
         .eq('event_id', p.event_id),
+      supabase
+        .from('event_tiebreak_groups')
+        .select('id, group_type, round_number, status, champion_user_id')
+        .eq('event_id', p.event_id)
+        .eq('status', 'active')
+        .maybeSingle(),
     ]);
 
     const currentUserId = meRes.data.user?.id ?? null;
@@ -204,8 +230,35 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setA(pa);
     setB(pb);
 
-    const matchRows = (matchesRes.data ?? []) as MatchRow[];
+    const matchRows = (matchesRes.data ?? []).map((row) => ({
+      ...(row as MatchRow),
+      tiebreak_round: (row as MatchRow).tiebreak_round ?? null,
+    })) as MatchRow[];
     setMatches(matchRows);
+
+    let tiebreakGroupState: ActiveTiebreakGroupState | null = null;
+    const tgRow = tiebreakGroupRes.data as
+      | {
+          id: string;
+          group_type: string;
+          round_number: number;
+          status: string;
+          champion_user_id: string | null;
+        }
+      | null;
+    if (!tiebreakGroupRes.error && tgRow) {
+      const tpRes = await supabase
+        .from('event_tiebreak_group_participants')
+        .select('participant_id, user_id, seed')
+        .eq('group_id', tgRow.id);
+      if (!tpRes.error) {
+        tiebreakGroupState = {
+          ...tgRow,
+          participants: (tpRes.data ?? []) as TiebreakGroupParticipantRow[],
+        };
+      }
+    }
+    setActiveTiebreakGroup(tiebreakGroupState);
 
     const ev = eventRes.data as {
       status?: string;
@@ -235,7 +288,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         tiebreakHere = true;
       }
     }
-    setIsTiebreakPairing(tiebreakHere);
+    setLegacyTwoWayTiebreak(tiebreakHere);
     const inProgRow = matchRows.find((m) => m.status === 'in_progress') ?? null;
     if (inProgRow?.id) {
       const lifeRes = await supabase
@@ -458,6 +511,46 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const bName = bu?.display_name || bu?.username || 'Jugador B';
   const isParticipant = !!myUserId && (a?.user_id === myUserId || b?.user_id === myUserId);
   const inProgressMatch = matches.find((m) => m.status === 'in_progress') ?? null;
+
+  const pairingIsInActiveGroup = Boolean(
+    activeTiebreakGroup &&
+      activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_a_id) &&
+      activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_b_id)
+  );
+
+  const currentRoundMatchAlreadyPlayed = Boolean(
+    activeTiebreakGroup &&
+      matches.some(
+        (m) =>
+          m.match_type === 'tiebreak' &&
+          m.status === 'completed' &&
+          (m.tiebreak_round ?? 1) === activeTiebreakGroup.round_number
+      )
+  );
+
+  const isTiebreakPendingMulti =
+    Boolean(activeTiebreakGroup) &&
+    pairingIsInActiveGroup &&
+    !currentRoundMatchAlreadyPlayed &&
+    pairing.tiebreak_winner_participant_id == null;
+
+  const isTiebreakPending =
+    isTiebreakPendingMulti ||
+    (legacyTwoWayTiebreak && pairing.tiebreak_winner_participant_id == null);
+
+  const champId = activeTiebreakGroup?.champion_user_id ?? null;
+  const isPlacementMatch = Boolean(
+    activeTiebreakGroup &&
+      activeTiebreakGroup.group_type === 'round_robin' &&
+      champId != null &&
+      champId !== '' &&
+      pairingIsInActiveGroup &&
+      a?.user_id !== champId &&
+      b?.user_id !== champId
+  );
+
+  const placementButtonPending =
+    isPlacementMatch && !currentRoundMatchAlreadyPlayed && pairing.tiebreak_winner_participant_id == null;
   const officialMs = matches
     .filter((m) => (m.match_type === 'draft' || m.match_type === 'final') && m.status !== 'aborted')
     .sort((a, b) => a.match_number - b.match_number);
@@ -479,7 +572,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       : pairing.tiebreak_winner_participant_id === pairing.participant_b_id
       ? bName
       : null;
-  const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPairing;
+  const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
+  const tiebreakSectionTitle = 'Desempate';
   const winsA = officialMs.filter(
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
   ).length;
@@ -493,6 +587,19 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const revengeWinsB = revengeCompleted.filter(
     (m) => m.winner_participant_id === pairing.participant_b_id
   ).length;
+  const swapSides = !!myUserId && b?.user_id === myUserId;
+  const leftP = swapSides ? b : a;
+  const rightP = swapSides ? a : b;
+  const dispLeftName = swapSides ? bName : aName;
+  const dispRightName = swapSides ? aName : bName;
+  const dispWinsLeftOfficial = swapSides ? winsB : winsA;
+  const dispWinsRightOfficial = swapSides ? winsA : winsB;
+  const dispTieLeft = swapSides ? tiebreakWinsB : tiebreakWinsA;
+  const dispTieRight = swapSides ? tiebreakWinsA : tiebreakWinsB;
+  const dispRevLeft = swapSides ? revengeWinsB : revengeWinsA;
+  const dispRevRight = swapSides ? revengeWinsA : revengeWinsB;
+  const dispLiveL = inProgressLives ? (swapSides ? inProgressLives.b : inProgressLives.a) : 0;
+  const dispLiveR = inProgressLives ? (swapSides ? inProgressLives.a : inProgressLives.b) : 0;
   const eventIsCancelled = draftEventStatus === 'cancelled';
 
   const startButtonLabel = inProgressMatch
@@ -501,12 +608,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       : inProgressMatch.match_type === 'revenge'
       ? 'Retomar venganza en curso'
       : 'Retomar partida en curso'
-    : isTiebreakPairing && pairing.tiebreak_winner_participant_id == null
+    : placementButtonPending
+    ? 'Definir 2do y 3er puesto'
+    : isTiebreakPending
     ? 'Iniciar desempate'
     : pairing.official_winner_participant_id != null
     ? 'Iniciar venganza'
     : 'Iniciar partida';
   const showResumeStyle = startButtonLabel.startsWith('Retomar');
+  const movePrimaryBtnAboveRevenge =
+    (!inProgressMatch && (placementButtonPending || isTiebreakPending)) ||
+    inProgressMatch?.match_type === 'tiebreak';
 
   const startMatch = async () => {
     if (!pairing) return;
@@ -559,11 +671,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     let matchType: 'draft' | 'revenge' | 'tiebreak';
     if (!pairing.official_winner_participant_id) {
       matchType = 'draft';
-    } else if (isTiebreakPairing && !pairing.tiebreak_winner_participant_id) {
+    } else if (isTiebreakPending && pairing.tiebreak_winner_participant_id == null) {
       matchType = 'tiebreak';
     } else {
       matchType = 'revenge';
     }
+    const tiebreakRound =
+      matchType === 'tiebreak' ? activeTiebreakGroup?.round_number ?? 1 : undefined;
     const { data, error } = await supabase
       .from('matches')
       .insert({
@@ -571,6 +685,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         match_number: nextNumber,
         match_type: matchType,
         started_at: new Date().toISOString(),
+        ...(matchType === 'tiebreak' && tiebreakRound != null ? { tiebreak_round: tiebreakRound } : {}),
       })
       .select('id')
       .maybeSingle();
@@ -586,38 +701,38 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       <View style={styles.hero}>
         <View style={styles.heroThreeCol}>
           <View style={[styles.heroSide, styles.heroSideLeft]}>
-            {a ? (
+            {leftP ? (
               <PlayerAvatar
-                userId={a.user_id}
-                participantId={a.id}
+                userId={leftP.user_id}
+                participantId={leftP.id}
                 size="large"
                 withColorBorder
                 borderWidth={4}
               />
             ) : null}
-            <Text style={styles.heroPlayerName}>{aName}</Text>
+            <Text style={styles.heroPlayerName}>{dispLeftName}</Text>
             <View style={styles.heroBo3RowLeft}>
-              <View style={[styles.heroBo3Box, winsA >= 1 && styles.heroBo3Filled]} />
-              <View style={[styles.heroBo3Box, winsA >= 2 && styles.heroBo3Filled]} />
+              <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 1 && styles.heroBo3Filled]} />
+              <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 2 && styles.heroBo3Filled]} />
             </View>
           </View>
           <View style={styles.heroCenter}>
             <Text style={styles.heroVsBig}>vs</Text>
           </View>
           <View style={[styles.heroSide, styles.heroSideRight]}>
-            {b ? (
+            {rightP ? (
               <PlayerAvatar
-                userId={b.user_id}
-                participantId={b.id}
+                userId={rightP.user_id}
+                participantId={rightP.id}
                 size="large"
                 withColorBorder
                 borderWidth={4}
               />
             ) : null}
-            <Text style={styles.heroPlayerName}>{bName}</Text>
+            <Text style={styles.heroPlayerName}>{dispRightName}</Text>
             <View style={styles.heroBo3RowRight}>
-              <View style={[styles.heroBo3Box, winsB >= 1 && styles.heroBo3Filled]} />
-              <View style={[styles.heroBo3Box, winsB >= 2 && styles.heroBo3Filled]} />
+              <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 1 && styles.heroBo3Filled]} />
+              <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 2 && styles.heroBo3Filled]} />
             </View>
           </View>
         </View>
@@ -625,7 +740,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Partidas</Text>
-        {officialMs.length === 0 && revengeMs.length === 0 && tiebreakMs.length === 0 && !isTiebreakPairing ? (
+        {officialMs.length === 0 && revengeMs.length === 0 && tiebreakMs.length === 0 && !isTiebreakPending ? (
           <Text style={styles.muted}>Todavía no hay partidas.</Text>
         ) : (
           <>
@@ -647,7 +762,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       </Text>
                       {showLive ? (
                         <Text style={styles.matchLiveScore}>
-                          {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                          {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
                         </Text>
                       ) : null}
                       {m.status === 'in_progress' ? (
@@ -680,9 +795,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             )}
             {showTiebreakSection ? (
               <>
-                <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>Desempate</Text>
+                <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>{tiebreakSectionTitle}</Text>
                 <Text style={styles.revengeCounter}>
-                  {shortName(aName)} {tiebreakWinsA} - {tiebreakWinsB} {shortName(bName)}
+                  {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
                   {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
                 </Text>
                 {tiebreakMs.length === 0 ? (
@@ -693,16 +808,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                     const durationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
                     const showLive =
                       m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
+                    const roundSuffix = (m.tiebreak_round ?? 1) >= 2 ? ` · Ronda ${m.tiebreak_round}` : '';
                     return (
                       <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                         <View style={styles.matchRowMain}>
                           <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                            #{displayNum} ·{' '}
+                            #{displayNum}
+                            {roundSuffix} ·{' '}
                             {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                           </Text>
                           {showLive ? (
                             <Text style={styles.matchLiveScore}>
-                              {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                              {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
                             </Text>
                           ) : null}
                           {m.status === 'in_progress' ? (
@@ -735,11 +852,28 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 )}
               </>
             ) : null}
+            {movePrimaryBtnAboveRevenge && (isParticipant || isOrganizer) ? (
+              <View style={styles.primaryAboveRevengeWrap}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    showResumeStyle ? styles.resumeBtn : null,
+                    eventIsCancelled ? styles.primaryBtnDisabled : null,
+                  ]}
+                  disabled={eventIsCancelled}
+                  onPress={() => void startMatch()}
+                >
+                  <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>
+                    {startButtonLabel}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {revengeMs.length > 0 ? (
               <>
                 <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>Venganzas</Text>
                 <Text style={styles.revengeCounter}>
-                  {shortName(aName)} {revengeWinsA} - {revengeWinsB} {shortName(bName)}
+                  {shortName(dispLeftName)} {dispRevLeft} - {dispRevRight} {shortName(dispRightName)}
                 </Text>
                 {revengeMs.map((m, idx) => {
                   const revengeNum = idx + 1;
@@ -764,7 +898,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         </Text>
                         {showLive ? (
                           <Text style={styles.matchLiveScore}>
-                            {aName} {inProgressLives.a} vs {inProgressLives.b} {bName}
+                            {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
                           </Text>
                         ) : null}
                         {m.status === 'in_progress' ? (
@@ -799,6 +933,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       </View>
 
       {isParticipant || isOrganizer ? (
+        !movePrimaryBtnAboveRevenge ? (
         <View style={styles.block}>
           <TouchableOpacity
             style={[
@@ -812,6 +947,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>{startButtonLabel}</Text>
           </TouchableOpacity>
         </View>
+        ) : null
       ) : null}
     </ScrollView>
   );
@@ -845,6 +981,7 @@ const styles = StyleSheet.create({
   blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8 },
   sectionSubtitle: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 6 },
   sectionSubtitleSpaced: { marginTop: 14 },
+  primaryAboveRevengeWrap: { marginTop: 16, marginBottom: 4 },
   revengeCounter: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
   meta: { fontSize: 14, color: '#666', marginBottom: 4 },
   matchRow: {

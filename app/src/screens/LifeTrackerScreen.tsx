@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { NativeStackScreenProps, NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
@@ -28,6 +28,7 @@ type MatchRow = {
   id: string;
   pairing_id: string;
   winner_participant_id: string | null;
+  match_type: string | null;
   starting_life_a: number;
   starting_life_b: number;
   life_tracker_user_id: string | null;
@@ -69,6 +70,28 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 
 function clampLife(value: number): number {
   return Math.max(0, value);
+}
+
+async function navigateAfterTiebreakMaybeComplete(
+  navigation: NativeStackNavigationProp<MainStackParamList, 'LifeTracker'>,
+  eventId: string,
+  matchId: string,
+  previousEventStatus: string | null | undefined
+): Promise<void> {
+  if (previousEventStatus === 'completed') {
+    navigation.replace('MatchResult', { matchId });
+    return;
+  }
+  const delays = [1500, 700, 700];
+  for (const ms of delays) {
+    await new Promise((r) => setTimeout(r, ms));
+    const { data, error } = await supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle();
+    if (!error && data?.status === 'completed') {
+      navigation.replace('Standings', { eventId, showPodiumIntro: true });
+      return;
+    }
+  }
+  navigation.replace('MatchResult', { matchId });
 }
 
 const COLOR_BG: Record<MtgColor, string> = {
@@ -159,7 +182,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const { data: mData, error: mErr } = await supabase
       .from('matches')
       .select(
-        'id, pairing_id, winner_participant_id, starting_life_a, starting_life_b, life_tracker_user_id, status'
+        'id, pairing_id, winner_participant_id, match_type, starting_life_a, starting_life_b, life_tracker_user_id, status'
       )
       .eq('id', matchId)
       .maybeSingle();
@@ -522,6 +545,13 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           {
             text: `Confirmar: gana ${winnerName}`,
             onPress: async () => {
+              if (!pairing) return;
+              const eventBeforeRes = await supabase
+                .from('draft_events')
+                .select('status')
+                .eq('id', pairing.event_id)
+                .maybeSingle();
+              const previousEventStatus = eventBeforeRes.data?.status;
               const endRes = await supabase
                 .from('matches')
                 .update({
@@ -534,7 +564,21 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 Alert.alert('Error', endRes.error.message ?? 'No se pudo cerrar la partida.');
                 return;
               }
-              navigation.replace('MatchResult', { matchId });
+              const { data: closedMeta } = await supabase
+                .from('matches')
+                .select('match_type')
+                .eq('id', matchId)
+                .maybeSingle();
+              if (closedMeta?.match_type === 'tiebreak' && pairing) {
+                void navigateAfterTiebreakMaybeComplete(
+                  navigation,
+                  pairing.event_id,
+                  matchId,
+                  previousEventStatus
+                );
+              } else {
+                navigation.replace('MatchResult', { matchId });
+              }
             },
           },
         ]);
@@ -601,6 +645,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         text: 'Sí, me rindo',
         style: 'destructive',
         onPress: async () => {
+          const eventBeforeRes = await supabase
+            .from('draft_events')
+            .select('status')
+            .eq('id', pairing.event_id)
+            .maybeSingle();
+          const previousEventStatus = eventBeforeRes.data?.status;
           const { error } = await supabase
             .from('matches')
             .update({
@@ -614,7 +664,21 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             Alert.alert('Error', error.message ?? 'No se pudo cerrar la partida.');
             return;
           }
-          navigation.replace('MatchResult', { matchId });
+          const { data: closedMeta } = await supabase
+            .from('matches')
+            .select('match_type')
+            .eq('id', matchId)
+            .maybeSingle();
+          if (closedMeta?.match_type === 'tiebreak' && pairing) {
+            void navigateAfterTiebreakMaybeComplete(
+              navigation,
+              pairing.event_id,
+              matchId,
+              previousEventStatus
+            );
+          } else {
+            navigation.replace('MatchResult', { matchId });
+          }
         },
       },
     ]);
