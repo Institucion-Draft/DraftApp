@@ -14,6 +14,8 @@ export type PodiumPlayer = {
   matchesWon: number;
   matchesCompleted: number;
   matchWinRate: number;
+  /** Banquito individual (p. ej. Copa Polémica vs reconocimiento en el mismo peldaño). */
+  onStool?: boolean;
 };
 
 export type PodiumStep = {
@@ -32,6 +34,24 @@ export type PairingRemain = {
   participantAId: string;
   participantBId: string;
   isBlocked: boolean;
+};
+
+export type ActiveTiebreakGroupPodiumInput = {
+  id: string;
+  group_type: 'round_robin' | 'bracket';
+  round_number: number;
+  champion_user_id: string | null;
+  participants: { participant_id: string; user_id: string; seed: number }[];
+};
+
+/** Match de tiebreak cerrado; incluye lados del pairing para detectar placement sin campeón. */
+export type TiebreakMatchPodiumInput = {
+  pairing_id: string;
+  participant_a_id: string;
+  participant_b_id: string;
+  winner_participant_id: string | null;
+  ended_at: string | null;
+  tiebreak_round: number | null;
 };
 
 function emptyStep(rank: 1 | 2 | 3): PodiumStep {
@@ -157,6 +177,40 @@ function buildStepsWithStools(s1: PodiumPlayer[], s2: PodiumPlayer[], s3: Podium
   ];
 }
 
+/** Copa Polémica: 1° unión polemica + reconocimiento (banquito solo polemica); 2°/3° por WR BO3 del resto. */
+function podiumPolemicaMode(
+  participants: PodiumPlayer[],
+  polemicaUserIds: string[],
+  recognitionUserIds: string[]
+): PodiumState {
+  const polemicaSet = new Set(
+    polemicaUserIds.map((uid) => String(uid).trim()).filter((u) => u.length > 0)
+  );
+  const seenUser = new Set<string>();
+  const s1Raw: PodiumPlayer[] = [];
+  const pushByUserId = (uid: string) => {
+    const u = String(uid).trim();
+    if (!u || seenUser.has(u)) return;
+    const p = participants.find((x) => String(x.userId) === u);
+    if (!p) return;
+    seenUser.add(u);
+    s1Raw.push(p);
+  };
+  for (const uid of polemicaUserIds) pushByUserId(uid);
+  for (const uid of recognitionUserIds) pushByUserId(uid);
+
+  const s1: PodiumPlayer[] = s1Raw.map((p) => ({
+    ...p,
+    onStool: polemicaSet.has(String(p.userId).trim()),
+  }));
+
+  const onFirst = new Set(s1.map((p) => p.participantId));
+  const poolRest = participants.filter((p) => !onFirst.has(p.participantId));
+  const { s2, s3, spectators } = podiumNextTwoStepsFromPool(poolRest);
+  const steps = buildStepsWithStools(s1, s2, s3);
+  return { steps, spectators, isFinal: s1.length > 0 };
+}
+
 /** Dos peldaños (2º y 3º) sólo por WR BO3 observado sobre `poolSeed`. */
 function podiumNextTwoStepsFromPool(poolSeed: PodiumPlayer[]): {
   s2: PodiumPlayer[];
@@ -254,11 +308,85 @@ function podiumPendingMode(participants: PodiumPlayer[], remaining: PairingRemai
   return { steps, spectators: pool, isFinal };
 }
 
+/** RR 3 con campeón en el grupo: 1° campeón; 2°/3° solo por partida de placement (tiebreak del round actual sin campeón). */
+function podiumRoundRobinTiebreakWithChampion(
+  participants: PodiumPlayer[],
+  group: ActiveTiebreakGroupPodiumInput,
+  tiebreakMatches: TiebreakMatchPodiumInput[],
+  remaining: PairingRemain[]
+): PodiumState {
+  const champUid = group.champion_user_id;
+  if (champUid == null || String(champUid).trim() === '') {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: [],
+      isFinal: false,
+    };
+  }
+  const champPid = group.participants.find((x) => x.user_id === champUid)?.participant_id;
+  const champPlayer = champPid ? participants.find((p) => p.participantId === champPid) : undefined;
+  if (!champPlayer) {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: [],
+      isFinal: false,
+    };
+  }
+
+  const roundNum = group.round_number ?? 1;
+  const gPidSet = new Set(group.participants.map((x) => x.participant_id));
+
+  const placement = tiebreakMatches.find(
+    (m) =>
+      m.winner_participant_id != null &&
+      String(m.winner_participant_id).length > 0 &&
+      (m.tiebreak_round ?? 1) === roundNum &&
+      m.participant_a_id !== champPid &&
+      m.participant_b_id !== champPid &&
+      gPidSet.has(m.participant_a_id) &&
+      gPidSet.has(m.participant_b_id)
+  );
+
+  const s1 = [champPlayer];
+  let s2: PodiumPlayer[] = [];
+  let s3: PodiumPlayer[] = [];
+  if (placement?.winner_participant_id) {
+    const w = placement.winner_participant_id;
+    const loserPid =
+      w === placement.participant_a_id ? placement.participant_b_id : placement.participant_a_id;
+    const second = participants.find((p) => p.participantId === w);
+    const third = participants.find((p) => p.participantId === loserPid);
+    if (second) s2 = [second];
+    if (third) s3 = [third];
+  }
+
+  const onPodium = new Set<string>([
+    champPlayer.participantId,
+    ...s2.map((p) => p.participantId),
+    ...s3.map((p) => p.participantId),
+  ]);
+  const spectators = participants.filter((p) => {
+    if (onPodium.has(p.participantId)) return false;
+    if (gPidSet.has(p.participantId)) return false;
+    return true;
+  });
+
+  const steps = buildStepsWithStools(s1, s2, s3);
+  const allClosed = !hasUnblockedPending(remaining);
+  const isFinal = allClosed && s1.length > 0 && s2.length > 0 && s3.length > 0;
+  return { steps, spectators, isFinal };
+}
+
 export function computePodium(
   participants: PodiumPlayer[],
   pairingsRemaining: PairingRemain[],
   totalPlayers: number,
-  championUserId?: string | null
+  championUserId?: string | null,
+  activeTiebreakGroup?: ActiveTiebreakGroupPodiumInput | null,
+  tiebreakMatches?: TiebreakMatchPodiumInput[] | null,
+  championDecidedBy?: string | null,
+  polemicaWinners?: string[] | null,
+  recognitionWinners?: string[] | null
 ): PodiumState {
   if (participants.length === 0) {
     return {
@@ -266,6 +394,35 @@ export function computePodium(
       spectators: [],
       isFinal: false,
     };
+  }
+
+  const polemicaIds = polemicaWinners ?? [];
+  if (championDecidedBy === 'polemica' && polemicaIds.length > 0) {
+    return podiumPolemicaMode(participants, polemicaIds, recognitionWinners ?? []);
+  }
+
+  if (activeTiebreakGroup != null) {
+    if (activeTiebreakGroup.group_type === 'bracket') {
+      // Bracket 4: lógica de podio pendiente; mismo comportamiento que sin grupo por ahora.
+    } else {
+      const gChamp = activeTiebreakGroup.champion_user_id;
+      const noGroupChampion = gChamp == null || String(gChamp).trim() === '';
+      if (noGroupChampion) {
+        return {
+          steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+          spectators: [],
+          isFinal: false,
+        };
+      }
+      if (activeTiebreakGroup.group_type === 'round_robin') {
+        return podiumRoundRobinTiebreakWithChampion(
+          participants,
+          activeTiebreakGroup,
+          tiebreakMatches ?? [],
+          pairingsRemaining
+        );
+      }
+    }
   }
 
   if (championUserId != null && String(championUserId).trim() !== '') {

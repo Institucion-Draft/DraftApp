@@ -69,6 +69,34 @@ type DbMatchRow = {
   match_type: string | null;
   match_number: number | null;
   started_at: string | null;
+  tiebreak_round: number | null;
+};
+
+type TiebreakOfficialItem = {
+  id: string;
+  participant_a_id: string;
+  participant_b_id: string;
+  official_winner_participant_id: string | null;
+  aName: string;
+  bName: string;
+  aUserId: string;
+  bUserId: string;
+  /** Lado atenuado si ya hubo ganador del tiebreak del round actual. */
+  dimLoserSide: 'a' | 'b' | null;
+  /** Ganador del tiebreak del round actual (para pie de card). */
+  tiebreakWinnerParticipantId: string | null;
+  tiebreakWinnerUserId: string | null;
+  tiebreakWinnerName: string | null;
+  status: 'in_progress' | 'scheduled' | 'completed';
+  liveScoreA: number | null;
+  liveScoreB: number | null;
+  inProgressMatchStartedAt: string | null;
+  mine: boolean;
+};
+
+type TiebreakOfficialRoundBlock = {
+  round: number;
+  items: TiebreakOfficialItem[];
 };
 
 type RevengeItemView = {
@@ -130,6 +158,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
   const [items, setItems] = useState<ItemView[]>([]);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
+  const [tiebreakOfficialSection, setTiebreakOfficialSection] = useState<{
+    groupRoundNumber: number;
+    rounds: TiebreakOfficialRoundBlock[];
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const firstLoadRef = useRef(true);
@@ -185,6 +217,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudieron cargar los enfrentamientos.');
       setItems([]);
       setRevengeItems([]);
+      setTiebreakOfficialSection(null);
       return false;
     }
 
@@ -198,7 +231,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? supabase
             .from('matches')
-            .select('id, pairing_id, status, winner_participant_id, match_type, match_number, started_at')
+            .select('id, pairing_id, status, winner_participant_id, match_type, match_number, started_at, tiebreak_round')
             .in('pairing_id', pairingIds)
         : Promise.resolve({ data: [], error: null } as any)
     );
@@ -207,6 +240,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudieron cargar detalles de enfrentamientos.');
       setItems([]);
       setRevengeItems([]);
+      setTiebreakOfficialSection(null);
       return false;
     }
 
@@ -402,6 +436,127 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setItems(mapped);
     setRevengeItems(revengeMapped);
 
+    let tiebreakSection: { groupRoundNumber: number; rounds: TiebreakOfficialRoundBlock[] } | null = null;
+    const agRes = await supabase
+      .from('event_tiebreak_groups')
+      .select('id, group_type, round_number, champion_user_id, status, created_at')
+      .eq('event_id', eventId)
+      .in('status', ['active', 'resolved', 'failed'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!agRes.error && agRes.data) {
+      const ag = agRes.data as { id: string; round_number: number; champion_user_id: string | null };
+      const gpRes = await supabase
+        .from('event_tiebreak_group_participants')
+        .select('participant_id')
+        .eq('group_id', ag.id);
+      if (!gpRes.error && gpRes.data) {
+        const gIds = new Set((gpRes.data as { participant_id: string }[]).map((x) => x.participant_id));
+        if (gIds.size >= 2) {
+          const groupRoundNumber = ag.round_number ?? 1;
+          const buildTiebreakItemsForRound = (roundNum: number): TiebreakOfficialItem[] => {
+            const tbItems: TiebreakOfficialItem[] = [];
+            for (const pairing of pairings) {
+              if (!gIds.has(pairing.participant_a_id) || !gIds.has(pairing.participant_b_id)) continue;
+              const pa = pMap.get(pairing.participant_a_id);
+              const pb = pMap.get(pairing.participant_b_id);
+              const ua = relationOne(pa?.users);
+              const ub = relationOne(pb?.users);
+              const aName = ua?.display_name || ua?.username || 'Jugador A';
+              const bName = ub?.display_name || ub?.username || 'Jugador B';
+              const aUserId = pa?.user_id ?? '';
+              const bUserId = pb?.user_id ?? '';
+              const tbWonA = safeMatches.some(
+                (m) =>
+                  m.pairing_id === pairing.id &&
+                  m.match_type === 'tiebreak' &&
+                  m.status === 'completed' &&
+                  m.winner_participant_id === pairing.participant_a_id &&
+                  (m.tiebreak_round ?? 1) === roundNum
+              );
+              const tbWonB = safeMatches.some(
+                (m) =>
+                  m.pairing_id === pairing.id &&
+                  m.match_type === 'tiebreak' &&
+                  m.status === 'completed' &&
+                  m.winner_participant_id === pairing.participant_b_id &&
+                  (m.tiebreak_round ?? 1) === roundNum
+              );
+              const tbInProg = safeMatches.find(
+                (m) =>
+                  m.pairing_id === pairing.id &&
+                  m.match_type === 'tiebreak' &&
+                  m.status === 'in_progress' &&
+                  (m.tiebreak_round ?? 1) === roundNum
+              );
+              const tbRoundFinished = tbWonA || tbWonB;
+              const st: TiebreakOfficialItem['status'] = tbInProg
+                ? 'in_progress'
+                : tbRoundFinished
+                  ? 'completed'
+                  : 'scheduled';
+              let liveScoreA: number | null = null;
+              let liveScoreB: number | null = null;
+              if (tbInProg) {
+                liveScoreA =
+                  lifeByMatchParticipant[tbInProg.id]?.[pairing.participant_a_id]?.life ?? 20;
+                liveScoreB =
+                  lifeByMatchParticipant[tbInProg.id]?.[pairing.participant_b_id]?.life ?? 20;
+              }
+              let dimLoserSide: 'a' | 'b' | null = null;
+              if (tbWonA) dimLoserSide = 'b';
+              else if (tbWonB) dimLoserSide = 'a';
+              const tiebreakWinnerParticipantId = tbWonA
+                ? pairing.participant_a_id
+                : tbWonB
+                  ? pairing.participant_b_id
+                  : null;
+              const tiebreakWinnerUserId = tbWonA ? aUserId : tbWonB ? bUserId : null;
+              const tiebreakWinnerName = tbWonA ? aName : tbWonB ? bName : null;
+              const mine =
+                !!currentUserId && (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
+              tbItems.push({
+                id: pairing.id,
+                participant_a_id: pairing.participant_a_id,
+                participant_b_id: pairing.participant_b_id,
+                official_winner_participant_id: pairing.official_winner_participant_id,
+                aName,
+                bName,
+                aUserId,
+                bUserId,
+                dimLoserSide,
+                tiebreakWinnerParticipantId,
+                tiebreakWinnerUserId,
+                tiebreakWinnerName,
+                status: st,
+                liveScoreA,
+                liveScoreB,
+                inProgressMatchStartedAt: tbInProg?.started_at ?? null,
+                mine,
+              });
+            }
+            tbItems.sort((x, y) => {
+              if (x.mine !== y.mine) return x.mine ? -1 : 1;
+              return `${x.aName} ${x.bName}`.localeCompare(`${y.aName} ${y.bName}`, 'es', {
+                sensitivity: 'base',
+              });
+            });
+            return tbItems;
+          };
+          const rounds: TiebreakOfficialRoundBlock[] =
+            groupRoundNumber >= 2
+              ? [
+                  { round: 2, items: buildTiebreakItemsForRound(2) },
+                  { round: 1, items: buildTiebreakItemsForRound(1) },
+                ]
+              : [{ round: 1, items: buildTiebreakItemsForRound(1) }];
+          tiebreakSection = { groupRoundNumber, rounds };
+        }
+      }
+    }
+    setTiebreakOfficialSection(tiebreakSection);
+
     let needsCheckIn = false;
     if (eventStatus === 'playing' && currentUserId) {
       const myP = participants.find((p) => p.user_id === currentUserId);
@@ -458,6 +613,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
         void load();
       })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_tiebreak_groups',
+          filter: `event_id=eq.${eventId}`,
+        },
+        () => {
+          void load();
+        }
+      )
       .subscribe();
     channelRef.current = channel;
     return () => {
@@ -519,6 +686,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     );
   }
 
+  const tiebreakCardsTotal =
+    tiebreakOfficialSection?.rounds.reduce((sum, b) => sum + b.items.length, 0) ?? 0;
+
   return (
     <View style={styles.root}>
       <View style={styles.tabsRow}>
@@ -539,10 +709,153 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
-          contentContainerStyle={items.length === 0 ? styles.emptyWrap : styles.listWrap}
-          ListEmptyComponent={<Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>}
+          contentContainerStyle={
+            items.length === 0 && tiebreakCardsTotal === 0 ? styles.emptyWrap : styles.listWrap
+          }
+          ListEmptyComponent={
+            items.length === 0 && tiebreakCardsTotal === 0 ? (
+              <Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>
+            ) : null
+          }
+          ListHeaderComponent={
+            tiebreakOfficialSection && tiebreakCardsTotal > 0 ? (
+              <View style={styles.tiebreakOfficialHeaderWrap}>
+                <Text style={styles.groupHeader}>Desempate</Text>
+                {tiebreakOfficialSection.rounds.map((block) => (
+                  <React.Fragment key={`tb-round-${block.round}`}>
+                    {tiebreakOfficialSection.groupRoundNumber >= 2 ? (
+                      <Text
+                        style={[styles.groupHeader, styles.officialListSectionTitle, styles.tiebreakRoundSubheader]}
+                      >
+                        Ronda {block.round}
+                      </Text>
+                    ) : null}
+                    {block.items.map((it) => {
+                      const playedRound = it.dimLoserSide != null;
+                      const cardStyles = [styles.card, styles.tiebreakCard];
+                      const swapSides = !!myUserId && it.bUserId === myUserId;
+                      const leftPid = swapSides ? it.participant_b_id : it.participant_a_id;
+                      const rightPid = swapSides ? it.participant_a_id : it.participant_b_id;
+                      const leftUserId = swapSides ? it.bUserId : it.aUserId;
+                      const rightUserId = swapSides ? it.aUserId : it.bUserId;
+                      const leftName = swapSides ? it.bName : it.aName;
+                      const rightName = swapSides ? it.aName : it.bName;
+                      const liveL = swapSides ? it.liveScoreB : it.liveScoreA;
+                      const liveR = swapSides ? it.liveScoreA : it.liveScoreB;
+                      const dimLeft =
+                        it.dimLoserSide == null
+                          ? false
+                          : swapSides
+                            ? it.dimLoserSide === 'b'
+                            : it.dimLoserSide === 'a';
+                      const dimRight =
+                        it.dimLoserSide == null
+                          ? false
+                          : swapSides
+                            ? it.dimLoserSide === 'a'
+                            : it.dimLoserSide === 'b';
+                      const inner = (
+                        <>
+                          <View style={styles.compactRow}>
+                            <View
+                              style={[styles.inlinePlayer, dimLeft ? styles.tiebreakDimmed : null]}
+                            >
+                              <PlayerAvatar
+                                userId={leftUserId}
+                                participantId={leftPid}
+                                size="small"
+                                withColorBorder
+                                borderWidth={3}
+                              />
+                              <View>
+                                <Text style={styles.name}>{leftName}</Text>
+                              </View>
+                            </View>
+                            <View style={styles.scoreWrap}>
+                              {it.status === 'in_progress' ? (
+                                <Text style={styles.scoreNum}>
+                                  {liveL ?? 20} <Text style={styles.vs}>vs</Text> {liveR ?? 20}
+                                </Text>
+                              ) : (
+                                <Text style={styles.scoreNumIdle}>vs</Text>
+                              )}
+                            </View>
+                            <View
+                              style={[
+                                styles.inlinePlayer,
+                                styles.inlinePlayerRight,
+                                dimRight ? styles.tiebreakDimmed : null,
+                              ]}
+                            >
+                              <View style={styles.playerRightText}>
+                                <Text style={styles.nameRight}>{rightName}</Text>
+                              </View>
+                              <PlayerAvatar
+                                userId={rightUserId}
+                                participantId={rightPid}
+                                size="small"
+                                withColorBorder
+                                borderWidth={3}
+                              />
+                            </View>
+                          </View>
+                          <View style={styles.footer}>
+                            <View style={styles.footerLeft}>
+                              {it.inProgressMatchStartedAt ? (
+                                <LiveMatchDuration startedAt={it.inProgressMatchStartedAt} />
+                              ) : it.tiebreakWinnerName ? (
+                                <Text style={styles.tiebreakGanoLine}>Gano: {it.tiebreakWinnerName}</Text>
+                              ) : null}
+                            </View>
+                            <View style={styles.footerCenter}>
+                              {it.status === 'in_progress' ? (
+                                <Text style={styles.liveCentered}>● EN VIVO</Text>
+                              ) : (
+                                <Text style={styles.status}>{getPairingStatusLabel(it.status)}</Text>
+                              )}
+                            </View>
+                            <View style={styles.footerRight} />
+                          </View>
+                        </>
+                      );
+                      const rowKey = `${it.id}-r${block.round}`;
+                      return playedRound ? (
+                        <View key={rowKey} style={cardStyles}>
+                          {inner}
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          key={rowKey}
+                          style={cardStyles}
+                          activeOpacity={0.7}
+                          onPress={() =>
+                            navigation.navigate('PairingDetail', { pairingId: it.id, fromTab: 'official' })
+                          }
+                        >
+                          {inner}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+                <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>Enfrentamientos</Text>
+              </View>
+            ) : null
+          }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          renderItem={({ item }) => (
+          renderItem={({ item }) => {
+            const swapSides = !!myUserId && item.bUserId === myUserId;
+            const leftUserId = swapSides ? item.bUserId : item.aUserId;
+            const rightUserId = swapSides ? item.aUserId : item.bUserId;
+            const leftPid = swapSides ? item.participant_b_id : item.participant_a_id;
+            const rightPid = swapSides ? item.participant_a_id : item.participant_b_id;
+            const leftName = swapSides ? item.bName : item.aName;
+            const rightName = swapSides ? item.aName : item.bName;
+            const winsLeft = swapSides ? item.winsB : item.winsA;
+            const winsRight = swapSides ? item.winsA : item.winsB;
+            const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
+            const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
+            return (
             <TouchableOpacity
               style={styles.card}
               onPress={() =>
@@ -552,24 +865,24 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               <View style={styles.compactRow}>
                 <View style={styles.inlinePlayer}>
                   <PlayerAvatar
-                    userId={item.aUserId}
-                    participantId={item.participant_a_id}
+                    userId={leftUserId}
+                    participantId={leftPid}
                     size="small"
                     withColorBorder
                     borderWidth={3}
                   />
                   <View>
-                    <Text style={styles.name}>{item.aName}</Text>
+                    <Text style={styles.name}>{leftName}</Text>
                     <View style={styles.bo3Row}>
-                      <View style={[styles.bo3Box, item.winsA >= 1 && styles.bo3Filled]} />
-                      <View style={[styles.bo3Box, item.winsA >= 2 && styles.bo3Filled]} />
+                      <View style={[styles.bo3Box, winsLeft >= 1 && styles.bo3Filled]} />
+                      <View style={[styles.bo3Box, winsLeft >= 2 && styles.bo3Filled]} />
                     </View>
                   </View>
                 </View>
                 <View style={styles.scoreWrap}>
                   {item.status === 'in_progress' ? (
                     <Text style={styles.scoreNum}>
-                      {item.liveScoreA ?? 20} <Text style={styles.vs}>vs</Text> {item.liveScoreB ?? 20}
+                      {liveL ?? 20} <Text style={styles.vs}>vs</Text> {liveR ?? 20}
                     </Text>
                   ) : (
                     <Text style={styles.scoreNumIdle}>vs</Text>
@@ -577,15 +890,15 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 </View>
                 <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
                   <View style={styles.playerRightText}>
-                    <Text style={styles.nameRight}>{item.bName}</Text>
+                    <Text style={styles.nameRight}>{rightName}</Text>
                     <View style={[styles.bo3Row, styles.bo3RowRight]}>
-                      <View style={[styles.bo3Box, item.winsB >= 1 && styles.bo3Filled]} />
-                      <View style={[styles.bo3Box, item.winsB >= 2 && styles.bo3Filled]} />
+                      <View style={[styles.bo3Box, winsRight >= 1 && styles.bo3Filled]} />
+                      <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
                     </View>
                   </View>
                   <PlayerAvatar
-                    userId={item.bUserId}
-                    participantId={item.participant_b_id}
+                    userId={rightUserId}
+                    participantId={rightPid}
                     size="small"
                     withColorBorder
                     borderWidth={3}
@@ -596,6 +909,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 <View style={styles.footerLeft}>
                   {item.inProgressMatchStartedAt ? (
                     <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+                  ) : item.winnerName && item.official_winner_participant_id ? (
+                    <Text style={styles.tiebreakGanoLine}>Ganó: {item.winnerName}</Text>
                   ) : null}
                 </View>
                 <View style={styles.footerCenter}>
@@ -604,26 +919,12 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   ) : (
                     <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
                   )}
-                  {item.winnerName &&
-                  item.winnerUserId &&
-                  item.official_winner_participant_id ? (
-                    <View style={styles.winnerWrap}>
-                      <PlayerAvatar
-                        userId={item.winnerUserId}
-                        participantId={item.official_winner_participant_id}
-                        size="small"
-                        withColorBorder
-                        borderWidth={3}
-                        style={styles.winnerAvatarWrap}
-                      />
-                      <Text style={styles.winnerTxt}>Ganó: {item.winnerName}</Text>
-                    </View>
-                  ) : null}
                 </View>
                 <View style={styles.footerRight} />
               </View>
             </TouchableOpacity>
-          )}
+            );
+          }}
         />
       ) : (
         <FlatList
@@ -638,7 +939,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           ListHeaderComponent={
             liveRevengeItems.length > 0 ? (
               <>
-                {liveRevengeItems.map((item) => (
+                {liveRevengeItems.map((item) => {
+                  const swapSides = !!myUserId && item.bUserId === myUserId;
+                  const leftUserId = swapSides ? item.bUserId : item.aUserId;
+                  const rightUserId = swapSides ? item.aUserId : item.bUserId;
+                  const leftPid = swapSides ? item.participantBId : item.participantAId;
+                  const rightPid = swapSides ? item.participantAId : item.participantBId;
+                  const leftName = swapSides ? item.bName : item.aName;
+                  const rightName = swapSides ? item.aName : item.bName;
+                  const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
+                  const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
+                  return (
                   <TouchableOpacity
                     key={item.matchId}
                     style={styles.card}
@@ -649,24 +960,24 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     <View style={styles.compactRow}>
                       <View style={styles.inlinePlayer}>
                         <PlayerAvatar
-                          userId={item.aUserId}
-                          participantId={item.participantAId}
+                          userId={leftUserId}
+                          participantId={leftPid}
                           size="small"
                           withColorBorder
                           borderWidth={3}
                         />
-                        <Text style={styles.name}>{item.aName}</Text>
+                        <Text style={styles.name}>{leftName}</Text>
                       </View>
                       <View style={styles.scoreWrap}>
                         <Text style={styles.scoreNum}>
-                          {item.liveScoreA ?? 20} <Text style={styles.vs}>vs</Text> {item.liveScoreB ?? 20}
+                          {liveL ?? 20} <Text style={styles.vs}>vs</Text> {liveR ?? 20}
                         </Text>
                       </View>
                       <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
-                        <Text style={styles.nameRight}>{item.bName}</Text>
+                        <Text style={styles.nameRight}>{rightName}</Text>
                         <PlayerAvatar
-                          userId={item.bUserId}
-                          participantId={item.participantBId}
+                          userId={rightUserId}
+                          participantId={rightPid}
                           size="small"
                           withColorBorder
                           borderWidth={3}
@@ -687,7 +998,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       <View style={styles.footerRight} />
                     </View>
                   </TouchableOpacity>
-                ))}
+                  );
+                })}
               </>
             ) : null
           }
@@ -706,7 +1018,15 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   </Text>
                 );
               })()}
-              {group.items.map((item) => (
+              {group.items.map((item) => {
+                const swapSides = !!myUserId && item.bUserId === myUserId;
+                const leftUserId = swapSides ? item.bUserId : item.aUserId;
+                const rightUserId = swapSides ? item.aUserId : item.bUserId;
+                const leftPid = swapSides ? item.participantBId : item.participantAId;
+                const rightPid = swapSides ? item.participantAId : item.participantBId;
+                const leftName = swapSides ? item.bName : item.aName;
+                const rightName = swapSides ? item.aName : item.bName;
+                return (
                 <TouchableOpacity
                   key={item.matchId}
                   style={styles.card}
@@ -717,22 +1037,22 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   <View style={styles.compactRow}>
                     <View style={styles.inlinePlayer}>
                       <PlayerAvatar
-                        userId={item.aUserId}
-                        participantId={item.participantAId}
+                        userId={leftUserId}
+                        participantId={leftPid}
                         size="small"
                         withColorBorder
                         borderWidth={3}
                       />
-                      <Text style={styles.name}>{item.aName}</Text>
+                      <Text style={styles.name}>{leftName}</Text>
                     </View>
                     <View style={styles.scoreWrap}>
                       <Text style={styles.scoreNumIdle}>vs</Text>
                     </View>
                     <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
-                      <Text style={styles.nameRight}>{item.bName}</Text>
+                      <Text style={styles.nameRight}>{rightName}</Text>
                       <PlayerAvatar
-                        userId={item.bUserId}
-                        participantId={item.participantBId}
+                        userId={rightUserId}
+                        participantId={rightPid}
                         size="small"
                         withColorBorder
                         borderWidth={3}
@@ -747,7 +1067,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     )}
                   </View>
                 </TouchableOpacity>
-              ))}
+                );
+              })}
             </View>
           )}
         />
@@ -775,6 +1096,22 @@ const styles = StyleSheet.create({
   listWrap: { padding: 16, paddingBottom: 30 },
   groupWrap: { marginBottom: 12 },
   groupHeader: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 8, marginTop: 2 },
+  tiebreakOfficialHeaderWrap: { marginBottom: 4 },
+  officialListSectionTitle: { marginTop: 18 },
+  tiebreakRoundSubheader: { marginTop: 12, marginBottom: 2 },
+  tiebreakDimmed: { opacity: 0.4 },
+  tiebreakCard: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  tiebreakCardPlayed: { opacity: 0.7 },
+  tiebreakGanoLine: {
+    alignSelf: 'stretch',
+    color: '#166534',
+    fontWeight: '600',
+    fontSize: 12,
+    textAlign: 'left',
+  },
   emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   empty: { color: '#666', fontSize: 15 },
   card: {

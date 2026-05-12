@@ -38,10 +38,13 @@ type PairingRow = {
 };
 
 type MatchRow = {
+  id: string;
   pairing_id: string;
   match_type: string;
   status: string;
   winner_participant_id: string | null;
+  ended_at: string | null;
+  tiebreak_round: number | null;
 };
 
 type EventPlayer = {
@@ -69,6 +72,19 @@ type RevengeH2HRow = {
   opponentHasRevengeCup: boolean;
   profileHasSuperCup: boolean;
   opponentHasSuperCup: boolean;
+};
+
+type TiebreakProfileRow = {
+  matchId: string;
+  pairingId: string;
+  opponentParticipantId: string;
+  opponentUserId: string;
+  opponentName: string;
+  profileGames: number;
+  opponentGames: number;
+  winnerName: string;
+  endedAt: string | null;
+  tiebreakRound: number;
 };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -145,11 +161,17 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [officialH2h, setOfficialH2h] = useState<OfficialH2HRow[]>([]);
   const [revengeH2h, setRevengeH2h] = useState<RevengeH2HRow[]>([]);
   const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
+  const [profileInTiebreakGroup, setProfileInTiebreakGroup] = useState(false);
+  const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
+  const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
 
   const load = useCallback(async () => {
     const meRes = await supabase.auth.getUser();
     const currentUserId = meRes.data.user?.id ?? null;
     setMyUserId(currentUserId);
+    setProfileInTiebreakGroup(false);
+    setProfileTiebreakRows([]);
+    setProfileTiebreakGroupRound(1);
 
     const { data: pRow, error: pErr } = await supabase
       .from('event_participants')
@@ -279,7 +301,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                     .from('matches')
                     .select('pairing_id, winner_participant_id, ended_at')
                     .in('pairing_id', pairingIds)
-                    .in('match_type', ['draft', 'final'])
+                    .in('match_type', ['draft', 'final', 'tiebreak'])
                     .eq('status', 'completed')
                     .not('winner_participant_id', 'is', null)
                     .order('ended_at', { ascending: false })
@@ -351,7 +373,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       pairingIds.length > 0
         ? await supabase
             .from('matches')
-            .select('pairing_id, match_type, status, winner_participant_id')
+            .select('id, pairing_id, match_type, status, winner_participant_id, ended_at, tiebreak_round')
             .in('pairing_id', pairingIds)
         : { data: [], error: null };
 
@@ -477,6 +499,66 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     });
     setRevengeH2h(revRows);
 
+    const tgRes = await supabase
+      .from('event_tiebreak_groups')
+      .select('id, round_number')
+      .eq('event_id', eventId)
+      .in('status', ['active', 'resolved', 'failed'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!tgRes.error && tgRes.data?.id) {
+      const tgRound = (tgRes.data as { round_number?: number }).round_number ?? 1;
+      const gpRes = await supabase
+        .from('event_tiebreak_group_participants')
+        .select('participant_id, user_id')
+        .eq('group_id', tgRes.data.id);
+      if (!gpRes.error && gpRes.data) {
+        const gList = gpRes.data as { participant_id: string; user_id: string }[];
+        const gPidSet = new Set(gList.map((r) => r.participant_id));
+        const uidByPid = new Map(gList.map((r) => [r.participant_id, r.user_id]));
+        if (gPidSet.has(participantId)) {
+          setProfileInTiebreakGroup(true);
+          setProfileTiebreakGroupRound(tgRound);
+          const pairingById = new Map(pairings.map((p) => [p.id, p]));
+          const tbRows: TiebreakProfileRow[] = [];
+          for (const m of matches) {
+            if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
+            const pr = pairingById.get(m.pairing_id);
+            if (!pr) continue;
+            if (!gPidSet.has(pr.participant_a_id) || !gPidSet.has(pr.participant_b_id)) continue;
+            let oppId: string | null = null;
+            if (pr.participant_a_id === participantId) oppId = pr.participant_b_id;
+            else if (pr.participant_b_id === participantId) oppId = pr.participant_a_id;
+            else continue;
+            const oppPlayer = players.find((p) => p.id === oppId);
+            const winPid = String(m.winner_participant_id);
+            const winnerPlayer = players.find((p) => p.id === winPid);
+            const profileWon = winPid === participantId;
+            tbRows.push({
+              matchId: m.id,
+              pairingId: pr.id,
+              opponentParticipantId: oppId,
+              opponentUserId: oppPlayer?.userId ?? uidByPid.get(oppId) ?? '',
+              opponentName: oppPlayer?.displayName ?? 'Jugador',
+              profileGames: profileWon ? 1 : 0,
+              opponentGames: profileWon ? 0 : 1,
+              winnerName: winnerPlayer?.displayName ?? 'Jugador',
+              endedAt: m.ended_at,
+              tiebreakRound: m.tiebreak_round != null ? Number(m.tiebreak_round) : 1,
+            });
+          }
+          tbRows.sort((a, b) => {
+            const ta = a.endedAt ? new Date(a.endedAt).getTime() : 0;
+            const tb = b.endedAt ? new Date(b.endedAt).getTime() : 0;
+            return tb - ta;
+          });
+          setProfileTiebreakRows(tbRows);
+        }
+      }
+    }
+
     setLoading(false);
   }, [eventId, participantId]);
 
@@ -560,6 +642,127 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           <Text style={styles.winRateValue}>{formatWinRate(matchesWon, matchesPlayed)}</Text>
         </View>
       </View>
+      {profileInTiebreakGroup ? (
+        <>
+          <Text style={styles.sectionTitle}>Desempate</Text>
+          {profileTiebreakRows.length === 0 ? (
+            <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
+          ) : profileTiebreakGroupRound >= 2 ? (
+            <>
+              {[2, 1].map((rn) => {
+                const rows = profileTiebreakRows.filter((r) => r.tiebreakRound === rn);
+                if (rows.length === 0) return null;
+                return (
+                  <React.Fragment key={`tb-prof-${rn}`}>
+                    <Text style={styles.tiebreakProfileRoundTitle}>Ronda {rn}</Text>
+                    {rows.map((row) => (
+                      <TouchableOpacity
+                        key={row.matchId}
+                        style={styles.h2hCard}
+                        activeOpacity={0.7}
+                        onPress={() => navigation.navigate('MatchResult', { matchId: row.matchId })}
+                      >
+                        <View style={styles.tiebreakVsRow}>
+                          <View style={styles.tiebreakVsLeft}>
+                            {userId ? (
+                              <PlayerAvatar
+                                userId={userId}
+                                participantId={participantId}
+                                size="small"
+                                withColorBorder
+                                borderWidth={3}
+                              />
+                            ) : null}
+                            <View style={styles.tiebreakVsLeftText}>
+                              <Text style={styles.tiebreakH2hOpponentName} numberOfLines={1}>
+                                {displayName}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={styles.tiebreakVsMid}>
+                            <Text style={styles.tiebreakH2hScore}>
+                              {row.profileGames} - {row.opponentGames}
+                            </Text>
+                            <Text style={styles.tiebreakH2hWinner}>Ganó: {row.winnerName}</Text>
+                          </View>
+                          <View style={styles.tiebreakVsRight}>
+                            <View style={styles.tiebreakVsRightText}>
+                              <Text
+                                style={[styles.tiebreakH2hOpponentName, styles.tiebreakH2hNameRight]}
+                                numberOfLines={1}
+                              >
+                                {row.opponentName}
+                              </Text>
+                            </View>
+                            <PlayerAvatar
+                              userId={row.opponentUserId}
+                              participantId={row.opponentParticipantId}
+                              size="small"
+                              withColorBorder
+                              borderWidth={3}
+                            />
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </>
+          ) : (
+            profileTiebreakRows.map((row) => (
+              <TouchableOpacity
+                key={row.matchId}
+                style={styles.h2hCard}
+                activeOpacity={0.7}
+                onPress={() => navigation.navigate('MatchResult', { matchId: row.matchId })}
+              >
+                <View style={styles.tiebreakVsRow}>
+                  <View style={styles.tiebreakVsLeft}>
+                    {userId ? (
+                      <PlayerAvatar
+                        userId={userId}
+                        participantId={participantId}
+                        size="small"
+                        withColorBorder
+                        borderWidth={3}
+                      />
+                    ) : null}
+                    <View style={styles.tiebreakVsLeftText}>
+                      <Text style={styles.tiebreakH2hOpponentName} numberOfLines={1}>
+                        {displayName}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.tiebreakVsMid}>
+                    <Text style={styles.tiebreakH2hScore}>
+                      {row.profileGames} - {row.opponentGames}
+                    </Text>
+                    <Text style={styles.tiebreakH2hWinner}>Ganó: {row.winnerName}</Text>
+                  </View>
+                  <View style={styles.tiebreakVsRight}>
+                    <View style={styles.tiebreakVsRightText}>
+                      <Text
+                        style={[styles.tiebreakH2hOpponentName, styles.tiebreakH2hNameRight]}
+                        numberOfLines={1}
+                      >
+                        {row.opponentName}
+                      </Text>
+                    </View>
+                    <PlayerAvatar
+                      userId={row.opponentUserId}
+                      participantId={row.opponentParticipantId}
+                      size="small"
+                      withColorBorder
+                      borderWidth={3}
+                    />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </>
+      ) : null}
       <Text style={styles.sectionTitle}>Enfrentamientos</Text>
       {officialH2h.map((row) => (
         <TouchableOpacity
@@ -946,6 +1149,40 @@ const styles = StyleSheet.create({
   h2hNameSide: { flex: 1, fontSize: 13, fontWeight: '700', color: '#111827' },
   h2hNameSideRight: { textAlign: 'right' },
   h2hVs: { fontSize: 12, fontWeight: '700', color: '#6B7280', flexShrink: 0 },
+  tiebreakVsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  tiebreakVsLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  tiebreakVsLeftText: { flex: 1, minWidth: 0 },
+  tiebreakVsMid: { alignItems: 'center', minWidth: 76, paddingHorizontal: 4 },
+  tiebreakVsRight: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    minWidth: 0,
+  },
+  tiebreakVsRightText: { flex: 1, minWidth: 0, alignItems: 'flex-end' },
+  tiebreakH2hNameRight: { textAlign: 'right', alignSelf: 'stretch' },
+  tiebreakH2hOpponentName: { fontSize: 13, fontWeight: '700', color: '#111827' },
+  tiebreakH2hScore: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    marginTop: 4,
+  },
+  tiebreakH2hWinner: { fontSize: 12, fontWeight: '600', color: '#166534', marginTop: 4 },
+  tiebreakProfileRoundTitle: { fontSize: 15, fontWeight: '800', color: '#111827', marginTop: 12, marginBottom: 8 },
   h2hBo3Outer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
