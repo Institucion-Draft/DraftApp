@@ -21,7 +21,13 @@ import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
 import { type Gender } from '../lib/genderText';
-import { computePodium, type PodiumState, type ActiveTiebreakGroupPodiumInput, type TiebreakMatchPodiumInput } from '../lib/podium';
+import {
+  computePodium,
+  type PodiumState,
+  type ActiveTiebreakGroupPodiumInput,
+  type TiebreakMatchPodiumInput,
+  type BracketMatchPodiumInput,
+} from '../lib/podium';
 
 /** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
 const PODIUM_COL_WIDTH = 132;
@@ -446,6 +452,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     let podiumTiebreakGroup: ActiveTiebreakGroupPodiumInput | null = null;
     let podiumTiebreakMatches: TiebreakMatchPodiumInput[] = [];
+    let podiumBracketMatches: BracketMatchPodiumInput[] = [];
     if (!tiebreakGroupRes.error && tiebreakGroupRes.data) {
       const tgRow = tiebreakGroupRes.data as {
         id: string;
@@ -484,6 +491,26 @@ export default function StandingsScreen({ route, navigation }: Props) {
           tiebreak_round: m.tiebreak_round != null ? Number(m.tiebreak_round) : null,
         });
       }
+      if (tgRow.group_type === 'bracket') {
+        const bmRes = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
+          .eq('group_id', tgRow.id);
+        if (!bmRes.error && bmRes.data) {
+          podiumBracketMatches = (bmRes.data as {
+            bracket_phase: 'semi' | 'final' | 'third_place';
+            participant_a_id: string;
+            participant_b_id: string;
+            winner_participant_id: string | null;
+          }[]).map((r) => ({
+            bracket_phase: r.bracket_phase,
+            participant_a_id: String(r.participant_a_id),
+            participant_b_id: String(r.participant_b_id),
+            winner_participant_id:
+              r.winner_participant_id != null ? String(r.winner_participant_id) : null,
+          }));
+        }
+      }
     }
 
     setPodiumState(
@@ -496,7 +523,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         podiumTiebreakMatches,
         championDecidedBy,
         polemicaWinners,
-        recognitionWinners
+        recognitionWinners,
+        podiumBracketMatches
       )
     );
 
@@ -561,9 +589,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
       return { participantId: pid, userId, name, colors, pg, pj, eg, ec, dmv, tmp, inProgress, leftEventAt, gender };
     });
 
+    const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
+    const winrateMatches = (r: RowView) => (r.pj > 0 ? r.pg / r.pj : 0);
     rowsBuilt.sort((a, b) => {
-      if (b.eg !== a.eg) return b.eg - a.eg;
-      if (b.pg !== a.pg) return b.pg - a.pg;
+      const wbA = winrateBO3(a);
+      const wbB = winrateBO3(b);
+      if (wbA !== wbB) return wbB - wbA;
+      const wmA = winrateMatches(a);
+      const wmB = winrateMatches(b);
+      if (wmA !== wmB) return wmB - wmA;
       const av = a.dmv ?? -Infinity;
       const bv = b.dmv ?? -Infinity;
       return bv - av;
@@ -740,6 +774,16 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const avatarSize = cnt > 0 ? podiumStepAvatarSize(cnt) : ('large' as PlayerAvatarSize);
     const avatarBorder = cnt <= 1 ? 3 : 2;
 
+    const isCompactStep = cnt >= 5;
+    const compactBorder = 1;
+    const compactNativeOuter = AVATAR_DIAM_TINY + 2 * compactBorder;
+    const compactFitMax =
+      cnt > 1
+        ? Math.floor((PODIUM_COL_WIDTH - (cnt - 1) * PODIUM_AVATAR_ROW_GAP) / cnt)
+        : compactNativeOuter;
+    const compactOuter = Math.max(12, Math.min(20, compactFitMax));
+    const compactScale = compactOuter / compactNativeOuter;
+
     const renderOneAvatar = (pl: (typeof players)[number]) => (
       <TouchableOpacity
         key={pl.participantId}
@@ -753,13 +797,34 @@ export default function StandingsScreen({ route, navigation }: Props) {
           })
         }
       >
-        <PlayerAvatar
-          userId={pl.avatarUserId}
-          participantId={pl.participantId}
-          size={avatarSize}
-          withColorBorder
-          borderWidth={avatarBorder}
-        />
+        {isCompactStep ? (
+          <View
+            style={{
+              width: compactOuter,
+              height: compactOuter,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View style={{ transform: [{ scale: compactScale }] }}>
+              <PlayerAvatar
+                userId={pl.avatarUserId}
+                participantId={pl.participantId}
+                size="tiny"
+                withColorBorder
+                borderWidth={compactBorder}
+              />
+            </View>
+          </View>
+        ) : (
+          <PlayerAvatar
+            userId={pl.avatarUserId}
+            participantId={pl.participantId}
+            size={avatarSize}
+            withColorBorder
+            borderWidth={avatarBorder}
+          />
+        )}
         {(pl.onStool === true || stoolId === pl.participantId) ? (
           <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
             🪑
