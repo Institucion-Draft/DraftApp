@@ -54,6 +54,14 @@ export type TiebreakMatchPodiumInput = {
   tiebreak_round: number | null;
 };
 
+/** Fila de event_tiebreak_bracket_matches; usada para reconstruir el podio del bracket de 4. */
+export type BracketMatchPodiumInput = {
+  bracket_phase: 'semi' | 'final' | 'third_place';
+  participant_a_id: string;
+  participant_b_id: string;
+  winner_participant_id: string | null;
+};
+
 function emptyStep(rank: 1 | 2 | 3): PodiumStep {
   return { rank, players: [], topPlayerOnStool: null };
 }
@@ -177,11 +185,17 @@ function buildStepsWithStools(s1: PodiumPlayer[], s2: PodiumPlayer[], s3: Podium
   ];
 }
 
-/** Copa Polémica: 1° unión polemica + reconocimiento (banquito solo polemica); 2°/3° por WR BO3 del resto. */
+/**
+ * Copa Polémica / Copa Fragmentada:
+ * - Polémica (`mode === 'polemica'`): 1° unión polemica + reconocimiento, banquito solo en polemica.
+ * - Fragmentada (`mode === 'fragmentada'`): 1° todos los polemica, sin banquito; recognition se ignora.
+ * 2°/3° por WR BO3 del resto en ambos modos.
+ */
 function podiumPolemicaMode(
   participants: PodiumPlayer[],
   polemicaUserIds: string[],
-  recognitionUserIds: string[]
+  recognitionUserIds: string[],
+  mode: 'polemica' | 'fragmentada'
 ): PodiumState {
   const polemicaSet = new Set(
     polemicaUserIds.map((uid) => String(uid).trim()).filter((u) => u.length > 0)
@@ -197,11 +211,13 @@ function podiumPolemicaMode(
     s1Raw.push(p);
   };
   for (const uid of polemicaUserIds) pushByUserId(uid);
-  for (const uid of recognitionUserIds) pushByUserId(uid);
+  if (mode === 'polemica') {
+    for (const uid of recognitionUserIds) pushByUserId(uid);
+  }
 
   const s1: PodiumPlayer[] = s1Raw.map((p) => ({
     ...p,
-    onStool: polemicaSet.has(String(p.userId).trim()),
+    onStool: mode === 'polemica' && polemicaSet.has(String(p.userId).trim()),
   }));
 
   const onFirst = new Set(s1.map((p) => p.participantId));
@@ -377,6 +393,62 @@ function podiumRoundRobinTiebreakWithChampion(
   return { steps, spectators, isFinal };
 }
 
+/** Bracket de 4 resuelto: 1º campeón, 2º perdedor de la final, 3º ganador del 3er/4to puesto. */
+function podiumBracketFinalMode(
+  participants: PodiumPlayer[],
+  group: ActiveTiebreakGroupPodiumInput,
+  bracketMatches: BracketMatchPodiumInput[],
+  remaining: PairingRemain[]
+): PodiumState {
+  const champUid = group.champion_user_id;
+  const champPid = champUid
+    ? group.participants.find((x) => x.user_id === champUid)?.participant_id ?? null
+    : null;
+  const champPlayer = champPid ? participants.find((p) => p.participantId === champPid) : undefined;
+  if (!champPlayer) {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: [],
+      isFinal: false,
+    };
+  }
+
+  const finalRow = bracketMatches.find((m) => m.bracket_phase === 'final');
+  const thirdRow = bracketMatches.find((m) => m.bracket_phase === 'third_place');
+
+  let s2: PodiumPlayer[] = [];
+  let s3: PodiumPlayer[] = [];
+  if (finalRow && finalRow.winner_participant_id) {
+    const loserPid =
+      finalRow.winner_participant_id === finalRow.participant_a_id
+        ? finalRow.participant_b_id
+        : finalRow.participant_a_id;
+    const second = participants.find((p) => p.participantId === loserPid);
+    if (second) s2 = [second];
+  }
+  if (thirdRow && thirdRow.winner_participant_id) {
+    const third = participants.find((p) => p.participantId === thirdRow.winner_participant_id);
+    if (third) s3 = [third];
+  }
+
+  const gPidSet = new Set(group.participants.map((x) => x.participant_id));
+  const onPodium = new Set<string>([
+    champPlayer.participantId,
+    ...s2.map((p) => p.participantId),
+    ...s3.map((p) => p.participantId),
+  ]);
+  const spectators = participants.filter((p) => {
+    if (onPodium.has(p.participantId)) return false;
+    if (gPidSet.has(p.participantId)) return false;
+    return true;
+  });
+
+  const steps = buildStepsWithStools([champPlayer], s2, s3);
+  const allClosed = !hasUnblockedPending(remaining);
+  const isFinal = allClosed && s2.length > 0 && s3.length > 0;
+  return { steps, spectators, isFinal };
+}
+
 export function computePodium(
   participants: PodiumPlayer[],
   pairingsRemaining: PairingRemain[],
@@ -386,7 +458,8 @@ export function computePodium(
   tiebreakMatches?: TiebreakMatchPodiumInput[] | null,
   championDecidedBy?: string | null,
   polemicaWinners?: string[] | null,
-  recognitionWinners?: string[] | null
+  recognitionWinners?: string[] | null,
+  bracketMatches?: BracketMatchPodiumInput[] | null
 ): PodiumState {
   if (participants.length === 0) {
     return {
@@ -397,16 +470,36 @@ export function computePodium(
   }
 
   const polemicaIds = polemicaWinners ?? [];
-  if (championDecidedBy === 'polemica' && polemicaIds.length > 0) {
-    return podiumPolemicaMode(participants, polemicaIds, recognitionWinners ?? []);
+  if (
+    (championDecidedBy === 'polemica' || championDecidedBy === 'fragmentada') &&
+    polemicaIds.length > 0
+  ) {
+    return podiumPolemicaMode(
+      participants,
+      polemicaIds,
+      recognitionWinners ?? [],
+      championDecidedBy === 'fragmentada' ? 'fragmentada' : 'polemica'
+    );
   }
 
   if (activeTiebreakGroup != null) {
+    const gChamp = activeTiebreakGroup.champion_user_id;
+    const noGroupChampion = gChamp == null || String(gChamp).trim() === '';
     if (activeTiebreakGroup.group_type === 'bracket') {
-      // Bracket 4: lógica de podio pendiente; mismo comportamiento que sin grupo por ahora.
+      if (noGroupChampion) {
+        return {
+          steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+          spectators: [],
+          isFinal: false,
+        };
+      }
+      return podiumBracketFinalMode(
+        participants,
+        activeTiebreakGroup,
+        bracketMatches ?? [],
+        pairingsRemaining
+      );
     } else {
-      const gChamp = activeTiebreakGroup.champion_user_id;
-      const noGroupChampion = gChamp == null || String(gChamp).trim() === '';
       if (noGroupChampion) {
         return {
           steps: [emptyStep(1), emptyStep(2), emptyStep(3)],

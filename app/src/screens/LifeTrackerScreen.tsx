@@ -72,7 +72,7 @@ function clampLife(value: number): number {
   return Math.max(0, value);
 }
 
-async function navigateAfterTiebreakMaybeComplete(
+async function navigateAfterMatchMaybeComplete(
   navigation: NativeStackNavigationProp<MainStackParamList, 'LifeTracker'>,
   eventId: string,
   matchId: string,
@@ -564,13 +564,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 Alert.alert('Error', endRes.error.message ?? 'No se pudo cerrar la partida.');
                 return;
               }
-              const { data: closedMeta } = await supabase
-                .from('matches')
-                .select('match_type')
-                .eq('id', matchId)
-                .maybeSingle();
-              if (closedMeta?.match_type === 'tiebreak' && pairing) {
-                void navigateAfterTiebreakMaybeComplete(
+              if (pairing) {
+                void navigateAfterMatchMaybeComplete(
                   navigation,
                   pairing.event_id,
                   matchId,
@@ -664,13 +659,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             Alert.alert('Error', error.message ?? 'No se pudo cerrar la partida.');
             return;
           }
-          const { data: closedMeta } = await supabase
-            .from('matches')
-            .select('match_type')
-            .eq('id', matchId)
-            .maybeSingle();
-          if (closedMeta?.match_type === 'tiebreak' && pairing) {
-            void navigateAfterTiebreakMaybeComplete(
+          if (pairing) {
+            void navigateAfterMatchMaybeComplete(
               navigation,
               pairing.event_id,
               matchId,

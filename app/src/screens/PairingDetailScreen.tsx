@@ -139,6 +139,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   /** Empate a 2 vías (sin fila en event_tiebreak_groups). */
   const [legacyTwoWayTiebreak, setLegacyTwoWayTiebreak] = useState(false);
   const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
+  const [bracketMatchRow, setBracketMatchRow] = useState<{
+    id: string;
+    bracket_phase: 'semi' | 'final' | 'third_place';
+    pairing_id: string | null;
+    participant_a_id: string;
+    participant_b_id: string;
+    winner_participant_id: string | null;
+  } | null>(null);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
   const firstRef = useRef(true);
@@ -200,7 +208,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         .from('event_tiebreak_groups')
         .select('id, group_type, round_number, status, champion_user_id')
         .eq('event_id', p.event_id)
-        .eq('status', 'active')
+        .in('status', ['active', 'resolved'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle(),
     ]);
 
@@ -259,6 +269,33 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       }
     }
     setActiveTiebreakGroup(tiebreakGroupState);
+
+    let bracketRow: typeof bracketMatchRow = null;
+    if (tiebreakGroupState && tiebreakGroupState.group_type === 'bracket') {
+      const bmRes = await supabase
+        .from('event_tiebreak_bracket_matches')
+        .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
+        .eq('group_id', tiebreakGroupState.id);
+      if (!bmRes.error && bmRes.data) {
+        const rows = bmRes.data as {
+          id: string;
+          bracket_phase: 'semi' | 'final' | 'third_place';
+          pairing_id: string | null;
+          participant_a_id: string;
+          participant_b_id: string;
+          winner_participant_id: string | null;
+        }[];
+        bracketRow =
+          rows.find((bm) => bm.pairing_id === p.id) ??
+          rows.find(
+            (bm) =>
+              (bm.participant_a_id === p.participant_a_id && bm.participant_b_id === p.participant_b_id) ||
+              (bm.participant_a_id === p.participant_b_id && bm.participant_b_id === p.participant_a_id)
+          ) ??
+          null;
+      }
+    }
+    setBracketMatchRow(bracketRow);
 
     const ev = eventRes.data as {
       status?: string;
@@ -512,20 +549,26 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const isParticipant = !!myUserId && (a?.user_id === myUserId || b?.user_id === myUserId);
   const inProgressMatch = matches.find((m) => m.status === 'in_progress') ?? null;
 
+  const isBracketGroup = activeTiebreakGroup?.group_type === 'bracket';
+
   const pairingIsInActiveGroup = Boolean(
     activeTiebreakGroup &&
-      activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_a_id) &&
-      activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_b_id)
+      (isBracketGroup
+        ? bracketMatchRow != null
+        : activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_a_id) &&
+          activeTiebreakGroup.participants.some((p) => p.participant_id === pairing.participant_b_id))
   );
 
   const currentRoundMatchAlreadyPlayed = Boolean(
     activeTiebreakGroup &&
-      matches.some(
-        (m) =>
-          m.match_type === 'tiebreak' &&
-          m.status === 'completed' &&
-          (m.tiebreak_round ?? 1) === activeTiebreakGroup.round_number
-      )
+      (isBracketGroup
+        ? bracketMatchRow?.winner_participant_id != null
+        : matches.some(
+            (m) =>
+              m.match_type === 'tiebreak' &&
+              m.status === 'completed' &&
+              (m.tiebreak_round ?? 1) === activeTiebreakGroup.round_number
+          ))
   );
 
   const isTiebreakPendingMulti =
@@ -574,6 +617,20 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       : null;
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle = 'Desempate';
+  const bracketRowLabel = bracketMatchRow
+    ? bracketMatchRow.bracket_phase === 'semi'
+      ? '#Semifinal'
+      : bracketMatchRow.bracket_phase === 'final'
+        ? '#Final'
+        : '#3er y 4to puesto'
+    : null;
+  const bracketPhaseTitle = bracketMatchRow
+    ? bracketMatchRow.bracket_phase === 'semi'
+      ? 'semifinal'
+      : bracketMatchRow.bracket_phase === 'final'
+        ? 'final'
+        : '3er y 4to puesto'
+    : null;
   const winsA = officialMs.filter(
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
   ).length;
@@ -604,14 +661,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   const startButtonLabel = inProgressMatch
     ? inProgressMatch.match_type === 'tiebreak'
-      ? 'Retomar desempate en curso'
+      ? bracketPhaseTitle
+        ? `Retomar ${bracketPhaseTitle} en curso`
+        : 'Retomar desempate en curso'
       : inProgressMatch.match_type === 'revenge'
       ? 'Retomar venganza en curso'
       : 'Retomar partida en curso'
     : placementButtonPending
     ? 'Definir 2do y 3er puesto'
     : isTiebreakPending
-    ? 'Iniciar desempate'
+    ? bracketPhaseTitle
+      ? `Iniciar ${bracketPhaseTitle}`
+      : 'Iniciar desempate'
     : pairing.official_winner_participant_id != null
     ? 'Iniciar venganza'
     : 'Iniciar partida';
@@ -796,12 +857,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showTiebreakSection ? (
               <>
                 <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>{tiebreakSectionTitle}</Text>
-                <Text style={styles.revengeCounter}>
-                  {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
-                  {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
-                </Text>
+                {bracketMatchRow ? null : (
+                  <Text style={styles.revengeCounter}>
+                    {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
+                    {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
+                  </Text>
+                )}
                 {tiebreakMs.length === 0 ? (
-                  <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
+                  bracketMatchRow ? null : (
+                    <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
+                  )
                 ) : (
                   tiebreakMs.map((m, idx) => {
                     const displayNum = idx + 1;
@@ -809,12 +874,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                     const showLive =
                       m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                     const roundSuffix = (m.tiebreak_round ?? 1) >= 2 ? ` · Ronda ${m.tiebreak_round}` : '';
+                    const rowLabel = bracketRowLabel ?? `#${displayNum}${roundSuffix}`;
                     return (
                       <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                         <View style={styles.matchRowMain}>
                           <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                            #{displayNum}
-                            {roundSuffix} ·{' '}
+                            {rowLabel} ·{' '}
                             {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
                           </Text>
                           {showLive ? (

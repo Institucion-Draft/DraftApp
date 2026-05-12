@@ -163,6 +163,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   } | null>(null);
   const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
   const [tiebreakVsNav, setTiebreakVsNav] = useState<{ pairingId: string; opponentName: string }[]>([]);
+  const [currentUserInBracketWaiting, setCurrentUserInBracketWaiting] = useState(false);
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
 
@@ -181,6 +182,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       setEvent(null);
       setActiveTiebreakGroup(null);
       setTiebreakVsNav([]);
+      setCurrentUserInBracketWaiting(false);
       return;
     }
     const e = data as EventRow;
@@ -188,6 +190,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setTiebreakBanner(null);
     setActiveTiebreakGroup(null);
     setTiebreakVsNav([]);
+    setCurrentUserInBracketWaiting(false);
     setChampionName(null);
     setChampionGender(null);
     setChampionOfficialWins(0);
@@ -296,32 +299,82 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       multiTiebreakGroup?.champion_user_id != null &&
       String(multiTiebreakGroup.champion_user_id).trim() !== '';
     const vsNav: { pairingId: string; opponentName: string }[] = [];
+    let inBracketWaiting = false;
     if (multiTiebreakGroup && !groupHasChampionOnRow && currentUserId) {
       const meGp = multiTiebreakGroup.participants.find((x) => x.user_id === currentUserId);
       if (meGp) {
-        const prRes = await supabase
-          .from('pairings')
-          .select('id, participant_a_id, participant_b_id')
-          .eq('event_id', e.id);
-        if (!prRes.error && prRes.data) {
-          for (const opp of multiTiebreakGroup.participants) {
-            if (opp.participant_id === meGp.participant_id) continue;
-            const row = (prRes.data as { id: string; participant_a_id: string; participant_b_id: string }[]).find(
-              (r) =>
-                (r.participant_a_id === meGp.participant_id && r.participant_b_id === opp.participant_id) ||
-                (r.participant_b_id === meGp.participant_id && r.participant_a_id === opp.participant_id)
+        if (multiTiebreakGroup.group_type === 'bracket') {
+          const bmRes = await supabase
+            .from('event_tiebreak_bracket_matches')
+            .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
+            .eq('group_id', multiTiebreakGroup.id);
+          if (!bmRes.error && bmRes.data) {
+            const rows = bmRes.data as {
+              id: string;
+              bracket_phase: string;
+              pairing_id: string | null;
+              participant_a_id: string;
+              participant_b_id: string;
+              winner_participant_id: string | null;
+            }[];
+            const mine = rows.find(
+              (bm) =>
+                bm.winner_participant_id == null &&
+                (bm.participant_a_id === meGp.participant_id || bm.participant_b_id === meGp.participant_id)
             );
-            if (row) {
-              vsNav.push({
-                pairingId: row.id,
-                opponentName: relationOne(opp.users)?.display_name?.trim() || 'Jugador',
-              });
+            if (mine) {
+              const oppPid =
+                mine.participant_a_id === meGp.participant_id ? mine.participant_b_id : mine.participant_a_id;
+              const opp = multiTiebreakGroup.participants.find((p) => p.participant_id === oppPid);
+              const oppName = relationOne(opp?.users)?.display_name?.trim() || 'Jugador';
+              let pairingId = mine.pairing_id;
+              if (!pairingId) {
+                const prRes = await supabase
+                  .from('pairings')
+                  .select('id, participant_a_id, participant_b_id')
+                  .eq('event_id', e.id);
+                if (!prRes.error && prRes.data) {
+                  const row = (prRes.data as { id: string; participant_a_id: string; participant_b_id: string }[]).find(
+                    (r) =>
+                      (r.participant_a_id === meGp.participant_id && r.participant_b_id === oppPid) ||
+                      (r.participant_b_id === meGp.participant_id && r.participant_a_id === oppPid)
+                  );
+                  if (row) pairingId = row.id;
+                }
+              }
+              if (pairingId) {
+                vsNav.push({ pairingId, opponentName: oppName });
+              }
+            } else {
+              inBracketWaiting = true;
+            }
+          }
+        } else {
+          const prRes = await supabase
+            .from('pairings')
+            .select('id, participant_a_id, participant_b_id')
+            .eq('event_id', e.id);
+          if (!prRes.error && prRes.data) {
+            for (const opp of multiTiebreakGroup.participants) {
+              if (opp.participant_id === meGp.participant_id) continue;
+              const row = (prRes.data as { id: string; participant_a_id: string; participant_b_id: string }[]).find(
+                (r) =>
+                  (r.participant_a_id === meGp.participant_id && r.participant_b_id === opp.participant_id) ||
+                  (r.participant_b_id === meGp.participant_id && r.participant_a_id === opp.participant_id)
+              );
+              if (row) {
+                vsNav.push({
+                  pairingId: row.id,
+                  opponentName: relationOne(opp.users)?.display_name?.trim() || 'Jugador',
+                });
+              }
             }
           }
         }
       }
     }
     setTiebreakVsNav(vsNav);
+    setCurrentUserInBracketWaiting(inBracketWaiting);
 
     if (
       !multiTiebreakGroup &&
@@ -830,7 +883,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                     </TouchableOpacity>
                   ))}
                 </View>
-              ) : (
+              ) : currentUserInBracketWaiting ? null : (
                 <TouchableOpacity
                   style={styles.tiebreakNoticeBtn}
                   onPress={() => navigation.navigate('PairingsList', { eventId: event.id })}
@@ -1096,6 +1149,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           const participantChampionLabel = resolveGenderedText(u?.gender, 'Campeón', 'Campeona');
           const polemicaSet = new Set((event?.polemica_winners ?? []).filter(Boolean).map(String));
           const recognitionSet = new Set((event?.recognition_winners ?? []).filter(Boolean).map(String));
+          const isFragmentadaEvent = event?.champion_decided_by === 'fragmentada';
           return (
             <TouchableOpacity
               key={p.id}
@@ -1124,9 +1178,15 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                     </View>
                   ) : null}
                   {polemicaSet.has(p.user_id) ? (
-                    <View style={styles.polemicaBadge}>
-                      <Text style={styles.polemicaBadgeText}>🏆 Copa Polémica</Text>
-                    </View>
+                    isFragmentadaEvent ? (
+                      <View style={styles.fragmentadaBadge}>
+                        <Text style={styles.fragmentadaBadgeText}>🏆 Copa Fragmentada</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.polemicaBadge}>
+                        <Text style={styles.polemicaBadgeText}>🏆 Copa Polémica</Text>
+                      </View>
+                    )
                   ) : null}
                   {recognitionSet.has(p.user_id) ? (
                     <View style={styles.recognitionBadge}>
@@ -1343,6 +1403,15 @@ const styles = StyleSheet.create({
     borderColor: '#DC2626',
   },
   polemicaBadgeText: { fontSize: 11, fontWeight: '700', color: '#991B1B' },
+  fragmentadaBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: '#DBEAFE',
+    borderColor: '#3B82F6',
+  },
+  fragmentadaBadgeText: { fontSize: 11, fontWeight: '700', color: '#1E40AF' },
   recognitionBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
