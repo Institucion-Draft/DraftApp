@@ -42,6 +42,7 @@ export type MainStackParamList = {
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
   LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge' };
+  LifeChart: { matchId: string };
   MatchResult: { matchId: string };
   Standings: { eventId: string; showPodiumIntro?: boolean };
 };

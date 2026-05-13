@@ -71,6 +71,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
   const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -104,7 +105,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setSuperCupWinnerName(null);
     setRevengeCupWinnerName(null);
 
-    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes, superCupWinnerRes, revengeCupWinnerRes] =
+    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes, superCupWinnerRes, revengeCupWinnerRes, eventFlagsRes] =
       await Promise.all([
       supabase
         .from('event_participants')
@@ -171,6 +172,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
             .eq('id', p.revenge_cup_winner_participant_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null } as const),
+      supabase
+        .from('draft_events')
+        .select('turn_tracking_enabled')
+        .eq('id', p.event_id)
+        .maybeSingle(),
     ]);
     if (
       partsRes.error ||
@@ -179,7 +185,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       completedCountRes.error ||
       tiebreakCompletedRes.error ||
       superCupWinnerRes.error ||
-      revengeCupWinnerRes.error
+      revengeCupWinnerRes.error ||
+      eventFlagsRes.error
     ) {
       Alert.alert('Error', 'No se pudo cargar el estado del resultado.');
       setLoading(false);
@@ -208,6 +215,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setRevengeCupWinnerName(revengeWinnerUser?.display_name ?? null);
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
     setTiebreakCompletedCount(tiebreakCompletedRes.count ?? 0);
+    setTurnTrackingEnabled(
+      !!(eventFlagsRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled
+    );
     setLoading(false);
   }, [matchId]);
 
@@ -376,6 +386,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       ) : null}
 
       <View style={styles.actions}>
+        {turnTrackingEnabled ? (
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => navigation.navigate('LifeChart', { matchId })}
+          >
+            <Text style={styles.secondaryTxt}>Evolución de vida</Text>
+          </TouchableOpacity>
+        ) : null}
         {showRematchBtn ? (
           <TouchableOpacity style={styles.primaryBtn} onPress={() => void createRematch()}>
             <Text style={styles.primaryTxt}>{rematchLabel}</Text>
