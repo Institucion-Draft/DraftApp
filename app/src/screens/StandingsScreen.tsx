@@ -58,8 +58,10 @@ type RowView = {
   eg: number;
   /** Enfrentamientos con BO3 cerrado (ganados o perdidos). */
   ec: number;
-  /** Diferencial medio de vida; null si no hay ≥2 life_events con duración efectiva > 0. */
+  /** Diferencial medio de vida (sin tracking de turnos); null si no aplica o sin datos. */
   dmv: number | null;
+  /** DMV por turnos (evento con turn_tracking_enabled); null si no aplica o sin datos. */
+  dmvt: number | null;
   /** Tiempo medio por partida (s); null si no hay partidas completadas con duración. */
   tmp: number | null;
   inProgress: boolean;
@@ -83,6 +85,47 @@ type RevengeRowView = {
 };
 
 type LifeEvRow = { match_id: string; participant_id: string; resulting_life: number; occurred_at: string };
+
+type MatchTurnRow = {
+  match_id: string;
+  turn_number: number;
+  life_a_after: number;
+  life_b_after: number;
+};
+
+/**
+ * DMVt del match: promedio de (vida propia − vida oponente) después de cada turno válido.
+ * Turnos válidos: desde el primer turno con vida distinta de 20-20 hasta el penúltimo turno (excluye el que cierra).
+ */
+function computeMatchDmvt(turns: MatchTurnRow[], myPid: string, pa: string, pb: string): number | null {
+  if (turns.length === 0) return null;
+  const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
+  const maxTurnNum = sorted[sorted.length - 1]!.turn_number;
+  let firstChangeNum: number | null = null;
+  for (const t of sorted) {
+    if (t.life_a_after !== 20 || t.life_b_after !== 20) {
+      firstChangeNum = t.turn_number;
+      break;
+    }
+  }
+  if (firstChangeNum == null) return null;
+  const lastValidTurnNum = maxTurnNum - 1;
+  if (firstChangeNum > lastValidTurnNum) return null;
+
+  const myAfter = (t: MatchTurnRow) => (myPid === pa ? t.life_a_after : t.life_b_after);
+  const oppAfter = (t: MatchTurnRow) => (myPid === pa ? t.life_b_after : t.life_a_after);
+
+  const valid = sorted.filter(
+    (t) => t.turn_number >= firstChangeNum && t.turn_number <= lastValidTurnNum
+  );
+  if (valid.length === 0) return null;
+
+  let sum = 0;
+  for (const t of valid) {
+    sum += myAfter(t) - oppAfter(t);
+  }
+  return sum / valid.length;
+}
 
 const DMV_POS = '#10B981';
 const DMV_NEG = '#EF4444';
@@ -239,6 +282,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [podiumState, setPodiumState] = useState<PodiumState | null>(null);
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -277,7 +321,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -329,6 +373,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const pairings = pairingsRes.data ?? [];
     const pairingIds = pairings.map((p) => p.id as string);
 
+    const turnTrackOn = !!(
+      eventRes.data as { turn_tracking_enabled?: boolean | null } | null
+    )?.turn_tracking_enabled;
+    setTurnTrackingEnabled(turnTrackOn);
+
     const matchesRes =
       pairingIds.length > 0
         ? await supabase
@@ -341,14 +390,32 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const matchIds = matches.map((m) => String(m.id));
 
     const lifeRes =
-      matchIds.length > 0
+      !turnTrackOn && matchIds.length > 0
         ? await supabase
             .from('life_events')
             .select('match_id, participant_id, resulting_life, occurred_at')
             .in('match_id', matchIds)
         : { data: [], error: null };
 
-    if (matchesRes.error || lifeRes.error) {
+    const officialCompletedMatchIds = matches
+      .filter(
+        (m: any) =>
+          m.status === 'completed' &&
+          (m.match_type === 'draft' || m.match_type === 'final') &&
+          m.winner_participant_id != null &&
+          String(m.winner_participant_id).length > 0
+      )
+      .map((m: any) => String(m.id));
+
+    const turnsRes =
+      turnTrackOn && officialCompletedMatchIds.length > 0
+        ? await supabase
+            .from('match_turns')
+            .select('match_id, turn_number, life_a_after, life_b_after')
+            .in('match_id', officialCompletedMatchIds)
+        : { data: [], error: null };
+
+    if (matchesRes.error || lifeRes.error || turnsRes.error) {
       setRows([]);
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
@@ -536,6 +603,14 @@ export default function StandingsScreen({ route, navigation }: Props) {
       lifeByMatchId.get(mid)!.push(e);
     }
 
+    const turnRows = (turnsRes.data ?? []) as MatchTurnRow[];
+    const turnsByMatchId = new Map<string, MatchTurnRow[]>();
+    for (const t of turnRows) {
+      const mid = String(t.match_id);
+      if (!turnsByMatchId.has(mid)) turnsByMatchId.set(mid, []);
+      turnsByMatchId.get(mid)!.push(t);
+    }
+
     const rowsBuilt: RowView[] = participants.map((p: any) => {
       const pid = p.id as string;
       const u = relationOne(p.users);
@@ -563,22 +638,36 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const leftEventAt = (p.left_event_at as string | null) ?? null;
 
       const matchDmvs: number[] = [];
+      const matchDmvts: number[] = [];
       for (const m of playerMatches) {
         if (m.match_type !== 'draft' && m.match_type !== 'final') continue;
         if (m.status !== 'completed') continue;
         const mid = String(m.id);
-        const evs = lifeByMatchId.get(mid) ?? [];
-        if (evs.length === 0) continue;
         const pr = pairings.find((x: any) => x.id === m.pairing_id);
         if (!pr) continue;
         const pa = pr.participant_a_id as string;
         const pb = pr.participant_b_id as string;
         if (pid !== pa && pid !== pb) continue;
         const opp = pid === pa ? pb : pa;
-        const mdv = computeMatchDmv(evs, pid, opp);
-        if (mdv != null) matchDmvs.push(mdv);
+        if (turnTrackOn) {
+          const tns = turnsByMatchId.get(mid) ?? [];
+          const dmvtOne = computeMatchDmvt(tns, pid, pa, pb);
+          if (dmvtOne != null) matchDmvts.push(dmvtOne);
+        } else {
+          const evs = lifeByMatchId.get(mid) ?? [];
+          if (evs.length === 0) continue;
+          const mdv = computeMatchDmv(evs, pid, opp);
+          if (mdv != null) matchDmvs.push(mdv);
+        }
       }
-      const dmv = matchDmvs.length > 0 ? matchDmvs.reduce((a, b) => a + b, 0) / matchDmvs.length : null;
+      const dmv =
+        !turnTrackOn && matchDmvs.length > 0
+          ? matchDmvs.reduce((a, b) => a + b, 0) / matchDmvs.length
+          : null;
+      const dmvt =
+        turnTrackOn && matchDmvts.length > 0
+          ? matchDmvts.reduce((a, b) => a + b, 0) / matchDmvts.length
+          : null;
 
       const durations = completedMatches
         .filter((m: any) => m.ended_at)
@@ -586,7 +675,22 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const tmp =
         durations.length > 0 ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : null;
 
-      return { participantId: pid, userId, name, colors, pg, pj, eg, ec, dmv, tmp, inProgress, leftEventAt, gender };
+      return {
+        participantId: pid,
+        userId,
+        name,
+        colors,
+        pg,
+        pj,
+        eg,
+        ec,
+        dmv,
+        dmvt,
+        tmp,
+        inProgress,
+        leftEventAt,
+        gender,
+      };
     });
 
     const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
@@ -598,8 +702,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const wmA = winrateMatches(a);
       const wmB = winrateMatches(b);
       if (wmA !== wmB) return wmB - wmA;
-      const av = a.dmv ?? -Infinity;
-      const bv = b.dmv ?? -Infinity;
+      const av = turnTrackOn ? (a.dmvt ?? -Infinity) : (a.dmv ?? -Infinity);
+      const bv = turnTrackOn ? (b.dmvt ?? -Infinity) : (b.dmv ?? -Infinity);
       return bv - av;
     });
     setRows(rowsBuilt);
@@ -896,7 +1000,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             <Text style={[styles.cell, styles.statCol]}>PJ</Text>
             <Text style={[styles.cell, styles.statCol]}>EG</Text>
             <Text style={[styles.cell, styles.statCol]}>EC</Text>
-            <Text style={[styles.cell, styles.dmvCol]}>DMV</Text>
+            <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
           {rows.map((r) => (
@@ -934,7 +1038,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
               <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
               <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
               <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
-              <Text style={[styles.cell, styles.dmvCol, { color: dmvCellColor(r.dmv) }]}>{formatDmvCell(r.dmv)}</Text>
+              <Text
+                style={[
+                  styles.cell,
+                  styles.dmvCol,
+                  { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
+                ]}
+              >
+                {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
+              </Text>
               <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
                 {formatTmpDisplay(r.tmp)}
               </Text>
@@ -1019,7 +1131,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
       <Text style={styles.legend}>
         {tab === 'official'
           ? [
-              'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
+              turnTrackingEnabled
+                ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
+                : 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
               'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
               'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
               '* Se fue antes de completar sus enfrentamientos',
