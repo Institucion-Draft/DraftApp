@@ -21,6 +21,7 @@ import {
 } from '../lib/participantConcurrentMatch';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
+import { categorizeMove } from '../lib/pokemonMovepool';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'LifeTracker'>;
 
@@ -33,6 +34,7 @@ type MatchRow = {
   starting_life_b: number;
   life_tracker_user_id: string | null;
   status: 'in_progress' | 'completed' | 'aborted';
+  who_started_participant_id: string | null;
 };
 
 type PairingRow = {
@@ -97,7 +99,7 @@ async function navigateAfterMatchMaybeComplete(
 const COLOR_BG: Record<MtgColor, string> = {
   W: '#F8FAFC',
   U: '#DBEAFE',
-  B: '#1F2937',
+  B: '#374151',
   R: '#FEE2E2',
   G: '#DCFCE7',
   C: '#E5E7EB',
@@ -111,6 +113,15 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   /** Otro match in_progress del mismo jugador en otro pairing. */
   const [concurrentBlockMessage, setConcurrentBlockMessage] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [whoStartedParticipantId, setWhoStartedParticipantId] = useState<string | null>(null);
+  const [savingStarter, setSavingStarter] = useState(false);
+  const [currentTurnParticipantId, setCurrentTurnParticipantId] = useState<string | null>(null);
+  const [turnStartLifeA, setTurnStartLifeA] = useState(20);
+  const [turnStartLifeB, setTurnStartLifeB] = useState(20);
+  const [turnStartedAt, setTurnStartedAt] = useState<string | null>(null);
+  const [lastTurnNumber, setLastTurnNumber] = useState(0);
+  const [passingTurn, setPassingTurn] = useState(false);
   const [match, setMatch] = useState<MatchRow | null>(null);
   const [pairing, setPairing] = useState<PairingRow | null>(null);
   const [pa, setPa] = useState<ParticipantRow | null>(null);
@@ -182,7 +193,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const { data: mData, error: mErr } = await supabase
       .from('matches')
       .select(
-        'id, pairing_id, winner_participant_id, match_type, starting_life_a, starting_life_b, life_tracker_user_id, status'
+        'id, pairing_id, winner_participant_id, match_type, starting_life_a, starting_life_b, life_tracker_user_id, status, who_started_participant_id'
       )
       .eq('id', matchId)
       .maybeSingle();
@@ -193,6 +204,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     }
     const matchRow = mData as MatchRow;
     setMatch(matchRow);
+    setWhoStartedParticipantId(matchRow.who_started_participant_id ?? null);
 
     const { data: pData, error: pErr } = await supabase
       .from('pairings')
@@ -208,7 +220,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     setPairing(pairingRow);
 
     const [eventRes, participantsRes, colorsRes, lifeRes, winsRes] = await Promise.all([
-      supabase.from('draft_events').select('workspace_id').eq('id', pairingRow.event_id).maybeSingle(),
+      supabase
+        .from('draft_events')
+        .select('workspace_id, turn_tracking_enabled')
+        .eq('id', pairingRow.event_id)
+        .maybeSingle(),
       supabase
         .from('event_participants')
         .select(
@@ -253,6 +269,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const preNameB = uB?.display_name || uB?.username || 'Jugador B';
 
     const wsId = eventRes.data?.workspace_id as string | undefined;
+    setTurnTrackingEnabled(!!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled);
     const [roleRes, concurrentDetails] = await Promise.all([
       wsId && uid
         ? supabase
@@ -333,6 +350,56 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const officialWins = wins.filter((w) => w.match_type === 'draft' || w.match_type === 'final');
     setWinsA(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length);
     setWinsB(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length);
+
+    const turnTrackOn = !!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled;
+    if (turnTrackOn) {
+      const turnsRes = await supabase
+        .from('match_turns')
+        .select('turn_number, attacker_participant_id, life_a_after, life_b_after, ended_at')
+        .eq('match_id', matchId)
+        .order('turn_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (turnsRes.error) {
+        if (__DEV__) console.error('match_turns load:', turnsRes.error);
+        setLastTurnNumber(0);
+        setCurrentTurnParticipantId(matchRow.who_started_participant_id ?? null);
+        setTurnStartLifeA(initialA);
+        setTurnStartLifeB(initialB);
+        setTurnStartedAt(new Date().toISOString());
+      } else {
+        const last = turnsRes.data as {
+          turn_number: number;
+          attacker_participant_id: string;
+          life_a_after: number;
+          life_b_after: number;
+          ended_at: string | null;
+        } | null;
+        if (last) {
+          setLastTurnNumber(last.turn_number);
+          const nextPid =
+            last.attacker_participant_id === pairingRow.participant_a_id
+              ? pairingRow.participant_b_id
+              : pairingRow.participant_a_id;
+          setCurrentTurnParticipantId(nextPid);
+          setTurnStartLifeA(clampLife(Number(last.life_a_after)));
+          setTurnStartLifeB(clampLife(Number(last.life_b_after)));
+          setTurnStartedAt(last.ended_at ?? new Date().toISOString());
+        } else {
+          setLastTurnNumber(0);
+          setCurrentTurnParticipantId(matchRow.who_started_participant_id ?? null);
+          setTurnStartLifeA(initialA);
+          setTurnStartLifeB(initialB);
+          setTurnStartedAt(new Date().toISOString());
+        }
+      }
+    } else {
+      setLastTurnNumber(0);
+      setCurrentTurnParticipantId(null);
+      setTurnStartLifeA(initialA);
+      setTurnStartLifeB(initialB);
+      setTurnStartedAt(null);
+    }
 
     const trackerUserId = matchRow.life_tracker_user_id;
     if (!uid) {
@@ -688,6 +755,97 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     setBlocked(false);
   };
 
+  const chooseStarter = useCallback(
+    async (participantId: string) => {
+      if (savingStarter) return;
+      if (!match) return;
+      setSavingStarter(true);
+      const { error } = await supabase
+        .from('matches')
+        .update({ who_started_participant_id: participantId })
+        .eq('id', match.id);
+      setSavingStarter(false);
+      if (error) {
+        Alert.alert('Error', error.message ?? 'No se pudo guardar quién empieza.');
+        return;
+      }
+      setWhoStartedParticipantId(participantId);
+      setMatch((prev) => (prev ? { ...prev, who_started_participant_id: participantId } : prev));
+      if (turnTrackingEnabled) {
+        const a = clampLife(pendingARef.current ?? stableARef.current);
+        const b = clampLife(pendingBRef.current ?? stableBRef.current);
+        setCurrentTurnParticipantId(participantId);
+        setTurnStartLifeA(a);
+        setTurnStartLifeB(b);
+        setTurnStartedAt(new Date().toISOString());
+      }
+    },
+    [match, savingStarter, turnTrackingEnabled]
+  );
+
+  const passTurn = useCallback(async () => {
+    if (!pairing || !match || !pa || !pb || passingTurn) return;
+    if (!currentTurnParticipantId || !turnStartedAt) return;
+    const uid = myUserIdRef.current;
+    if (!uid) return;
+
+    const attackerPid = currentTurnParticipantId;
+    const isAttackerA = attackerPid === pairing.participant_a_id;
+    const attackerUserId = isAttackerA ? pa.user_id : pb.user_id;
+
+    const lifeA = clampLife(aLife);
+    const lifeB = clampLife(bLife);
+    const atkLife = isAttackerA ? lifeA : lifeB;
+    const defLife = isAttackerA ? lifeB : lifeA;
+    const turnStartAtk = isAttackerA ? turnStartLifeA : turnStartLifeB;
+    const turnStartDef = isAttackerA ? turnStartLifeB : turnStartLifeA;
+    const myDelta = atkLife - turnStartAtk;
+    const otherDelta = defLife - turnStartDef;
+    const move_category = categorizeMove(myDelta, otherDelta);
+
+    const nextNum = lastTurnNumber + 1;
+    setPassingTurn(true);
+    const { error } = await supabase.from('match_turns').insert({
+      match_id: match.id,
+      turn_number: nextNum,
+      attacker_user_id: attackerUserId,
+      attacker_participant_id: attackerPid,
+      life_a_before: turnStartLifeA,
+      life_b_before: turnStartLifeB,
+      life_a_after: lifeA,
+      life_b_after: lifeB,
+      move_category,
+      started_at: turnStartedAt,
+      ended_at: new Date().toISOString(),
+    });
+    setPassingTurn(false);
+    if (error) {
+      Alert.alert('Error', error.message ?? 'No se pudo pasar el turno.');
+      return;
+    }
+
+    const otherPid =
+      attackerPid === pairing.participant_a_id ? pairing.participant_b_id : pairing.participant_a_id;
+    setLastTurnNumber(nextNum);
+    setCurrentTurnParticipantId(otherPid);
+    setTurnStartLifeA(lifeA);
+    setTurnStartLifeB(lifeB);
+    setTurnStartedAt(new Date().toISOString());
+  }, [
+    aLife,
+    bLife,
+    currentTurnParticipantId,
+    lastTurnNumber,
+    match,
+    pairing,
+    pa,
+    pb,
+    passingTurn,
+    turnStartLifeA,
+    turnStartLifeB,
+    turnStartedAt,
+  ]);
+
   const nameA = useMemo(() => {
     const u = relationOne(pa?.users);
     return u?.display_name || u?.username || 'Jugador A';
@@ -784,21 +942,40 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const colors = isA ? colorsA : colorsB;
     const isDarkBg = colors[0] === 'B';
     const t = isA ? ('a' as const) : ('b' as const);
+    const startingLife = isA ? match?.starting_life_a ?? 20 : match?.starting_life_b ?? 20;
+    const hpRatio = startingLife > 0 ? Math.max(0, Math.min(1, clampLife(life) / startingLife)) : 0;
+    const hpColor = hpRatio >= 0.5 ? '#16A34A' : hpRatio >= 0.25 ? '#EAB308' : '#DC2626';
+    const passTurnBorder = colors.length > 1 ? COLOR_BG[colors[1]!] : '#6B7280';
+    const isMyTurn =
+      turnTrackingEnabled &&
+      whoStartedParticipantId != null &&
+      currentTurnParticipantId === p.id;
+    const hasUnsettledLife =
+      pendingA != null || pendingB != null || persistingA || persistingB;
+    const passTurnDisabled = !isMyTurn || passingTurn || hasUnsettledLife;
     const diffColor =
       deltaDisplay > 0 ? '#16A34A' : deltaDisplay < 0 ? '#DC2626' : '#6B7280';
     const diffLabel =
       deltaDisplay > 0 ? `+${deltaDisplay}` : deltaDisplay < 0 ? String(deltaDisplay) : '\u00a0';
     const body = (
       <>
-        <View style={styles.topRow}>
+        <View style={[styles.topRow, turnTrackingEnabled && styles.topRowTurn]}>
           <View style={styles.bo3Wrap}>
             <View style={[styles.bo3Box, wins >= 1 && styles.bo3Filled]} />
             <View style={[styles.bo3Box, wins >= 2 && styles.bo3Filled]} />
           </View>
         </View>
         <View style={styles.lifeRow}>
-          <View style={styles.playerBlock}>
-            <View style={styles.avatarWrap}>
+          <View style={[styles.playerBlock, turnTrackingEnabled && styles.playerBlockTurn]}>
+            {turnTrackingEnabled ? (
+              <View style={styles.nameRowTurn}>
+                {currentTurnParticipantId === p.id ? (
+                  <Text style={[styles.turnArrow, isDarkBg && styles.turnArrowDark]}>▶</Text>
+                ) : null}
+                <Text style={[styles.playerNameAbove, isDarkBg && { color: '#fff' }]}>{name}</Text>
+              </View>
+            ) : null}
+            <View style={[styles.avatarWrap, turnTrackingEnabled && styles.avatarWrapTurn]}>
               <View style={styles.avatarInner}>
                 <PlayerAvatar
                   userId={p.user_id}
@@ -809,7 +986,35 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
-            <Text style={[styles.playerName, isDarkBg && { color: '#fff' }]}>{name}</Text>
+            {turnTrackingEnabled ? (
+              <>
+                <View style={styles.hpBarRow}>
+                  <Text style={[styles.hpBarLabel, isDarkBg && styles.hpBarLabelDark]}>HP</Text>
+                  <View style={styles.hpBarTrack}>
+                    <View
+                      style={[
+                        styles.hpBarFill,
+                        { width: `${hpRatio * 100}%`, backgroundColor: hpColor },
+                      ]}
+                    />
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.passTurnBtn,
+                    { borderColor: passTurnBorder },
+                    passTurnDisabled && styles.passTurnBtnDisabled,
+                  ]}
+                  activeOpacity={0.85}
+                  disabled={passTurnDisabled}
+                  onPress={() => void passTurn()}
+                >
+                  <Text style={styles.passTurnBtnTxt}>Pasar turno</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={[styles.playerName, isDarkBg && { color: '#fff' }]}>{name}</Text>
+            )}
           </View>
           <View style={styles.lifeControlsVertical}>
             <TouchableOpacity
@@ -841,12 +1046,23 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       </>
     );
     return (
-      <View style={[styles.half, { backgroundColor: COLOR_BG[colors[0] ?? 'C'] }]}>
+      <View
+        style={[
+          styles.half,
+          turnTrackingEnabled && styles.halfTurnTrack,
+          { backgroundColor: COLOR_BG[colors[0] ?? 'C'] },
+        ]}
+      >
         {rotated ? <View style={styles.rotated}>{body}</View> : body}
         <TouchableOpacity
           style={[
             styles.flagBtn,
             rotated ? styles.flagBtnTowardEquatorTop : styles.flagBtnTowardEquatorBottom,
+            turnTrackingEnabled
+              ? rotated
+                ? styles.flagBtnTowardEquatorTopTurn
+                : styles.flagBtnTowardEquatorBottomTurn
+              : null,
             rotated ? styles.flagBtnAvatarSideRotated : styles.flagBtnAvatarSideNormal,
           ]}
           onPress={() => onSurrender(t)}
@@ -857,32 +1073,78 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     );
   };
 
+  const showStarterModal =
+    turnTrackingEnabled &&
+    whoStartedParticipantId == null &&
+    !!pa &&
+    !!pb &&
+    match?.status === 'in_progress';
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      {renderPlayerHalf(
-        layoutAB.top,
-        true,
-        layoutAB.top === 'a' ? deltaA : deltaB,
-        layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
-      )}
+    <View style={{ flex: 1 }}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+        {renderPlayerHalf(
+          layoutAB.top,
+          true,
+          layoutAB.top === 'a' ? deltaA : deltaB,
+          layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
+        )}
 
-      <View style={styles.undoWrap}>
-        <TouchableOpacity
-          style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
-          disabled={!canUndo}
-          onPress={() => void onUndo()}
-        >
-          <Text style={styles.undoTxt}>Undo</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.undoWrap}>
+          <TouchableOpacity
+            style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
+            disabled={!canUndo}
+            onPress={() => void onUndo()}
+          >
+            <Text style={styles.undoTxt}>Undo</Text>
+          </TouchableOpacity>
+        </View>
 
-      {renderPlayerHalf(
-        layoutAB.bottom,
-        false,
-        layoutAB.bottom === 'a' ? deltaA : deltaB,
-        layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
-      )}
-    </ScrollView>
+        {renderPlayerHalf(
+          layoutAB.bottom,
+          false,
+          layoutAB.bottom === 'a' ? deltaA : deltaB,
+          layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
+        )}
+      </ScrollView>
+      {showStarterModal && pa && pb ? (
+        <View style={styles.starterModalBackdrop}>
+          <View style={styles.starterModalCard}>
+            <Text style={styles.starterModalTitle}>¿Quién empieza?</Text>
+            <TouchableOpacity
+              style={[styles.starterOption, savingStarter && styles.starterOptionDisabled]}
+              activeOpacity={0.8}
+              disabled={savingStarter}
+              onPress={() => void chooseStarter(pa.id)}
+            >
+              <PlayerAvatar
+                userId={pa.user_id}
+                participantId={pa.id}
+                size="small"
+                withColorBorder
+                borderWidth={3}
+              />
+              <Text style={styles.starterOptionName}>{nameA}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.starterOption, savingStarter && styles.starterOptionDisabled]}
+              activeOpacity={0.8}
+              disabled={savingStarter}
+              onPress={() => void chooseStarter(pb.id)}
+            >
+              <PlayerAvatar
+                userId={pb.user_id}
+                participantId={pb.id}
+                size="small"
+                withColorBorder
+                borderWidth={3}
+              />
+              <Text style={styles.starterOptionName}>{nameB}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -898,8 +1160,10 @@ const styles = StyleSheet.create({
   concurrentBackBtn: { marginTop: 18 },
   linkTxt: { color: '#3B82F6', fontWeight: '700' },
   half: { flex: 1, minHeight: 300, padding: 16, justifyContent: 'center', position: 'relative' },
+  halfTurnTrack: { paddingVertical: 10, paddingHorizontal: 12 },
   rotated: { transform: [{ rotate: '180deg' }] },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  topRowTurn: { marginBottom: 12 },
   bo3Wrap: { flexDirection: 'row' },
   bo3Box: { width: 24, height: 10, borderRadius: 3, borderWidth: 1, borderColor: '#9CA3AF', marginRight: 6 },
   bo3Filled: { backgroundColor: '#22C55E', borderColor: '#22C55E' },
@@ -909,7 +1173,18 @@ const styles = StyleSheet.create({
   lifeBtnTxt: { color: '#fff', fontSize: 24, fontWeight: '700' },
   lifeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   playerBlock: { width: '50%', alignItems: 'center', justifyContent: 'center' },
+  playerBlockTurn: { justifyContent: 'flex-start', paddingVertical: 0 },
   avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+  avatarWrapTurn: {
+    marginTop: 0,
+    marginBottom: 0,
+    width: 'auto',
+    aspectRatio: undefined,
+    maxWidth: undefined,
+    alignSelf: 'center',
+  },
+  flagBtnTowardEquatorTopTurn: { bottom: 4 },
+  flagBtnTowardEquatorBottomTurn: { top: 4 },
   avatarInner: { alignItems: 'center', justifyContent: 'center' },
   flagBtn: {
     position: 'absolute',
@@ -927,6 +1202,118 @@ const styles = StyleSheet.create({
   flagBtnAvatarSideRotated: { right: 22 },
   flagBtnAvatarSideNormal: { left: 22 },
   playerName: { marginTop: 10, fontSize: 24, color: '#111', fontWeight: '700', textAlign: 'center' },
+  nameRowTurn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0,
+    marginBottom: 0,
+    flexWrap: 'wrap',
+  },
+  turnArrow: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111',
+    marginRight: 4,
+  },
+  turnArrowDark: { color: '#fff' },
+  playerNameAbove: {
+    marginBottom: 0,
+    fontSize: 24,
+    color: '#111',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  hpBarRow: {
+    marginTop: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: 130,
+    alignSelf: 'center',
+    position: 'relative',
+  },
+  hpBarLabel: {
+    position: 'absolute',
+    right: '100%',
+    marginRight: 6,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#111',
+  },
+  hpBarLabelDark: { color: '#fff' },
+  hpBarTrack: {
+    width: 130,
+    backgroundColor: '#1F2937',
+    padding: 2,
+    borderRadius: 4,
+  },
+  hpBarFill: {
+    height: 8,
+    borderRadius: 2,
+  },
+  passTurnBtn: {
+    marginTop: 10,
+    paddingVertical: 18,
+    paddingHorizontal: 36,
+    borderRadius: 10,
+    borderWidth: 2,
+    backgroundColor: '#FFFFFF',
+    alignSelf: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  passTurnBtnDisabled: { opacity: 0.4 },
+  passTurnBtnTxt: {
+    color: '#111',
+    fontWeight: '700',
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  starterModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#00000099',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 100,
+  },
+  starterModalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+  },
+  starterModalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111',
+    marginBottom: 18,
+    textAlign: 'center',
+  },
+  starterOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+    width: '100%',
+    marginBottom: 10,
+  },
+  starterOptionDisabled: { opacity: 0.5 },
+  starterOptionName: { fontSize: 18, fontWeight: '700', color: '#111', flex: 1 },
   lifeControlsVertical: { width: '50%', alignItems: 'center', justifyContent: 'space-between' },
   lifeCenter: { alignItems: 'center', flex: 1 },
   lifeDiffWrap: { minHeight: 48, justifyContent: 'flex-end', marginBottom: 2 },

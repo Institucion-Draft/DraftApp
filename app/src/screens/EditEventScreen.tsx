@@ -31,6 +31,7 @@ type FormBaseline = {
   venueId: string | null;
   notes: string;
   forceEditOverride: boolean;
+  turnTrackingEnabled: boolean;
 };
 
 const EVENT_TYPES: { value: EventType; label: string }[] = [
@@ -62,6 +63,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [cubeId, setCubeId] = useState<string | null>(null);
   const [venueId, setVenueId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [cubes, setCubes] = useState<SimpleOption[]>([]);
   const [venues, setVenues] = useState<SimpleOption[]>([]);
   /** Solo aplica si status es playing/completed: permite editar cubo, sede, tipo, fecha (no estado). */
@@ -78,7 +80,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
     void (async () => {
       const { data, error } = await supabase
         .from('draft_events')
-        .select('id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes')
+        .select('id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled')
         .eq('id', eventId)
         .maybeSingle();
 
@@ -101,6 +103,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setVenueId(row.venue_id);
       setNotes(row.notes ?? '');
       setForceEditOverride(false);
+      const tt = !!row.turn_tracking_enabled;
+      setTurnTrackingEnabled(tt);
       setBaseline({
         name: row.name,
         eventType: row.event_type as EventType,
@@ -110,6 +114,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         venueId: row.venue_id,
         notes: row.notes ?? '',
         forceEditOverride: false,
+        turnTrackingEnabled: tt,
       });
 
       const [cubesRes, venuesRes] = await Promise.all([
@@ -136,9 +141,10 @@ export default function EditEventScreen({ route, navigation }: Props) {
       cubeId !== baseline.cubeId ||
       venueId !== baseline.venueId ||
       (notes.trim() || '') !== (baseline.notes.trim() || '') ||
-      forceEditOverride !== baseline.forceEditOverride
+      forceEditOverride !== baseline.forceEditOverride ||
+      turnTrackingEnabled !== baseline.turnTrackingEnabled
     );
-  }, [baseline, name, eventType, status, scheduledFor, cubeId, venueId, notes, forceEditOverride]);
+  }, [baseline, name, eventType, status, scheduledFor, cubeId, venueId, notes, forceEditOverride, turnTrackingEnabled]);
 
   const openStatusPicker = () => {
     if (statusPickerLocked || !loadedStatus) return;
@@ -193,6 +199,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
     const patch: Record<string, unknown> = {
       name: n,
       notes: notes.trim() || null,
+      turn_tracking_enabled: turnTrackingEnabled,
     };
     if (!restricted) {
       patch.event_type = eventType;
@@ -355,6 +362,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
       <TextInput style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={2000} />
       <Text style={styles.counter}>{notes.length}/2000</Text>
 
+      <View style={styles.turnTrackingRow}>
+        <Text style={styles.turnTrackingLabel}>Sistema de turnos con animaciones</Text>
+        <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
+      </View>
+
       {!hasDirtyFields ? <Text style={styles.noChangesHint}>No hay cambios para guardar</Text> : null}
       <TouchableOpacity
         style={[styles.primaryBtn, (submitting || !hasDirtyFields) && styles.primaryBtnDisabled]}
@@ -412,6 +424,13 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   switchLabel: { flex: 1, fontSize: 15, color: '#374151', fontWeight: '500' },
+  turnTrackingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  turnTrackingLabel: { flex: 1, fontSize: 15, color: '#111', fontWeight: '500', marginRight: 12 },
   forceEditHint: {
     fontSize: 13,
     color: '#6B7280',
