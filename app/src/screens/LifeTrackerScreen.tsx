@@ -21,7 +21,13 @@ import {
 } from '../lib/participantConcurrentMatch';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
-import { categorizeMove } from '../lib/pokemonMovepool';
+import {
+  categorizeMove,
+  getSpecialBehavior,
+  pickMove,
+  pickRandomMoveFromAll,
+  type MoveTarget,
+} from '../lib/pokemonMovepool';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'LifeTracker'>;
 
@@ -47,6 +53,8 @@ type PairingRow = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  rotated_avatar_id: string | null;
+  rotated_avatar: { storage_path: string } | { storage_path: string }[] | null;
   users:
     | {
         username: string;
@@ -68,6 +76,27 @@ type LifeSnapshot = { a: number; b: number };
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
+}
+
+function getPokemonNameFromAvatar(participant: ParticipantRow | null): string {
+  if (!participant) return 'normal';
+  const rotatedDa = relationOne(participant.rotated_avatar);
+  if (rotatedDa?.storage_path) {
+    const filename = rotatedDa.storage_path.split('/').pop() ?? '';
+    const base = filename.replace(/\.[^.]+$/, '').toLowerCase();
+    if (base) return base;
+  }
+  const user = relationOne(participant.users);
+  if (!user) return 'normal';
+  const customPath = user.custom_avatar_path;
+  if (customPath) {
+    const filename = customPath.split('/').pop() ?? '';
+    return filename.replace(/\.[^.]+$/, '').toLowerCase();
+  }
+  const defaultAvatar = relationOne(user.default_avatars);
+  if (!defaultAvatar) return 'normal';
+  const filename = defaultAvatar.storage_path.split('/').pop() ?? '';
+  return filename.replace(/\.[^.]+$/, '').toLowerCase();
 }
 
 function clampLife(value: number): number {
@@ -149,6 +178,23 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const lifeRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const diffOpacityA = useRef(new Animated.Value(0)).current;
   const diffOpacityB = useRef(new Animated.Value(0)).current;
+  const attackTravel = useRef(new Animated.Value(0)).current;
+  const defenderShake = useRef(new Animated.Value(0)).current;
+  const attackerShake = useRef(new Animated.Value(0)).current;
+  const attackSelfOpacity = useRef(new Animated.Value(1)).current;
+  const specialPreAnim = useRef(new Animated.Value(0)).current;
+  const [attackingFrom, setAttackingFrom] = useState<'a' | 'b' | null>(null);
+  const [attackEmoji, setAttackEmoji] = useState<string | null>(null);
+  const [attackMoveTarget, setAttackMoveTarget] = useState<MoveTarget | null>(null);
+  const [specialEmoji, setSpecialEmoji] = useState<string | null>(null);
+  const [specialType, setSpecialType] = useState<'ditto' | 'metronome' | null>(null);
+  const [lifeDisplayedA, setLifeDisplayedA] = useState(20);
+  const [lifeDisplayedB, setLifeDisplayedB] = useState(20);
+  const scrollContentLayoutRef = useRef<View>(null);
+  const avatarWrapMeasureRefA = useRef<View>(null);
+  const avatarWrapMeasureRefB = useRef<View>(null);
+  const avatarPositionA = useRef(0);
+  const avatarPositionB = useRef(0);
 
   const aLife = pendingA ?? stableA;
   const bLife = pendingB ?? stableB;
@@ -182,6 +228,19 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       useNativeDriver: true,
     }).start();
   }, [deltaB, diffOpacityB]);
+
+  const updateAvatarYInScrollContent = useCallback((slot: 'a' | 'b') => {
+    const wrap = slot === 'a' ? avatarWrapMeasureRefA.current : avatarWrapMeasureRefB.current;
+    const content = scrollContentLayoutRef.current;
+    if (!wrap || !content) return;
+    wrap.measureInWindow((_wx, wy, _ww, _wh) => {
+      content.measureInWindow((_cx, cy, _cw, _ch) => {
+        const relativeY = wy - cy;
+        if (slot === 'a') avatarPositionA.current = relativeY;
+        else avatarPositionB.current = relativeY;
+      });
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setConcurrentBlockMessage(null);
@@ -231,6 +290,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          rotated_avatar_id,
+          rotated_avatar:default_avatars!rotated_avatar_id(storage_path),
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -351,6 +412,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     setWinsA(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length);
     setWinsB(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length);
 
+    let lifeDispA = clampLife(matchRow.starting_life_a);
+    let lifeDispB = clampLife(matchRow.starting_life_b);
+
     const turnTrackOn = !!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled;
     if (turnTrackOn) {
       const turnsRes = await supabase
@@ -385,6 +449,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           setTurnStartLifeA(clampLife(Number(last.life_a_after)));
           setTurnStartLifeB(clampLife(Number(last.life_b_after)));
           setTurnStartedAt(last.ended_at ?? new Date().toISOString());
+          lifeDispA = clampLife(Number(last.life_a_after));
+          lifeDispB = clampLife(Number(last.life_b_after));
         } else {
           setLastTurnNumber(0);
           setCurrentTurnParticipantId(matchRow.who_started_participant_id ?? null);
@@ -400,6 +466,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       setTurnStartLifeB(initialB);
       setTurnStartedAt(null);
     }
+
+    setLifeDisplayedA(lifeDispA);
+    setLifeDisplayedB(lifeDispB);
 
     const trackerUserId = matchRow.life_tracker_user_id;
     if (!uid) {
@@ -655,7 +724,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       if (ref.current) clearTimeout(ref.current);
       ref.current = setTimeout(() => {
         void persistLife(target);
-      }, 5000);
+      }, 3500);
     },
     [persistLife]
   );
@@ -792,6 +861,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const attackerPid = currentTurnParticipantId;
     const isAttackerA = attackerPid === pairing.participant_a_id;
     const attackerUserId = isAttackerA ? pa.user_id : pb.user_id;
+    const attackerSide: 'a' | 'b' = isAttackerA ? 'a' : 'b';
+    const attackerParticipant = isAttackerA ? pa : pb;
 
     const lifeA = clampLife(aLife);
     const lifeB = clampLife(bLife);
@@ -802,9 +873,116 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const myDelta = atkLife - turnStartAtk;
     const otherDelta = defLife - turnStartDef;
     const move_category = categorizeMove(myDelta, otherDelta);
+    const pokemonName = getPokemonNameFromAvatar(attackerParticipant);
+    const defenderParticipant = isAttackerA ? pb : pa;
+    const defenderPokemonName = getPokemonNameFromAvatar(defenderParticipant);
+    const attackerSpecial = getSpecialBehavior(pokemonName);
+
+    let move;
+    if (attackerSpecial === 'ditto') {
+      move = pickMove(defenderPokemonName, move_category, otherDelta);
+    } else if (attackerSpecial === 'metronome') {
+      move = pickRandomMoveFromAll();
+    } else {
+      move = pickMove(pokemonName, move_category, otherDelta);
+    }
 
     const nextNum = lastTurnNumber + 1;
     setPassingTurn(true);
+
+    if (attackerSpecial === 'ditto') {
+      const { count, error: dittoCountErr } = await supabase
+        .from('match_turns')
+        .select('id', { count: 'exact', head: true })
+        .eq('match_id', match.id)
+        .eq('attacker_user_id', attackerUserId);
+      if (dittoCountErr && __DEV__) {
+        console.error('match_turns ditto count:', dittoCountErr);
+      }
+      const isFirstDittoTurn = (count ?? 0) === 0;
+      if (isFirstDittoTurn) {
+        setAttackingFrom(attackerSide);
+        setSpecialType('ditto');
+        setSpecialEmoji('🌀');
+        specialPreAnim.setValue(0);
+        await new Promise<void>((resolve) => {
+          Animated.timing(specialPreAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }).start(() => resolve());
+        });
+        setSpecialEmoji(null);
+        setSpecialType(null);
+        specialPreAnim.setValue(0);
+      }
+    } else if (attackerSpecial === 'metronome') {
+      setAttackingFrom(attackerSide);
+      setSpecialType('metronome');
+      setSpecialEmoji('☝️');
+      specialPreAnim.setValue(0);
+      await new Promise<void>((resolve) => {
+        Animated.timing(specialPreAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }).start(() => resolve());
+      });
+      setSpecialEmoji(null);
+      setSpecialType(null);
+      specialPreAnim.setValue(0);
+    }
+
+    attackTravel.setValue(0);
+    defenderShake.setValue(0);
+    attackerShake.setValue(0);
+    attackSelfOpacity.setValue(1);
+    setAttackingFrom(attackerSide);
+    setAttackMoveTarget(move.target);
+    setAttackEmoji(move.emoji);
+
+    const defenderShakeSteps = [
+      Animated.timing(defenderShake, { toValue: 10, duration: 80, useNativeDriver: true }),
+      Animated.timing(defenderShake, { toValue: -10, duration: 80, useNativeDriver: true }),
+      Animated.timing(defenderShake, { toValue: 8, duration: 80, useNativeDriver: true }),
+      Animated.timing(defenderShake, { toValue: -8, duration: 80, useNativeDriver: true }),
+      Animated.timing(defenderShake, { toValue: 0, duration: 80, useNativeDriver: true }),
+    ];
+
+    if (move.target === 'enemy') {
+      await new Promise<void>((resolve) => {
+        Animated.timing(attackTravel, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }).start(() => {
+          Animated.sequence(defenderShakeSteps).start(() => resolve());
+        });
+      });
+    } else if (move.target === 'self') {
+      attackSelfOpacity.setValue(0);
+      await new Promise<void>((resolve) => {
+        Animated.sequence([
+          Animated.timing(attackSelfOpacity, { toValue: 1, duration: 100, useNativeDriver: true }),
+          Animated.sequence([
+            Animated.timing(attackerShake, { toValue: -5, duration: 80, useNativeDriver: true }),
+            Animated.timing(attackerShake, { toValue: 5, duration: 80, useNativeDriver: true }),
+            Animated.timing(attackerShake, { toValue: -3, duration: 80, useNativeDriver: true }),
+            Animated.timing(attackerShake, { toValue: 3, duration: 80, useNativeDriver: true }),
+            Animated.timing(attackerShake, { toValue: 0, duration: 80, useNativeDriver: true }),
+          ]),
+          Animated.timing(attackSelfOpacity, { toValue: 0, duration: 100, useNativeDriver: true }),
+        ]).start(() => resolve());
+      });
+    } else {
+      await new Promise<void>((resolve) => {
+        Animated.sequence([
+          Animated.sequence(defenderShakeSteps),
+          Animated.timing(attackTravel, { toValue: 1, duration: 800, useNativeDriver: true }),
+        ]).start(() => resolve());
+      });
+    }
+
     const { error } = await supabase.from('match_turns').insert({
       match_id: match.id,
       turn_number: nextNum,
@@ -818,11 +996,26 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       started_at: turnStartedAt,
       ended_at: new Date().toISOString(),
     });
+
+    setAttackingFrom(null);
+    setAttackEmoji(null);
+    setAttackMoveTarget(null);
+    setSpecialEmoji(null);
+    setSpecialType(null);
+    attackTravel.setValue(0);
+    defenderShake.setValue(0);
+    attackerShake.setValue(0);
+    attackSelfOpacity.setValue(1);
+    specialPreAnim.setValue(0);
     setPassingTurn(false);
+
     if (error) {
       Alert.alert('Error', error.message ?? 'No se pudo pasar el turno.');
       return;
     }
+
+    setLifeDisplayedA(clampLife(lifeA));
+    setLifeDisplayedB(clampLife(lifeB));
 
     const otherPid =
       attackerPid === pairing.participant_a_id ? pairing.participant_b_id : pairing.participant_a_id;
@@ -936,6 +1129,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const name = isA ? nameA : nameB;
     const wins = isA ? winsA : winsB;
     const life = isA ? aLife : bLife;
+    const lifeForHpBar = isA ? lifeDisplayedA : lifeDisplayedB;
     const canDec = isA ? canDecreaseA : canDecreaseB;
     const pending = isA ? pendingA : pendingB;
     const persisting = isA ? persistingA : persistingB;
@@ -943,7 +1137,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const isDarkBg = colors[0] === 'B';
     const t = isA ? ('a' as const) : ('b' as const);
     const startingLife = isA ? match?.starting_life_a ?? 20 : match?.starting_life_b ?? 20;
-    const hpRatio = startingLife > 0 ? Math.max(0, Math.min(1, clampLife(life) / startingLife)) : 0;
+    const hpRatio =
+      startingLife > 0 ? Math.max(0, Math.min(1, clampLife(lifeForHpBar) / startingLife)) : 0;
     const hpColor = hpRatio >= 0.5 ? '#16A34A' : hpRatio >= 0.25 ? '#EAB308' : '#DC2626';
     const passTurnBorder = colors.length > 1 ? COLOR_BG[colors[1]!] : '#6B7280';
     const isMyTurn =
@@ -953,6 +1148,18 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const hasUnsettledLife =
       pendingA != null || pendingB != null || persistingA || persistingB;
     const passTurnDisabled = !isMyTurn || passingTurn || hasUnsettledLife;
+    const isDefenderShake =
+      turnTrackingEnabled &&
+      attackingFrom != null &&
+      attackMoveTarget != null &&
+      attackMoveTarget !== 'self' &&
+      ((attackingFrom === 'a' && slot === 'b') || (attackingFrom === 'b' && slot === 'a'));
+    const isAttackerSoftShake =
+      turnTrackingEnabled &&
+      attackingFrom != null &&
+      attackMoveTarget === 'self' &&
+      attackEmoji != null &&
+      ((attackingFrom === 'a' && slot === 'a') || (attackingFrom === 'b' && slot === 'b'));
     const diffColor =
       deltaDisplay > 0 ? '#16A34A' : deltaDisplay < 0 ? '#DC2626' : '#6B7280';
     const diffLabel =
@@ -975,16 +1182,92 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 <Text style={[styles.playerNameAbove, isDarkBg && { color: '#fff' }]}>{name}</Text>
               </View>
             ) : null}
-            <View style={[styles.avatarWrap, turnTrackingEnabled && styles.avatarWrapTurn]}>
-              <View style={styles.avatarInner}>
-                <PlayerAvatar
-                  userId={p.user_id}
-                  participantId={p.id}
-                  size="xlarge"
-                  withColorBorder
-                  borderWidth={5}
-                />
-              </View>
+            <View
+              ref={isA ? avatarWrapMeasureRefA : avatarWrapMeasureRefB}
+              onLayout={() => updateAvatarYInScrollContent(t)}
+              style={[styles.avatarWrap, turnTrackingEnabled && styles.avatarWrapTurn]}
+            >
+              {isDefenderShake ? (
+                <Animated.View style={{ transform: [{ translateX: defenderShake }] }}>
+                  <View style={styles.avatarInner}>
+                    <PlayerAvatar
+                      userId={p.user_id}
+                      participantId={p.id}
+                      size="xlarge"
+                      withColorBorder
+                      borderWidth={5}
+                    />
+                  </View>
+                </Animated.View>
+              ) : isAttackerSoftShake ? (
+                <Animated.View style={{ transform: [{ translateX: attackerShake }] }}>
+                  <View style={styles.avatarInner}>
+                    <PlayerAvatar
+                      userId={p.user_id}
+                      participantId={p.id}
+                      size="xlarge"
+                      withColorBorder
+                      borderWidth={5}
+                    />
+                  </View>
+                </Animated.View>
+              ) : (
+                <View style={styles.avatarInner}>
+                  <PlayerAvatar
+                    userId={p.user_id}
+                    participantId={p.id}
+                    size="xlarge"
+                    withColorBorder
+                    borderWidth={5}
+                  />
+                </View>
+              )}
+              {specialEmoji != null && specialType != null && attackingFrom === t ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[StyleSheet.absoluteFillObject, styles.specialPreLayer]}
+                >
+                  <Animated.View
+                    style={[
+                      styles.specialPreInner,
+                      {
+                        transform:
+                          specialType === 'ditto'
+                            ? [
+                                {
+                                  rotate: specialPreAnim.interpolate({
+                                    inputRange: [0, 1],
+                                    outputRange: ['0deg', '360deg'],
+                                  }),
+                                },
+                                {
+                                  scale: specialPreAnim.interpolate({
+                                    inputRange: [0, 0.5, 1],
+                                    outputRange: [0.5, 1.5, 0],
+                                  }),
+                                },
+                              ]
+                            : [
+                                {
+                                  translateX: specialPreAnim.interpolate({
+                                    inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+                                    outputRange: [-10, 10, -10, 10, -10, 0],
+                                  }),
+                                },
+                              ],
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={
+                        specialType === 'ditto' ? styles.specialDittoEmoji : styles.specialMetronomeEmoji
+                      }
+                    >
+                      {specialEmoji}
+                    </Text>
+                  </Animated.View>
+                </Animated.View>
+              ) : null}
             </View>
             {turnTrackingEnabled ? (
               <>
@@ -1080,32 +1363,85 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     !!pb &&
     match?.status === 'in_progress';
 
+  const ayFly = avatarPositionA.current;
+  const byFly = avatarPositionB.current;
+  const attackFlyMeasured = ayFly > 2 || byFly > 2;
+  let attackFlyOutputRange: [number, number] | null = null;
+  if (attackEmoji && attackingFrom && attackMoveTarget) {
+    if (attackMoveTarget === 'self') {
+      attackFlyOutputRange = attackFlyMeasured
+        ? attackingFrom === 'a'
+          ? [ayFly, ayFly]
+          : [byFly, byFly]
+        : [80, 80];
+    } else if (attackMoveTarget === 'absorb') {
+      attackFlyOutputRange = attackFlyMeasured
+        ? attackingFrom === 'a'
+          ? [byFly, ayFly]
+          : [ayFly, byFly]
+        : attackingFrom === 'a'
+          ? [400, 80]
+          : [80, 400];
+    } else {
+      attackFlyOutputRange = attackFlyMeasured
+        ? attackingFrom === 'a'
+          ? [ayFly, byFly]
+          : [byFly, ayFly]
+        : attackingFrom === 'a'
+          ? [80, 400]
+          : [400, 80];
+    }
+  }
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-        {renderPlayerHalf(
-          layoutAB.top,
-          true,
-          layoutAB.top === 'a' ? deltaA : deltaB,
-          layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
-        )}
+        <View ref={scrollContentLayoutRef} style={styles.scrollInner} collapsable={false}>
+          {renderPlayerHalf(
+            layoutAB.top,
+            true,
+            layoutAB.top === 'a' ? deltaA : deltaB,
+            layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
+          )}
 
-        <View style={styles.undoWrap}>
-          <TouchableOpacity
-            style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
-            disabled={!canUndo}
-            onPress={() => void onUndo()}
-          >
-            <Text style={styles.undoTxt}>Undo</Text>
-          </TouchableOpacity>
+          <View style={styles.undoWrap}>
+            <TouchableOpacity
+              style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
+              disabled={!canUndo}
+              onPress={() => void onUndo()}
+            >
+              <Text style={styles.undoTxt}>Undo</Text>
+            </TouchableOpacity>
+          </View>
+
+          {renderPlayerHalf(
+            layoutAB.bottom,
+            false,
+            layoutAB.bottom === 'a' ? deltaA : deltaB,
+            layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
+          )}
+          {attackFlyOutputRange ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.attackFlyWrap,
+                {
+                  opacity: attackSelfOpacity,
+                  transform: [
+                    {
+                      translateY: attackTravel.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: attackFlyOutputRange,
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={styles.attackFlyEmoji}>{attackEmoji}</Text>
+            </Animated.View>
+          ) : null}
         </View>
-
-        {renderPlayerHalf(
-          layoutAB.bottom,
-          false,
-          layoutAB.bottom === 'a' ? deltaA : deltaB,
-          layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
-        )}
       </ScrollView>
       {showStarterModal && pa && pb ? (
         <View style={styles.starterModalBackdrop}>
@@ -1151,6 +1487,15 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   scroll: { flexGrow: 1 },
+  scrollInner: { flexGrow: 1, position: 'relative' },
+  attackFlyWrap: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -28,
+    top: 0,
+    zIndex: 40,
+  },
+  attackFlyEmoji: { fontSize: 56 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#fff' },
   muted: { color: '#666' },
   blockedText: { color: '#111', fontSize: 16, textAlign: 'center', marginBottom: 14 },
@@ -1174,7 +1519,14 @@ const styles = StyleSheet.create({
   lifeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   playerBlock: { width: '50%', alignItems: 'center', justifyContent: 'center' },
   playerBlockTurn: { justifyContent: 'flex-start', paddingVertical: 0 },
-  avatarWrap: { width: '96%', maxWidth: 220, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+  avatarWrap: {
+    width: '96%',
+    maxWidth: 220,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
   avatarWrapTurn: {
     marginTop: 0,
     marginBottom: 0,
@@ -1186,6 +1538,10 @@ const styles = StyleSheet.create({
   flagBtnTowardEquatorTopTurn: { bottom: 4 },
   flagBtnTowardEquatorBottomTurn: { top: 4 },
   avatarInner: { alignItems: 'center', justifyContent: 'center' },
+  specialPreLayer: { zIndex: 15, justifyContent: 'center', alignItems: 'center' },
+  specialPreInner: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' },
+  specialDittoEmoji: { fontSize: 56 },
+  specialMetronomeEmoji: { fontSize: 48 },
   flagBtn: {
     position: 'absolute',
     backgroundColor: '#00000030',
