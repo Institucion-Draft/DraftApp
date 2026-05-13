@@ -30,6 +30,7 @@ import PairingsListScreen from '../screens/PairingsListScreen';
 import PairingDetailScreen from '../screens/PairingDetailScreen';
 import CubeRouletteScreen from '../screens/CubeRouletteScreen';
 import LifeTrackerScreen from '../screens/LifeTrackerScreen';
+import LifeChartScreen from '../screens/LifeChartScreen';
 import MatchResultScreen from '../screens/MatchResultScreen';
 import StandingsScreen from '../screens/StandingsScreen';
 import type { MainStackParamList } from './mainStackParams';
@@ -149,6 +150,7 @@ export default function MainNavigator() {
         <Stack.Screen name="PairingDetail" component={PairingDetailScreen} options={{ title: 'Enfrentamiento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CubeRoulette" component={CubeRouletteScreen} options={{ title: 'Ruleta de cubos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="LifeTracker" component={LifeTrackerScreen} options={{ title: 'Life Tracker', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="LifeChart" component={LifeChartScreen} options={{ title: 'Evolución de vida', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="MatchResult" component={MatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Standings" component={StandingsScreen} options={{ title: 'Tabla de posiciones', headerBackTitle: 'Atrás' }} />
       </Stack.Navigator>

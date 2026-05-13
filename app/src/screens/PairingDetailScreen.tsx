@@ -959,6 +959,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         <Text style={styles.matchTime}>Cierre pendiente.</Text>
                       ) : null}
                     </View>
+                    {turnTrackingEnabled && m.status === 'completed' ? (
+                      <TouchableOpacity
+                        style={styles.matchChartBtn}
+                        onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
+                        hitSlop={8}
+                        accessibilityLabel="Evolución de vida"
+                      >
+                        <Text style={styles.matchChartEmoji}>📊</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     {renderMatchAbortControl(m)}
                   </View>
                 );
@@ -1047,6 +1057,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                             <Text style={styles.matchTime}>Cierre pendiente.</Text>
                           ) : null}
                         </View>
+                        {turnTrackingEnabled && m.status === 'completed' ? (
+                          <TouchableOpacity
+                            style={styles.matchChartBtn}
+                            onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
+                            hitSlop={8}
+                            accessibilityLabel="Evolución de vida"
+                          >
+                            <Text style={styles.matchChartEmoji}>📊</Text>
+                          </TouchableOpacity>
+                        ) : null}
                         {renderMatchAbortControl(m)}
                       </View>
                     );
@@ -1154,6 +1174,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                           <Text style={styles.matchTime}>Cierre pendiente.</Text>
                         ) : null}
                       </View>
+                      {turnTrackingEnabled && m.status === 'completed' ? (
+                        <TouchableOpacity
+                          style={styles.matchChartBtn}
+                          onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
+                          hitSlop={8}
+                          accessibilityLabel="Evolución de vida"
+                        >
+                          <Text style={styles.matchChartEmoji}>📊</Text>
+                        </TouchableOpacity>
+                      ) : null}
                       {renderMatchAbortControl(m)}
                     </View>
                   );
@@ -1222,6 +1252,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   matchStartedBy: { fontSize: 12, color: '#6B7280', marginLeft: 6 },
+  matchChartBtn: {
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    marginRight: 4,
+  },
+  matchChartEmoji: { fontSize: 18 },
   matchRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
