@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  findNodeHandle,
   ScrollView,
   StyleSheet,
   Text,
@@ -142,18 +141,14 @@ function measureAvatarCenterInScroll(
       resolve({ cx: 180, cy: 220 });
       return;
     }
-    const nh = findNodeHandle(content);
-    if (nh == null) {
-      resolve({ cx: 180, cy: 220 });
-      return;
-    }
-    wrap.measureLayout(
-      nh,
-      (x, y, w, h) => {
-        resolve({ cx: x + w / 2, cy: y + h / 2 });
-      },
-      () => resolve({ cx: 180, cy: 220 })
-    );
+    wrap.measureInWindow((wx, wy, ww, wh) => {
+      content.measureInWindow((cwx, cwy, _cww, _cwh) => {
+        resolve({
+          cx: wx - cwx + ww / 2,
+          cy: wy - cwy + wh / 2,
+        });
+      });
+    });
   });
 }
 
@@ -798,11 +793,12 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     (target: 'a' | 'b') => {
       const ref = target === 'a' ? timerARef : timerBRef;
       if (ref.current) clearTimeout(ref.current);
+      const delayMs = turnTrackingEnabled ? 1000 : 3500;
       ref.current = setTimeout(() => {
         void persistLife(target);
-      }, 3500);
+      }, delayMs);
     },
-    [persistLife]
+    [persistLife, turnTrackingEnabled]
   );
 
   const adjustLife = useCallback(

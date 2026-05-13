@@ -46,11 +46,20 @@ type MatchRow = {
   tiebreak_round: number | null;
   status: 'in_progress' | 'completed' | 'aborted';
   winner_participant_id: string | null;
+  who_started_participant_id: string | null;
   ended_by_surrender: boolean;
   started_at: string;
   ended_at: string | null;
   abort_requested_by: string | null;
   abort_requested_at: string | null;
+};
+
+type MatchTurnTimeRow = {
+  match_id: string;
+  turn_number: number;
+  attacker_participant_id: string;
+  started_at: string;
+  ended_at: string | null;
 };
 
 type TiebreakGroupParticipantRow = {
@@ -123,6 +132,50 @@ function formatCompletedMatchDuration(startedAt: string | null, endedAt: string 
   return `${s}s`;
 }
 
+/**
+ * Tiempos por turno (desde turno 2): promedios en segundos y % del jugador con más tiempo acumulado.
+ */
+function computeMatchTurnTimeLines(
+  turns: MatchTurnTimeRow[],
+  paId: string,
+  pbId: string,
+  aName: string,
+  bName: string
+): { avgA: number; avgB: number; maxPlayerName: string; maxPct: number } | null {
+  if (turns.length === 0) return null;
+  const sorted = [...turns].sort((a, b) => a.turn_number - b.turn_number);
+  const maxTn = sorted[sorted.length - 1]!.turn_number;
+  if (maxTn < 2) return null;
+
+  let totalA = 0;
+  let totalB = 0;
+  let countA = 0;
+  let countB = 0;
+  for (const t of sorted) {
+    if (t.turn_number < 2) continue;
+    if (!t.ended_at) continue;
+    const dt = new Date(t.ended_at).getTime() - new Date(t.started_at).getTime();
+    if (!Number.isFinite(dt) || dt < 0) continue;
+    const secs = dt / 1000;
+    if (t.attacker_participant_id === paId) {
+      totalA += secs;
+      countA += 1;
+    } else if (t.attacker_participant_id === pbId) {
+      totalB += secs;
+      countB += 1;
+    }
+  }
+  const totalPartida = totalA + totalB;
+  if (totalPartida <= 0 || countA === 0 || countB === 0) return null;
+
+  const avgA = totalA / countA;
+  const avgB = totalB / countB;
+  const moreA = totalA >= totalB;
+  const maxPlayerName = moreA ? aName : bName;
+  const maxPct = ((moreA ? totalA : totalB) / totalPartida) * 100;
+  return { avgA, avgB, maxPlayerName, maxPct };
+}
+
 export default function PairingDetailScreen({ route, navigation }: Props) {
   const { pairingId, fromTab: fromPairingsTab = 'official' } = route.params;
   const [loading, setLoading] = useState(true);
@@ -148,6 +201,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     winner_participant_id: string | null;
   } | null>(null);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [matchTurnsByMatchId, setMatchTurnsByMatchId] = useState<Record<string, MatchTurnTimeRow[]>>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
   const firstRef = useRef(true);
 
@@ -163,6 +218,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudo cargar el enfrentamiento.');
       setPairing(null);
       setDraftEventStatus(null);
+      setTurnTrackingEnabled(false);
+      setMatchTurnsByMatchId({});
       setActiveTiebreakGroup(null);
       setLegacyTwoWayTiebreak(false);
       return;
@@ -174,7 +231,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase.auth.getUser(),
       supabase
         .from('draft_events')
-        .select('workspace_id, status, final_pending, champion_user_id')
+        .select('workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -195,7 +252,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('matches')
         .select(
-          'id, match_number, match_type, tiebreak_round, status, winner_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
+          'id, match_number, match_type, tiebreak_round, status, winner_participant_id, who_started_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
         )
         .eq('pairing_id', p.id)
         .order('match_number', { ascending: true }),
@@ -243,8 +300,34 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const matchRows = (matchesRes.data ?? []).map((row) => ({
       ...(row as MatchRow),
       tiebreak_round: (row as MatchRow).tiebreak_round ?? null,
+      who_started_participant_id: (row as MatchRow).who_started_participant_id ?? null,
     })) as MatchRow[];
     setMatches(matchRows);
+
+    const evFlags = eventRes.data as { turn_tracking_enabled?: boolean | null } | null;
+    const turnTrackOn = !!evFlags?.turn_tracking_enabled;
+    setTurnTrackingEnabled(turnTrackOn);
+
+    const completedMatchIdsForTurns = matchRows.filter((m) => m.status === 'completed').map((m) => m.id);
+
+    let turnsByMatch: Record<string, MatchTurnTimeRow[]> = {};
+    if (turnTrackOn && completedMatchIdsForTurns.length > 0) {
+      const trRes = await supabase
+        .from('match_turns')
+        .select('match_id, turn_number, attacker_participant_id, started_at, ended_at')
+        .in('match_id', completedMatchIdsForTurns);
+      if (!trRes.error && trRes.data) {
+        for (const raw of trRes.data as MatchTurnTimeRow[]) {
+          const mid = String(raw.match_id);
+          if (!turnsByMatch[mid]) turnsByMatch[mid] = [];
+          turnsByMatch[mid].push(raw);
+        }
+        for (const mid of Object.keys(turnsByMatch)) {
+          turnsByMatch[mid].sort((a, b) => a.turn_number - b.turn_number);
+        }
+      }
+    }
+    setMatchTurnsByMatchId(turnsByMatch);
 
     let tiebreakGroupState: ActiveTiebreakGroupState | null = null;
     const tgRow = tiebreakGroupRes.data as
@@ -814,13 +897,37 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 const durationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
                 const showLive =
                   m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
+                const starterName =
+                  m.status === 'completed' &&
+                  m.who_started_participant_id &&
+                  (m.who_started_participant_id === pairing.participant_a_id ||
+                    m.who_started_participant_id === pairing.participant_b_id)
+                    ? m.who_started_participant_id === pairing.participant_a_id
+                      ? aName
+                      : bName
+                    : null;
+                const turnStats =
+                  turnTrackingEnabled && m.status === 'completed'
+                    ? computeMatchTurnTimeLines(
+                        matchTurnsByMatchId[m.id] ?? [],
+                        pairing.participant_a_id,
+                        pairing.participant_b_id,
+                        aName,
+                        bName
+                      )
+                    : null;
                 return (
                   <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                     <View style={styles.matchRowMain}>
-                      <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                        #{displayNum} ·{' '}
-                        {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
-                      </Text>
+                      <View style={styles.matchMetaRow}>
+                        <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                          #{displayNum} ·{' '}
+                          {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
+                        </Text>
+                        {starterName ? (
+                          <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text>
+                        ) : null}
+                      </View>
                       {showLive ? (
                         <Text style={styles.matchLiveScore}>
                           {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
@@ -835,7 +942,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                             Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
                           </Text>
                           {durationLabel ? (
-                            <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                            <Text style={styles.matchDuration}>
+                              Duración: {durationLabel}
+                              {turnStats ? ` (${turnStats.maxPct.toFixed(0)}% ${turnStats.maxPlayerName})` : ''}
+                            </Text>
                           ) : null}
                         </View>
                       ) : null}
@@ -875,13 +985,37 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
                     const roundSuffix = (m.tiebreak_round ?? 1) >= 2 ? ` · Ronda ${m.tiebreak_round}` : '';
                     const rowLabel = bracketRowLabel ?? `#${displayNum}${roundSuffix}`;
+                    const starterName =
+                      m.status === 'completed' &&
+                      m.who_started_participant_id &&
+                      (m.who_started_participant_id === pairing.participant_a_id ||
+                        m.who_started_participant_id === pairing.participant_b_id)
+                        ? m.who_started_participant_id === pairing.participant_a_id
+                          ? aName
+                          : bName
+                        : null;
+                    const turnStats =
+                      turnTrackingEnabled && m.status === 'completed'
+                        ? computeMatchTurnTimeLines(
+                            matchTurnsByMatchId[m.id] ?? [],
+                            pairing.participant_a_id,
+                            pairing.participant_b_id,
+                            aName,
+                            bName
+                          )
+                        : null;
                     return (
                       <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                         <View style={styles.matchRowMain}>
-                          <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                            {rowLabel} ·{' '}
-                            {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
-                          </Text>
+                          <View style={styles.matchMetaRow}>
+                            <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                              {rowLabel} ·{' '}
+                              {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
+                            </Text>
+                            {starterName ? (
+                              <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text>
+                            ) : null}
+                          </View>
                           {showLive ? (
                             <Text style={styles.matchLiveScore}>
                               {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
@@ -896,7 +1030,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                                 Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
                               </Text>
                               {durationLabel ? (
-                                <Text style={styles.matchDuration}>Duración: {durationLabel}</Text>
+                                <Text style={styles.matchDuration}>
+                                  Duración: {durationLabel}
+                                  {turnStats ? ` (${turnStats.maxPct.toFixed(0)}% ${turnStats.maxPlayerName})` : ''}
+                                </Text>
                               ) : null}
                             </View>
                           ) : null}
@@ -951,16 +1088,40 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       : m.winner_participant_id === pairing.participant_b_id
                       ? bName
                       : null;
+                  const starterName =
+                    m.status === 'completed' &&
+                    m.who_started_participant_id &&
+                    (m.who_started_participant_id === pairing.participant_a_id ||
+                      m.who_started_participant_id === pairing.participant_b_id)
+                      ? m.who_started_participant_id === pairing.participant_a_id
+                        ? aName
+                        : bName
+                      : null;
+                  const turnStats =
+                    turnTrackingEnabled && m.status === 'completed'
+                      ? computeMatchTurnTimeLines(
+                          matchTurnsByMatchId[m.id] ?? [],
+                          pairing.participant_a_id,
+                          pairing.participant_b_id,
+                          aName,
+                          bName
+                        )
+                      : null;
                   return (
                     <View key={m.id} style={[styles.matchRow, m.status === 'in_progress' && styles.matchRowLive]}>
                       <View style={styles.matchRowMain}>
-                        <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
-                          {m.status === 'completed' && winnerName
-                            ? `Venganza N°${revengeNum} - Ganó ${winnerName}`
-                            : `Venganza N°${revengeNum} · ${
-                                m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
-                              }`}
-                        </Text>
+                        <View style={styles.matchMetaRow}>
+                          <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
+                            {m.status === 'completed' && winnerName
+                              ? `Venganza N°${revengeNum} - Ganó ${winnerName}`
+                              : `Venganza N°${revengeNum} · ${
+                                  m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
+                                }`}
+                          </Text>
+                          {starterName ? (
+                            <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text>
+                          ) : null}
+                        </View>
                         {showLive ? (
                           <Text style={styles.matchLiveScore}>
                             {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
@@ -970,13 +1131,19 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                           <Text style={styles.matchTime}>{formatMatchTimestamp(m.started_at)}</Text>
                         ) : null}
                         {m.status === 'completed' && winnerName && revengeDurationLabel ? (
-                          <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
+                          <Text style={styles.matchDuration}>
+                            Duración: {revengeDurationLabel}
+                            {turnStats ? ` (${turnStats.maxPct.toFixed(0)}% ${turnStats.maxPlayerName})` : ''}
+                          </Text>
                         ) : null}
                         {m.status === 'completed' && !winnerName ? (
                           <View>
                             <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
                             {revengeDurationLabel ? (
-                              <Text style={styles.matchDuration}>Duración: {revengeDurationLabel}</Text>
+                              <Text style={styles.matchDuration}>
+                                Duración: {revengeDurationLabel}
+                                {turnStats ? ` (${turnStats.maxPct.toFixed(0)}% ${turnStats.maxPlayerName})` : ''}
+                              </Text>
                             ) : null}
                           </View>
                         ) : null}
@@ -1049,6 +1216,12 @@ const styles = StyleSheet.create({
   primaryAboveRevengeWrap: { marginTop: 16, marginBottom: 4 },
   revengeCounter: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
   meta: { fontSize: 14, color: '#666', marginBottom: 4 },
+  matchMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  matchStartedBy: { fontSize: 12, color: '#6B7280', marginLeft: 6 },
   matchRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
