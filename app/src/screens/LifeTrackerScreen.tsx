@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  findNodeHandle,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,7 +23,9 @@ import {
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import {
+  buildSequentialEmojis,
   categorizeMove,
+  getEffectiveAttackPattern,
   getSpecialBehavior,
   pickMove,
   pickRandomMoveFromAll,
@@ -101,6 +104,57 @@ function getPokemonNameFromAvatar(participant: ParticipantRow | null): string {
 
 function clampLife(value: number): number {
   return Math.max(0, value);
+}
+
+function flushLayout(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+const computeSurroundPositions = (count: number, radius = 50) => {
+  if (count === 3) {
+    return [
+      { x: -radius, y: 0 },
+      { x: 0, y: -radius },
+      { x: radius, y: 0 },
+    ];
+  }
+  if (count === 4) {
+    return [
+      { x: 0, y: -radius },
+      { x: 0, y: radius },
+      { x: -radius, y: 0 },
+      { x: radius, y: 0 },
+    ];
+  }
+  return [];
+};
+
+function measureAvatarCenterInScroll(
+  wrap: View | null,
+  content: View | null
+): Promise<{ cx: number; cy: number }> {
+  return new Promise((resolve) => {
+    if (!wrap || !content) {
+      resolve({ cx: 180, cy: 220 });
+      return;
+    }
+    const nh = findNodeHandle(content);
+    if (nh == null) {
+      resolve({ cx: 180, cy: 220 });
+      return;
+    }
+    wrap.measureLayout(
+      nh,
+      (x, y, w, h) => {
+        resolve({ cx: x + w / 2, cy: y + h / 2 });
+      },
+      () => resolve({ cx: 180, cy: 220 })
+    );
+  });
 }
 
 async function navigateAfterMatchMaybeComplete(
@@ -183,9 +237,31 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const attackerShake = useRef(new Animated.Value(0)).current;
   const attackSelfOpacity = useRef(new Animated.Value(1)).current;
   const specialPreAnim = useRef(new Animated.Value(0)).current;
+  const surroundFade = useRef(new Animated.Value(0)).current;
+  const circularProgress = useRef(new Animated.Value(0)).current;
+  const circularTx = useMemo(
+    () =>
+      circularProgress.interpolate({
+        inputRange: [0, 0.25, 0.5, 0.75, 1],
+        outputRange: [0, 60, 0, -60, 0],
+      }),
+    [circularProgress]
+  );
+  const circularTy = useMemo(
+    () =>
+      circularProgress.interpolate({
+        inputRange: [0, 0.25, 0.5, 0.75, 1],
+        outputRange: [-60, 0, 60, 0, -60],
+      }),
+    [circularProgress]
+  );
   const [attackingFrom, setAttackingFrom] = useState<'a' | 'b' | null>(null);
   const [attackEmoji, setAttackEmoji] = useState<string | null>(null);
   const [attackMoveTarget, setAttackMoveTarget] = useState<MoveTarget | null>(null);
+  type SurroundPayload = { cx: number; cy: number; items: { x: number; y: number; emoji: string }[] };
+  type CircularPayload = { cx: number; cy: number; emoji: string };
+  const [surroundPayload, setSurroundPayload] = useState<SurroundPayload | null>(null);
+  const [circularPayload, setCircularPayload] = useState<CircularPayload | null>(null);
   const [specialEmoji, setSpecialEmoji] = useState<string | null>(null);
   const [specialType, setSpecialType] = useState<'ditto' | 'metronome' | null>(null);
   const [lifeDisplayedA, setLifeDisplayedA] = useState(20);
@@ -937,9 +1013,16 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     defenderShake.setValue(0);
     attackerShake.setValue(0);
     attackSelfOpacity.setValue(1);
+    surroundFade.setValue(0);
+    circularProgress.setValue(0);
+    setSurroundPayload(null);
+    setCircularPayload(null);
     setAttackingFrom(attackerSide);
     setAttackMoveTarget(move.target);
     setAttackEmoji(move.emoji);
+
+    const effectivePattern = getEffectiveAttackPattern(move);
+    const strikeCount = move.count ?? 1;
 
     const defenderShakeSteps = [
       Animated.timing(defenderShake, { toValue: 10, duration: 80, useNativeDriver: true }),
@@ -949,7 +1032,109 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       Animated.timing(defenderShake, { toValue: 0, duration: 80, useNativeDriver: true }),
     ];
 
-    if (move.target === 'enemy') {
+    const runDefenderShakeOnly = () =>
+      new Promise<void>((resolve) => {
+        Animated.sequence(defenderShakeSteps).start(() => resolve());
+      });
+
+    const runAttackerSoftShakeOnly = () =>
+      new Promise<void>((resolve) => {
+        Animated.sequence([
+          Animated.timing(attackerShake, { toValue: -5, duration: 80, useNativeDriver: true }),
+          Animated.timing(attackerShake, { toValue: 5, duration: 80, useNativeDriver: true }),
+          Animated.timing(attackerShake, { toValue: -3, duration: 80, useNativeDriver: true }),
+          Animated.timing(attackerShake, { toValue: 3, duration: 80, useNativeDriver: true }),
+          Animated.timing(attackerShake, { toValue: 0, duration: 80, useNativeDriver: true }),
+        ]).start(() => resolve());
+      });
+
+    const runTravelEnemy = () =>
+      new Promise<void>((resolve) => {
+        Animated.timing(attackTravel, { toValue: 1, duration: 800, useNativeDriver: true }).start(() =>
+          resolve()
+        );
+      });
+
+    const runTravelAbsorb = () =>
+      new Promise<void>((resolve) => {
+        Animated.timing(attackTravel, { toValue: 1, duration: 800, useNativeDriver: true }).start(() =>
+          resolve()
+        );
+      });
+
+    if (effectivePattern === 'sequential' && strikeCount > 1 && move.target === 'enemy') {
+      const seq = buildSequentialEmojis(move);
+      for (let i = 0; i < seq.length; i += 1) {
+        attackTravel.setValue(0);
+        setAttackEmoji(seq[i]!);
+        await flushLayout();
+        await runTravelEnemy();
+        if (i < seq.length - 1) {
+          await new Promise<void>((r) => setTimeout(r, 120));
+        }
+      }
+      await runDefenderShakeOnly();
+    } else if (
+      effectivePattern === 'surround' &&
+      (move.target === 'enemy' || move.target === 'absorb')
+    ) {
+      const defenderSlot: 'a' | 'b' = isAttackerA ? 'b' : 'a';
+      updateAvatarYInScrollContent('a');
+      updateAvatarYInScrollContent('b');
+      await flushLayout();
+      const defWrap = defenderSlot === 'a' ? avatarWrapMeasureRefA.current : avatarWrapMeasureRefB.current;
+      const center = await measureAvatarCenterInScroll(defWrap, scrollContentLayoutRef.current);
+      setAttackEmoji(null);
+      await runDefenderShakeOnly();
+      const offsets = computeSurroundPositions(strikeCount, 50);
+      if (offsets.length > 0) {
+        surroundFade.setValue(0);
+        setSurroundPayload({
+          cx: center.cx,
+          cy: center.cy,
+          items: offsets.map((o) => ({ x: o.x, y: o.y, emoji: move.emoji })),
+        });
+        await new Promise<void>((resolve) => {
+          Animated.sequence([
+            Animated.timing(surroundFade, { toValue: 1, duration: 200, useNativeDriver: true }),
+            Animated.delay(600),
+            Animated.timing(surroundFade, { toValue: 0, duration: 200, useNativeDriver: true }),
+          ]).start(() => resolve());
+        });
+        setSurroundPayload(null);
+        surroundFade.setValue(0);
+      }
+      if (move.target === 'absorb') {
+        attackTravel.setValue(0);
+        setAttackEmoji(move.emoji);
+        await flushLayout();
+        await runTravelAbsorb();
+      }
+    } else if (effectivePattern === 'circular') {
+      const anchorSlot: 'a' | 'b' = move.target === 'self' ? attackerSide : isAttackerA ? 'b' : 'a';
+      updateAvatarYInScrollContent('a');
+      updateAvatarYInScrollContent('b');
+      await flushLayout();
+      const anchorWrap = anchorSlot === 'a' ? avatarWrapMeasureRefA.current : avatarWrapMeasureRefB.current;
+      const center = await measureAvatarCenterInScroll(anchorWrap, scrollContentLayoutRef.current);
+      setAttackEmoji(null);
+      setCircularPayload({ cx: center.cx, cy: center.cy, emoji: move.emoji });
+      circularProgress.setValue(0);
+      await new Promise<void>((resolve) => {
+        Animated.timing(circularProgress, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }).start(() => resolve());
+      });
+      setCircularPayload(null);
+      circularProgress.setValue(0);
+      if (move.target === 'enemy') {
+        await runDefenderShakeOnly();
+      } else {
+        await runAttackerSoftShakeOnly();
+      }
+    } else if (move.target === 'enemy') {
       await new Promise<void>((resolve) => {
         Animated.timing(attackTravel, {
           toValue: 1,
@@ -1000,6 +1185,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     setAttackingFrom(null);
     setAttackEmoji(null);
     setAttackMoveTarget(null);
+    setSurroundPayload(null);
+    setCircularPayload(null);
     setSpecialEmoji(null);
     setSpecialType(null);
     attackTravel.setValue(0);
@@ -1007,6 +1194,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     attackerShake.setValue(0);
     attackSelfOpacity.setValue(1);
     specialPreAnim.setValue(0);
+    surroundFade.setValue(0);
+    circularProgress.setValue(0);
     setPassingTurn(false);
 
     if (error) {
@@ -1037,6 +1226,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     turnStartLifeA,
     turnStartLifeB,
     turnStartedAt,
+    updateAvatarYInScrollContent,
   ]);
 
   const nameA = useMemo(() => {
@@ -1158,7 +1348,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       turnTrackingEnabled &&
       attackingFrom != null &&
       attackMoveTarget === 'self' &&
-      attackEmoji != null &&
       ((attackingFrom === 'a' && slot === 'a') || (attackingFrom === 'b' && slot === 'b'));
     const diffColor =
       deltaDisplay > 0 ? '#16A34A' : deltaDisplay < 0 ? '#DC2626' : '#6B7280';
@@ -1420,7 +1609,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             layoutAB.bottom === 'a' ? deltaA : deltaB,
             layoutAB.bottom === 'a' ? diffOpacityA : diffOpacityB
           )}
-          {attackFlyOutputRange ? (
+          {attackFlyOutputRange && attackEmoji ? (
             <Animated.View
               pointerEvents="none"
               style={[
@@ -1439,6 +1628,44 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               ]}
             >
               <Text style={styles.attackFlyEmoji}>{attackEmoji}</Text>
+            </Animated.View>
+          ) : null}
+          {surroundPayload ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.surroundAnchor,
+                { left: surroundPayload.cx, top: surroundPayload.cy },
+              ]}
+            >
+              <Animated.View style={{ opacity: surroundFade }}>
+                {surroundPayload.items.map((it, idx) => (
+                  <Text
+                    key={`${it.emoji}-${idx}`}
+                    style={[
+                      styles.surroundEmoji,
+                      { left: it.x - 28, top: it.y - 28 },
+                    ]}
+                  >
+                    {it.emoji}
+                  </Text>
+                ))}
+              </Animated.View>
+            </View>
+          ) : null}
+          {circularPayload ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.circularWrap,
+                {
+                  left: circularPayload.cx - 28,
+                  top: circularPayload.cy - 28,
+                  transform: [{ translateX: circularTx }, { translateY: circularTy }],
+                },
+              ]}
+            >
+              <Text style={styles.attackFlyEmoji}>{circularPayload.emoji}</Text>
             </Animated.View>
           ) : null}
         </View>
@@ -1493,6 +1720,20 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -28,
     top: 0,
+    zIndex: 40,
+  },
+  surroundAnchor: {
+    position: 'absolute',
+    zIndex: 40,
+    width: 0,
+    height: 0,
+  },
+  surroundEmoji: {
+    position: 'absolute',
+    fontSize: 56,
+  },
+  circularWrap: {
+    position: 'absolute',
     zIndex: 40,
   },
   attackFlyEmoji: { fontSize: 56 },

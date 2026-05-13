@@ -13,11 +13,38 @@ export type MoveCategory =
 
 export type MoveTarget = 'enemy' | 'self' | 'absorb';
 
+export type MovePattern = 'sequential' | 'surround' | 'circular' | 'sequential_around';
+
 export type Move = {
   name: string;
   emoji: string;
   target: MoveTarget;
+  /** Cantidad de emojis simultáneos/secuenciales (patrones avanzados). */
+  count?: number;
+  pattern?: MovePattern;
+  /** Segundo emoji para combos secuenciales (p. ej. Pin Misil). */
+  emojiAlt?: string;
 };
+
+/**
+ * Si hay count > 1 sin pattern explícito, el cliente usa secuencial por defecto.
+ */
+export function getEffectiveAttackPattern(move: Move): MovePattern | undefined {
+  if (move.pattern) return move.pattern;
+  if ((move.count ?? 1) > 1) return 'sequential';
+  return undefined;
+}
+
+/** Secuencia de emojis para animación sequential (alterna emojiAlt si existe). */
+export function buildSequentialEmojis(move: Move): string[] {
+  const n = Math.max(1, move.count ?? 1);
+  const out: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const useAlt = move.emojiAlt != null && i % 2 === 1;
+    out.push(useAlt ? move.emojiAlt! : move.emoji);
+  }
+  return out;
+}
 
 type Movepool = Partial<Record<MoveCategory, Move[]>>;
 
@@ -64,8 +91,8 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   },
   bug: {
     damage: [
-      { name: 'Pin Misil', emoji: '🪲', target: 'enemy' },
-      { name: 'Picadura', emoji: '🪲', target: 'enemy' },
+      { name: 'Pin Misil', emoji: '🪲', emojiAlt: '💉', count: 2, pattern: 'sequential', target: 'enemy' },
+      { name: 'Picadura', emoji: '🪲', emojiAlt: '💉', count: 2, pattern: 'sequential', target: 'enemy' },
       { name: 'Corte Furia', emoji: '🗡️', target: 'enemy' },
       { name: 'Megacuerno', emoji: '🫎', target: 'enemy' },
     ],
@@ -78,8 +105,8 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   electric: {
     damage: [
       { name: 'Impactrueno', emoji: '⚡', target: 'enemy' },
-      { name: 'Trueno', emoji: '⚡', target: 'enemy' },
-      { name: 'Rayo', emoji: '⚡', target: 'enemy' },
+      { name: 'Trueno', emoji: '⚡', count: 3, pattern: 'sequential', target: 'enemy' },
+      { name: 'Rayo', emoji: '⚡', count: 2, pattern: 'sequential', target: 'enemy' },
     ],
     self_damage_both: [{ name: 'Explosión', emoji: '💥', target: 'enemy' }],
     neutral: [
@@ -91,14 +118,14 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
     damage: [
       { name: 'Terremoto', emoji: '🫨', target: 'enemy' },
       { name: 'Bomba Lodo', emoji: '💩', target: 'enemy' },
-      { name: 'Magnitud', emoji: '🪨', target: 'enemy' },
+      { name: 'Magnitud', emoji: '🪨', count: 2, pattern: 'sequential', target: 'enemy' },
     ],
     neutral: [{ name: 'Ataque Arena', emoji: '⏳', target: 'enemy' }],
   },
   rock: {
     damage: [
       { name: 'Lanzarrocas', emoji: '🪨', target: 'enemy' },
-      { name: 'Magnitud', emoji: '🪨', target: 'enemy' },
+      { name: 'Magnitud', emoji: '🪨', count: 2, pattern: 'sequential', target: 'enemy' },
     ],
     neutral: [
       { name: 'Ataque Arena', emoji: '⏳', target: 'enemy' },
@@ -108,12 +135,12 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   ghost: {
     damage: [
       { name: 'Bola Sombra', emoji: '🌀', target: 'enemy' },
-      { name: 'Confusión', emoji: '😵‍💫', target: 'enemy' },
+      { name: 'Confusión', emoji: '😵‍💫', target: 'enemy', count: 4, pattern: 'surround' },
       { name: 'Lengüetazo', emoji: '👅', target: 'enemy' },
     ],
-    absorption: [{ name: 'Comesueños', emoji: '😴', target: 'absorb' }],
+    absorption: [{ name: 'Comesueños', emoji: '😴', target: 'absorb', count: 4, pattern: 'surround' }],
     self_damage_only: [{ name: 'Maldición', emoji: '💀', target: 'self' }],
-    neutral: [{ name: 'Mal de Ojo', emoji: '👁️', target: 'enemy' }],
+    neutral: [{ name: 'Mal de Ojo', emoji: '👁️', target: 'enemy', count: 3, pattern: 'surround' }],
   },
   normal: {
     damage: [
@@ -154,11 +181,11 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   },
   psychic: {
     damage: [
-      { name: 'Confusión', emoji: '😵‍💫', target: 'enemy' },
+      { name: 'Confusión', emoji: '😵‍💫', target: 'enemy', count: 4, pattern: 'surround' },
       { name: 'Psicoonda', emoji: '🧠', target: 'enemy' },
       { name: 'Psíquico', emoji: '🔮', target: 'enemy' },
     ],
-    absorption: [{ name: 'Comesueños', emoji: '😴', target: 'absorb' }],
+    absorption: [{ name: 'Comesueños', emoji: '😴', target: 'absorb', count: 4, pattern: 'surround' }],
     self_heal: [{ name: 'Recuperación', emoji: '💫', target: 'self' }],
     neutral: [
       { name: 'Barrera', emoji: '🛡️', target: 'self' },
@@ -167,7 +194,7 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   },
   fighting: {
     damage: [
-      { name: 'Movimiento Sísmico', emoji: '🌎', target: 'enemy' },
+      { name: 'Movimiento Sísmico', emoji: '🌎', target: 'enemy', pattern: 'circular' },
       { name: 'Golpe Karate', emoji: '🥋', target: 'enemy' },
       { name: 'Patada Salto', emoji: '🦵', target: 'enemy' },
     ],
@@ -203,7 +230,7 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
       { name: 'Hiperrayo', emoji: '☄️', target: 'enemy' },
     ],
     self_heal: [{ name: 'Recuperación', emoji: '💫', target: 'self' }],
-    neutral: [{ name: 'Danza Dragón', emoji: '🐲', target: 'self' }],
+    neutral: [{ name: 'Danza Dragón', emoji: '🐲', target: 'self', pattern: 'circular' }],
   },
 };
 
