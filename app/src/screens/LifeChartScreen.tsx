@@ -218,6 +218,9 @@ export default function LifeChartScreen({ route }: Props) {
 
   const xToPixel = (x: number) => PADDING_LEFT + ((x - effXMin) / xSpan) * plotWidth;
   const yToPixel = (y: number) => PADDING_TOP + ((effYMax - y) / ySpan) * plotHeight;
+  /** Drift visual en Y para separar series cuando comparten vida (eje/ticks sin cambio). */
+  const yToPixelA = (life: number) => yToPixel(life + 0.2);
+  const yToPixelB = (life: number) => yToPixel(life - 0.2);
 
   const visibleTurns = chartTurns.filter((t) => t.turn_number >= effXMin && t.turn_number <= effXMax);
 
@@ -232,11 +235,11 @@ export default function LifeChartScreen({ route }: Props) {
   const seriesPoints = (includeInitial ? [initialRow] : []).concat(visibleTurns);
   const pointsA =
     seriesPoints.length > 0
-      ? seriesPoints.map((t) => `${xToPixel(t.turn_number)},${yToPixel(t.life_a_after)}`).join(' ')
+      ? seriesPoints.map((t) => `${xToPixel(t.turn_number)},${yToPixelA(t.life_a_after)}`).join(' ')
       : '';
   const pointsB =
     seriesPoints.length > 0
-      ? seriesPoints.map((t) => `${xToPixel(t.turn_number)},${yToPixel(t.life_b_after)}`).join(' ')
+      ? seriesPoints.map((t) => `${xToPixel(t.turn_number)},${yToPixelB(t.life_b_after)}`).join(' ')
       : '';
 
   const xTicks: number[] = [];
@@ -343,8 +346,8 @@ export default function LifeChartScreen({ route }: Props) {
 
             {seriesPoints.map((t, idx) => (
               <React.Fragment key={`pts-${idx}`}>
-                <Circle cx={xToPixel(t.turn_number)} cy={yToPixel(t.life_a_after)} r={3} fill={colorA} />
-                <Circle cx={xToPixel(t.turn_number)} cy={yToPixel(t.life_b_after)} r={3} fill={colorB} />
+                <Circle cx={xToPixel(t.turn_number)} cy={yToPixelA(t.life_a_after)} r={3} fill={colorA} />
+                <Circle cx={xToPixel(t.turn_number)} cy={yToPixelB(t.life_b_after)} r={3} fill={colorB} />
               </React.Fragment>
             ))}
           </Svg>
