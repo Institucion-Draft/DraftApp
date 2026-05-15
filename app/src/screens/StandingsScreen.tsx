@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,7 +22,7 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
-import { type Gender } from '../lib/genderText';
+import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   computePodium,
   type PodiumState,
@@ -64,6 +66,12 @@ type RowView = {
   dmvt: number | null;
   /** Tiempo medio por partida (s); null si no hay partidas completadas con duración. */
   tmp: number | null;
+  swissPoints: number;
+  swissOmw: number | null;
+  swissGw: number | null;
+  swissOgw: number | null;
+  /** Suizo: bye en ronda ya cerrada (todos los pairings con official_winner). */
+  showCompletedByeL: boolean;
   inProgress: boolean;
   leftEventAt: string | null;
   gender: Gender | null;
@@ -85,6 +93,173 @@ type RevengeRowView = {
 };
 
 type LifeEvRow = { match_id: string; participant_id: string; resulting_life: number; occurred_at: string };
+
+type SwissTopcutPlayerSlot = {
+  kind: 'player';
+  participantId: string;
+  userId: string;
+  name: string;
+  seed: number;
+};
+
+type SwissTopcutPlaceholderSlot = { kind: 'placeholder'; label: string };
+
+type SwissTopcutNodeSlot = SwissTopcutPlayerSlot | SwissTopcutPlaceholderSlot;
+
+type SwissTopcutSemiView = {
+  top: SwissTopcutNodeSlot;
+  bottom: SwissTopcutNodeSlot;
+  winnerParticipantId: string | null;
+  /** Raw match ids for loser resolution */
+  participantAId: string;
+  participantBId: string;
+};
+
+type SwissTopcutBracketView = {
+  semi1: SwissTopcutSemiView;
+  semi2: SwissTopcutSemiView;
+  finalTop: SwissTopcutNodeSlot;
+  finalBottom: SwissTopcutNodeSlot;
+  finalWinnerParticipantId: string | null;
+  thirdTop: SwissTopcutNodeSlot;
+  thirdBottom: SwissTopcutNodeSlot;
+  thirdWinnerParticipantId: string | null;
+};
+
+function buildSwissTopcutBracketModel(
+  gpRows: { participant_id: string; user_id: string; seed: number }[],
+  matches: BracketMatchPodiumInput[],
+  infoByParticipantId: Map<string, { userId: string; name: string }>
+): SwissTopcutBracketView | null {
+  const seedByPid = new Map<string, number>();
+  for (const r of gpRows) {
+    seedByPid.set(String(r.participant_id), Number(r.seed));
+  }
+  const slot = (pid: string): SwissTopcutPlayerSlot | null => {
+    const s = seedByPid.get(pid);
+    if (s == null || !Number.isFinite(s)) return null;
+    const info = infoByParticipantId.get(pid);
+    return {
+      kind: 'player',
+      participantId: pid,
+      userId: info?.userId ?? '',
+      name: info?.name ?? 'Jugador',
+      seed: s,
+    };
+  };
+
+  const semis = matches.filter((m) => m.bracket_phase === 'semi');
+  if (semis.length < 2) return null;
+
+  const seedsOf = (m: BracketMatchPodiumInput) => ({
+    sa: seedByPid.get(m.participant_a_id),
+    sb: seedByPid.get(m.participant_b_id),
+  });
+
+  let semi14: BracketMatchPodiumInput | null = null;
+  let semi23: BracketMatchPodiumInput | null = null;
+  for (const m of semis) {
+    const { sa, sb } = seedsOf(m);
+    const set = new Set([sa, sb].filter((x) => x != null) as number[]);
+    if (set.has(1) && set.has(4)) semi14 = m;
+    else if (set.has(2) && set.has(3)) semi23 = m;
+  }
+  if (!semi14 || !semi23) return null;
+
+  const s1a = slot(semi14.participant_a_id);
+  const s1b = slot(semi14.participant_b_id);
+  if (!s1a || !s1b) return null;
+  const topSf1 = s1a.seed === 1 ? s1a : s1b.seed === 1 ? s1b : null;
+  const botSf1 = s1a.seed === 4 ? s1a : s1b.seed === 4 ? s1b : null;
+  if (!topSf1 || !botSf1) return null;
+  const semi1View: SwissTopcutSemiView = {
+    top: topSf1,
+    bottom: botSf1,
+    winnerParticipantId: semi14.winner_participant_id,
+    participantAId: semi14.participant_a_id,
+    participantBId: semi14.participant_b_id,
+  };
+
+  const pa2 = slot(semi23.participant_a_id);
+  const pb2 = slot(semi23.participant_b_id);
+  if (!pa2 || !pb2) return null;
+  const topSf2 = pa2.seed === 3 ? pa2 : pb2.seed === 3 ? pb2 : null;
+  const bottomSf2 = pa2.seed === 2 ? pa2 : pb2.seed === 2 ? pb2 : null;
+  if (!topSf2 || !bottomSf2) return null;
+
+  const semi2View: SwissTopcutSemiView = {
+    top: topSf2,
+    bottom: bottomSf2,
+    winnerParticipantId: semi23.winner_participant_id,
+    participantAId: semi23.participant_a_id,
+    participantBId: semi23.participant_b_id,
+  };
+
+  const loserOf = (semi: SwissTopcutSemiView): string | null => {
+    const w = semi.winnerParticipantId;
+    if (!w) return null;
+    if (w === semi.participantAId) return semi.participantBId;
+    if (w === semi.participantBId) return semi.participantAId;
+    return null;
+  };
+
+  const finalM = matches.find((m) => m.bracket_phase === 'final');
+  const thirdM = matches.find((m) => m.bracket_phase === 'third_place');
+
+  const wSf1 = semi1View.winnerParticipantId;
+  const wSf2 = semi2View.winnerParticipantId;
+
+  let finalTop: SwissTopcutNodeSlot;
+  let finalBottom: SwissTopcutNodeSlot;
+  let finalWinner = finalM?.winner_participant_id ?? null;
+
+  if (finalM) {
+    const ta = slot(finalM.participant_a_id);
+    const tb = slot(finalM.participant_b_id);
+    finalTop = ta ?? { kind: 'placeholder', label: 'Ganador SF1' };
+    finalBottom = tb ?? { kind: 'placeholder', label: 'Ganador SF2' };
+  } else if (wSf1 && wSf2) {
+    const a = slot(wSf1);
+    const b = slot(wSf2);
+    finalTop = a ?? { kind: 'placeholder', label: 'Ganador SF1' };
+    finalBottom = b ?? { kind: 'placeholder', label: 'Ganador SF2' };
+  } else {
+    finalTop = wSf1 ? (slot(wSf1) ?? { kind: 'placeholder', label: 'Ganador SF1' }) : { kind: 'placeholder', label: 'Ganador SF1' };
+    finalBottom = wSf2 ? (slot(wSf2) ?? { kind: 'placeholder', label: 'Ganador SF2' }) : { kind: 'placeholder', label: 'Ganador SF2' };
+  }
+
+  let thirdTop: SwissTopcutNodeSlot;
+  let thirdBottom: SwissTopcutNodeSlot;
+  let thirdWinner = thirdM?.winner_participant_id ?? null;
+
+  if (thirdM) {
+    const ta = slot(thirdM.participant_a_id);
+    const tb = slot(thirdM.participant_b_id);
+    thirdTop = ta ?? { kind: 'placeholder', label: 'Perdedor SF1' };
+    thirdBottom = tb ?? { kind: 'placeholder', label: 'Perdedor SF2' };
+  } else {
+    const l1 = loserOf(semi1View);
+    const l2 = loserOf(semi2View);
+    if (l1 && l2) {
+      thirdTop = slot(l1) ?? { kind: 'placeholder', label: 'Perdedor SF1' };
+      thirdBottom = slot(l2) ?? { kind: 'placeholder', label: 'Perdedor SF2' };
+    } else {
+      thirdTop = { kind: 'placeholder', label: 'Perdedor SF1' };
+      thirdBottom = { kind: 'placeholder', label: 'Perdedor SF2' };
+    }
+  }
+
+  return {
+    semi1: semi1View,
+    semi2: semi2View,
+    finalTop,
+    finalBottom,
+    finalWinnerParticipantId: finalWinner,
+    thirdTop,
+    thirdBottom,
+    thirdWinnerParticipantId: thirdWinner,
+  };
+}
 
 type MatchTurnRow = {
   match_id: string;
@@ -213,9 +388,28 @@ function formatPctOneDecimal(fraction: number): string {
   return `${pct.toFixed(1).replace('.', ',')}%`;
 }
 
+/** Porcentaje suizo (OMW%, GW%): 1 decimal si hace falta; "33%" sin coma si es entero. No usar con null: usar celda "—" explícita. */
+function formatSwissPctDisplay(rate: number): string {
+  if (!Number.isFinite(rate)) return '—';
+  const pct = rate * 100;
+  const rounded = Math.round(pct * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return `${Math.round(rounded)}%`;
+  return `${rounded.toFixed(1).replace('.', ',')}%`;
+}
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
+}
+
+/** Ronda suiza cerrada: todos los pairings de esa ronda tienen ganador oficial. */
+function isSwissRoundFullyResolved(
+  pairings: { swiss_round?: number | string | null; official_winner_participant_id?: string | null }[],
+  round: number
+): boolean {
+  const inRound = pairings.filter((pr) => Number(pr.swiss_round) === round);
+  if (inRound.length === 0) return false;
+  return inRound.every((pr) => pr.official_winner_participant_id != null);
 }
 
 /** Tamaño por cantidad y por si caben con `gap` en el peldaño (misma lógica en 1º, 2º y 3º). */
@@ -271,6 +465,152 @@ type Bo3Footer = {
 
 type EventFooterStats = { torneo: string | null; bo3: Bo3Footer | null };
 
+const STC_ROW_H = 46;
+
+function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
+  const winW = Dimensions.get('window').width;
+  const totalW = Math.min(Math.max(winW - 24, 300), 540);
+  const gap = Math.max(30, Math.round(totalW * 0.07));
+  const finalW = Math.min(196, Math.round(totalW * 0.36));
+  const semiW = Math.floor((totalW - 2 * gap - finalW) / 2);
+  const cardH = STC_ROW_H * 2 + 1;
+  const yTop = STC_ROW_H / 2;
+  const yBot = STC_ROW_H + 1 + STC_ROW_H / 2;
+  const semi1Right = semiW;
+  const finalLeft = semiW + gap;
+  const finalRight = semiW + gap + finalW;
+  const semi2Left = finalRight + gap;
+  const hStub = Math.min(20, gap * 0.42);
+  const midL = semi1Right + hStub;
+  const midR = semi2Left - hStub;
+  const jog = 10;
+  const dLeftTop = `M ${semi1Right} ${yTop} L ${midL} ${yTop} L ${midL} ${yTop + jog} L ${finalLeft} ${yTop + jog} L ${finalLeft} ${yTop}`;
+  const dLeftBot = `M ${semi1Right} ${yBot} L ${midL} ${yBot} L ${midL} ${yBot - jog} L ${finalLeft} ${yBot - jog} L ${finalLeft} ${yBot}`;
+  const dRightTop = `M ${semi2Left} ${yTop} L ${midR} ${yTop} L ${midR} ${yTop + jog} L ${finalRight} ${yTop + jog} L ${finalRight} ${yTop}`;
+  const dRightBot = `M ${semi2Left} ${yBot} L ${midR} ${yBot} L ${midR} ${yBot - jog} L ${finalRight} ${yBot - jog} L ${finalRight} ${yBot}`;
+
+  const finalDecided = model.finalWinnerParticipantId != null;
+  const finalWinnerId = model.finalWinnerParticipantId;
+
+  const rowHighlight = (
+    slot: SwissTopcutNodeSlot,
+    winnerPid: string | null,
+    matchDone: boolean
+  ): 'none' | 'win' | 'lose' => {
+    if (slot.kind !== 'player') return 'none';
+    if (!matchDone || winnerPid == null) return 'none';
+    if (winnerPid === slot.participantId) return 'win';
+    return 'lose';
+  };
+
+  const renderMatchRow = (
+    slot: SwissTopcutNodeSlot,
+    hi: 'none' | 'win' | 'lose',
+    text: string,
+    opts: { isTop: boolean; showCrown: boolean }
+  ) => {
+    const rowStyle = [
+      styles.tcMatchRow,
+      !opts.isTop && styles.tcMatchRowBorder,
+      hi === 'win' && styles.tcMatchRowWin,
+      hi === 'lose' && styles.tcMatchRowLose,
+    ];
+    if (slot.kind === 'placeholder') {
+      return (
+        <View style={rowStyle}>
+          <View style={styles.tcPhAvatarSm} />
+          <Text style={styles.tcMatchNamePh} numberOfLines={1} ellipsizeMode="tail">
+            {slot.label}
+          </Text>
+        </View>
+      );
+    }
+    return (
+      <View style={rowStyle}>
+        <PlayerAvatar
+          userId={slot.userId}
+          participantId={slot.participantId}
+          size="small"
+          withColorBorder={false}
+        />
+        <Text style={styles.tcMatchName} numberOfLines={1} ellipsizeMode="tail">
+          {opts.showCrown ? `${text} 👑` : text}
+        </Text>
+      </View>
+    );
+  };
+
+  const semiCard = (semi: SwissTopcutSemiView) => {
+    const done = semi.winnerParticipantId != null;
+    const topHi = rowHighlight(semi.top, semi.winnerParticipantId, done);
+    const botHi = rowHighlight(semi.bottom, semi.winnerParticipantId, done);
+    const topLabel = semi.top.kind === 'player' ? `${semi.top.seed}°` : semi.top.label;
+    const botLabel = semi.bottom.kind === 'player' ? `${semi.bottom.seed}°` : semi.bottom.label;
+    return (
+      <View style={[styles.tcMatchCard, { width: semiW }]}>
+        {renderMatchRow(semi.top, topHi, topLabel, { isTop: true, showCrown: false })}
+        {renderMatchRow(semi.bottom, botHi, botLabel, { isTop: false, showCrown: false })}
+      </View>
+    );
+  };
+
+  const topHiF = rowHighlight(model.finalTop, finalWinnerId, finalDecided);
+  const botHiF = rowHighlight(model.finalBottom, finalWinnerId, finalDecided);
+  const topTextF = model.finalTop.kind === 'player' ? model.finalTop.name : model.finalTop.label;
+  const botTextF = model.finalBottom.kind === 'player' ? model.finalBottom.name : model.finalBottom.label;
+  const crownTop =
+    finalDecided &&
+    model.finalTop.kind === 'player' &&
+    finalWinnerId === model.finalTop.participantId;
+  const crownBot =
+    finalDecided &&
+    model.finalBottom.kind === 'player' &&
+    finalWinnerId === model.finalBottom.participantId;
+
+  return (
+    <View style={styles.tcSection}>
+      <View style={[styles.tcBracketOuter, { width: totalW, alignSelf: 'center' }]}>
+        <View style={[styles.tcHdrRow, { width: totalW }]}>
+          <Text style={[styles.tcHdrCol, { width: semiW }]}>Semifinal</Text>
+          <View style={{ width: gap }} />
+          <Text style={[styles.tcHdrCol, { width: finalW }]}>Final</Text>
+          <View style={{ width: gap }} />
+          <Text style={[styles.tcHdrCol, { width: semiW }]}>Semifinal</Text>
+        </View>
+        <View style={[styles.tcBodyWrap, { width: totalW, height: cardH }]}>
+          <Svg
+            width={totalW}
+            height={cardH}
+            style={StyleSheet.absoluteFillObject}
+            pointerEvents="none"
+          >
+            <Path d={dLeftTop} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
+            <Path d={dLeftBot} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
+            <Path d={dRightTop} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
+            <Path d={dRightBot} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
+          </Svg>
+          <View style={[styles.tcBodyRow, { width: totalW }]}>
+            {semiCard(model.semi1)}
+            <View style={{ width: gap }} />
+            <View style={[styles.tcMatchCard, styles.tcMatchCardFinal, { width: finalW }]}>
+              {renderMatchRow(model.finalTop, topHiF, topTextF, {
+                isTop: true,
+                showCrown: crownTop,
+              })}
+              {renderMatchRow(model.finalBottom, botHiF, botTextF, {
+                isTop: false,
+                showCrown: crownBot,
+              })}
+            </View>
+            <View style={{ width: gap }} />
+            {semiCard(model.semi2)}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function StandingsScreen({ route, navigation }: Props) {
   const { eventId, showPodiumIntro } = route.params;
   const [loading, setLoading] = useState(true);
@@ -280,9 +620,14 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [tab, setTab] = useState<'official' | 'revenge'>('official');
   const [eventFooter, setEventFooter] = useState<EventFooterStats>({ torneo: null, bo3: null });
   const [podiumState, setPodiumState] = useState<PodiumState | null>(null);
+  const [swissTopcutBracketView, setSwissTopcutBracketView] = useState<SwissTopcutBracketView | null>(null);
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  /** Suizo completado: nombre + campeón/campeona (sin otras estadísticas en el banner ni en la meta junto al banner). */
+  const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
+  const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -293,6 +638,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [navigation, eventId]);
 
   const load = useCallback(async () => {
+    let swissTopcutBracketModel: SwissTopcutBracketView | null = null;
     const [partsRes, pairingsRes, eventRes, tiebreakGroupRes] = await Promise.all([
       supabase
         .from('event_participants')
@@ -301,6 +647,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
           id,
           user_id,
           left_event_at,
+          bye_rounds,
+          swiss_points,
+          swiss_omw,
+          swiss_gw,
+          swiss_ogw,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -315,19 +666,19 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('pairings')
         .select(
-          'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id, swiss_round'
         )
         .eq('event_id', eventId),
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format'
         )
         .eq('id', eventId)
         .maybeSingle(),
       supabase
         .from('event_tiebreak_groups')
-        .select('id, champion_user_id, status, group_type, round_number, created_at')
+        .select('id, champion_user_id, status, group_type, round_number, created_at, group_origin')
         .eq('event_id', eventId)
         .in('status', ['active', 'resolved'])
         .order('created_at', { ascending: false })
@@ -339,10 +690,21 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       setPodiumState(null);
+      setSwissTopcutBracketView(null);
+      setSwissChampionName(null);
+      setSwissChampionHonorific(null);
       return;
     }
 
     const participants = partsRes.data ?? [];
+    const infoByParticipantId = new Map<string, { userId: string; name: string }>();
+    for (const p of participants as { id: string; user_id: string; users?: unknown }[]) {
+      const u = relationOne(p.users) as { display_name?: string; username?: string } | null;
+      infoByParticipantId.set(String(p.id), {
+        userId: String(p.user_id),
+        name: u?.display_name || u?.username || 'Jugador',
+      });
+    }
     const participantIds = participants.map((p) => p.id as string);
 
     const leftAtByParticipant = new Map<string, string | null>();
@@ -362,6 +724,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       setPodiumState(null);
+      setSwissTopcutBracketView(null);
+      setSwissChampionName(null);
+      setSwissChampionHonorific(null);
       return;
     }
     const colorMap: Record<string, MtgColor[]> = {};
@@ -377,6 +742,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
       eventRes.data as { turn_tracking_enabled?: boolean | null } | null
     )?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
+    const fmt =
+      (eventRes.data as { competition_format?: string | null } | null)?.competition_format === 'swiss'
+        ? 'swiss'
+        : 'round_robin';
+    setCompetitionFormat(fmt);
 
     const matchesRes =
       pairingIds.length > 0
@@ -420,6 +790,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setRevengeRows([]);
       setEventFooter({ torneo: null, bo3: null });
       setPodiumState(null);
+      setSwissTopcutBracketView(null);
+      setSwissChampionName(null);
+      setSwissChampionHonorific(null);
       return;
     }
 
@@ -432,6 +805,26 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const recognitionWinners = ((eventRes.data as { recognition_winners?: string[] | null } | null)
       ?.recognition_winners ?? []) as string[];
     setEventStatusStored(eventStatus ?? null);
+    let swissChampName: string | null = null;
+    let swissChampHonorific: string | null = null;
+    if (fmt === 'swiss' && eventStatus === 'completed' && championUserId) {
+      const cp = (participants as { id: string; user_id: string; users?: unknown }[]).find(
+        (p) => String(p.user_id) === String(championUserId)
+      );
+      if (cp) {
+        const u = relationOne(
+          cp.users as
+            | { display_name?: string; username?: string; gender?: Gender | null }
+            | { display_name?: string; username?: string; gender?: Gender | null }[]
+            | null
+        );
+        swissChampName = u?.display_name || u?.username || 'Campeón';
+        const gen = (u?.gender as Gender | null | undefined) ?? null;
+        swissChampHonorific = resolveGenderedText(gen, 'campeón', 'campeona');
+      }
+    }
+    setSwissChampionName(swissChampName);
+    setSwissChampionHonorific(swissChampHonorific);
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
       (pr: any) => pr.official_winner_participant_id != null
@@ -527,6 +920,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         status: string;
         group_type: string;
         round_number: number;
+        group_origin?: string | null;
       };
       const gpRes = await supabase
         .from('event_tiebreak_group_participants')
@@ -578,6 +972,21 @@ export default function StandingsScreen({ route, navigation }: Props) {
           }));
         }
       }
+      const groupOrigin = tgRow.group_origin ?? 'tiebreak';
+      if (
+        groupOrigin === 'swiss_topcut' &&
+        !gpRes.error &&
+        gpRes.data &&
+        (gpRes.data as { participant_id: string }[]).length >= 4 &&
+        podiumBracketMatches.length >= 2
+      ) {
+        const built = buildSwissTopcutBracketModel(
+          gpRes.data as { participant_id: string; user_id: string; seed: number }[],
+          podiumBracketMatches,
+          infoByParticipantId
+        );
+        if (built) swissTopcutBracketModel = built;
+      }
     }
 
     setPodiumState(
@@ -611,6 +1020,20 @@ export default function StandingsScreen({ route, navigation }: Props) {
       turnsByMatchId.get(mid)!.push(t);
     }
 
+    const swissRoundResolved = new Map<number, boolean>();
+    if (fmt === 'swiss') {
+      const rounds = new Set<number>();
+      for (const pr of pairings as { swiss_round?: number | string | null }[]) {
+        const r = pr.swiss_round;
+        if (r == null || r === '') continue;
+        const n = typeof r === 'number' ? r : Number(r);
+        if (Number.isFinite(n)) rounds.add(n);
+      }
+      for (const r of rounds) {
+        swissRoundResolved.set(r, isSwissRoundFullyResolved(pairings as any, r));
+      }
+    }
+
     const rowsBuilt: RowView[] = participants.map((p: any) => {
       const pid = p.id as string;
       const u = relationOne(p.users);
@@ -636,6 +1059,23 @@ export default function StandingsScreen({ route, navigation }: Props) {
           m.status === 'in_progress' && (m.match_type === 'draft' || m.match_type === 'final')
       );
       const leftEventAt = (p.left_event_at as string | null) ?? null;
+
+      const swissPoints = Number((p as { swiss_points?: number | null }).swiss_points ?? 0);
+      const rawOmw = (p as { swiss_omw?: number | string | null }).swiss_omw;
+      const rawGw = (p as { swiss_gw?: number | string | null }).swiss_gw;
+      const rawOgw = (p as { swiss_ogw?: number | string | null }).swiss_ogw;
+      const swissOmw = rawOmw != null && rawOmw !== '' ? Number(rawOmw) : null;
+      const swissGw = rawGw != null && rawGw !== '' ? Number(rawGw) : null;
+      const swissOgw = rawOgw != null && rawOgw !== '' ? Number(rawOgw) : null;
+
+      const rawBye = (p as { bye_rounds?: (number | string)[] | null }).bye_rounds;
+      const byeRounds = Array.isArray(rawBye)
+        ? rawBye.map((x) => (typeof x === 'number' ? x : Number(x))).filter((n) => Number.isFinite(n))
+        : [];
+      const showCompletedByeL =
+        fmt === 'swiss' &&
+        byeRounds.length > 0 &&
+        byeRounds.some((r) => swissRoundResolved.get(r) === true);
 
       const matchDmvs: number[] = [];
       const matchDmvts: number[] = [];
@@ -687,25 +1127,47 @@ export default function StandingsScreen({ route, navigation }: Props) {
         dmv,
         dmvt,
         tmp,
+        swissPoints,
+        swissOmw: swissOmw != null && Number.isFinite(swissOmw) ? swissOmw : null,
+        swissGw: swissGw != null && Number.isFinite(swissGw) ? swissGw : null,
+        swissOgw: swissOgw != null && Number.isFinite(swissOgw) ? swissOgw : null,
+        showCompletedByeL,
         inProgress,
         leftEventAt,
         gender,
       };
     });
 
-    const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
-    const winrateMatches = (r: RowView) => (r.pj > 0 ? r.pg / r.pj : 0);
-    rowsBuilt.sort((a, b) => {
-      const wbA = winrateBO3(a);
-      const wbB = winrateBO3(b);
-      if (wbA !== wbB) return wbB - wbA;
-      const wmA = winrateMatches(a);
-      const wmB = winrateMatches(b);
-      if (wmA !== wmB) return wmB - wmA;
-      const av = turnTrackOn ? (a.dmvt ?? -Infinity) : (a.dmv ?? -Infinity);
-      const bv = turnTrackOn ? (b.dmvt ?? -Infinity) : (b.dmv ?? -Infinity);
-      return bv - av;
-    });
+    if (fmt === 'swiss') {
+      rowsBuilt.sort((a, b) => {
+        if (b.swissPoints !== a.swissPoints) return b.swissPoints - a.swissPoints;
+        const oa = a.swissOmw ?? -Infinity;
+        const ob = b.swissOmw ?? -Infinity;
+        if (ob !== oa) return ob - oa;
+        const ga = a.swissGw ?? -Infinity;
+        const gb = b.swissGw ?? -Infinity;
+        if (gb !== ga) return gb - ga;
+        const wa = a.swissOgw ?? -Infinity;
+        const wb = b.swissOgw ?? -Infinity;
+        if (wb !== wa) return wb - wa;
+        return 0;
+      });
+    } else {
+      const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
+      const winrateMatches = (r: RowView) => (r.pj > 0 ? r.pg / r.pj : 0);
+      rowsBuilt.sort((a, b) => {
+        const wbA = winrateBO3(a);
+        const wbB = winrateBO3(b);
+        if (wbA !== wbB) return wbB - wbA;
+        const wmA = winrateMatches(a);
+        const wmB = winrateMatches(b);
+        if (wmA !== wmB) return wmB - wmA;
+        const av = turnTrackOn ? (a.dmvt ?? -Infinity) : (a.dmv ?? -Infinity);
+        const bv = turnTrackOn ? (b.dmvt ?? -Infinity) : (b.dmv ?? -Infinity);
+        return bv - av;
+      });
+    }
+    setSwissTopcutBracketView(swissTopcutBracketModel);
     setRows(rowsBuilt);
 
     const revengeRowsBuilt: RevengeRowView[] = participants.map((p: any) => {
@@ -978,6 +1440,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
         </View>
       ) : null}
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      {tab === 'official' && swissChampionName && swissChampionHonorific ? (
+        <View style={styles.swissChampionBanner}>
+          <Text style={styles.swissChampionBannerText}>
+            {swissChampionName} {swissChampionHonorific}
+          </Text>
+        </View>
+      ) : null}
       {podiumBlock}
       {revengeRows.length > 0 ? (
         <View style={styles.tabsRow}>
@@ -996,10 +1465,20 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <>
           <View style={styles.header}>
             <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
-            <Text style={[styles.cell, styles.statCol]}>PG</Text>
-            <Text style={[styles.cell, styles.statCol]}>PJ</Text>
-            <Text style={[styles.cell, styles.statCol]}>EG</Text>
-            <Text style={[styles.cell, styles.statCol]}>EC</Text>
+            {competitionFormat === 'swiss' ? (
+              <>
+                <Text style={[styles.cell, styles.statCol]}>Pts</Text>
+                <Text style={[styles.cell, styles.swissPctCol]}>OMW%</Text>
+                <Text style={[styles.cell, styles.swissPctCol]}>GW%</Text>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.cell, styles.statCol]}>PG</Text>
+                <Text style={[styles.cell, styles.statCol]}>PJ</Text>
+                <Text style={[styles.cell, styles.statCol]}>EG</Text>
+                <Text style={[styles.cell, styles.statCol]}>EC</Text>
+              </>
+            )}
             <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
@@ -1027,17 +1506,37 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 <View style={styles.playerNameRow}>
                   <View style={styles.playerNameInner}>
                     {r.inProgress ? <PulsingLiveDot /> : null}
-                    <Text style={styles.playerName} numberOfLines={2}>
-                      {r.name}{r.leftEventAt ? ' *' : ''}
-                    </Text>
+                    <View style={styles.playerNameWithByeRow}>
+                      <Text style={styles.playerNameSwiss} numberOfLines={1}>
+                        {r.name}
+                        {r.leftEventAt ? ' *' : ''}
+                      </Text>
+                      {competitionFormat === 'swiss' && r.showCompletedByeL ? (
+                        <Text style={styles.byeLMark}>L</Text>
+                      ) : null}
+                    </View>
                   </View>
                   <ColorFlag colors={r.colors} />
                 </View>
               </View>
-              <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
-              <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
-              <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
-              <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+              {competitionFormat === 'swiss' ? (
+                <>
+                  <Text style={[styles.cell, styles.statCol]}>{r.swissPoints}</Text>
+                  <Text style={[styles.cell, styles.swissPctCol]}>
+                    {r.swissOmw == null ? '—' : formatSwissPctDisplay(r.swissOmw)}
+                  </Text>
+                  <Text style={[styles.cell, styles.swissPctCol]}>
+                    {r.swissGw == null ? '—' : formatSwissPctDisplay(r.swissGw)}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+                </>
+              )}
               <Text
                 style={[
                   styles.cell,
@@ -1106,7 +1605,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <Text style={styles.legendStaticDot}>●</Text>
         <Text style={styles.legendLiveCaption}> En juego</Text>
       </View>
-      {tab === 'official' && (eventFooter.torneo || eventFooter.bo3) ? (
+      {tab === 'official' &&
+      (eventFooter.torneo ||
+        (eventFooter.bo3 && !(competitionFormat === 'swiss' && swissChampionName))) ? (
         <View style={styles.tourneyMeta}>
           <View style={styles.tourneyMetaRow}>
             {eventFooter.torneo ? (
@@ -1114,7 +1615,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             ) : (
               <View style={styles.tourneyMetaLeftSpacer} />
             )}
-            {eventFooter.bo3 ? (
+            {eventFooter.bo3 && !(competitionFormat === 'swiss' && swissChampionName) ? (
               <Text style={styles.tourneyMetaRight}>
                 <Text style={eventFooter.bo3.bold20 ? styles.tourneyMetaBo3Bold : styles.tourneyMetaBo3Norm}>
                   E_2-0: {eventFooter.bo3.pct20}
@@ -1128,18 +1629,48 @@ export default function StandingsScreen({ route, navigation }: Props) {
           </View>
         </View>
       ) : null}
-      <Text style={styles.legend}>
-        {tab === 'official'
-          ? [
-              turnTrackingEnabled
-                ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
-                : 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida',
-              'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
-              'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
-              '* Se fue antes de completar sus enfrentamientos',
-            ].join('\n')
-          : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'}
-      </Text>
+      {(() => {
+        const footnoteOfficial = '* Se fue antes de completar sus enfrentamientos';
+        const segments: string[] =
+          tab === 'official'
+            ? competitionFormat === 'swiss'
+              ? (
+                  turnTrackingEnabled
+                    ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
+                    : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
+                ).split(' · ')
+              : [
+                  ...(
+                    turnTrackingEnabled
+                      ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
+                      : 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
+                  ).split(' · '),
+                  'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
+                  'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
+                ]
+            : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'.split(
+                ' · '
+              );
+        return (
+          <>
+            <View style={styles.legendWrap}>
+              {segments.map((segment, i) => (
+                <Text key={i} style={styles.legendSegment}>
+                  {tab === 'official' && competitionFormat === 'swiss'
+                    ? `· ${segment}`
+                    : i > 0
+                      ? `· ${segment}`
+                      : segment}
+                </Text>
+              ))}
+            </View>
+            {tab === 'official' ? <Text style={styles.legendFootnote}>{footnoteOfficial}</Text> : null}
+          </>
+        );
+      })()}
+      {tab === 'official' && swissTopcutBracketView ? (
+        <SwissTopcutBracketBlock model={swissTopcutBracketView} />
+      ) : null}
     </ScrollView>
     </View>
   );
@@ -1147,6 +1678,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   screenRoot: { flex: 1, backgroundColor: '#fff' },
+  swissChampionBanner: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+    alignItems: 'center',
+  },
+  swissChampionBannerText: { fontSize: 17, fontWeight: '800', color: '#111827', textAlign: 'center' },
   confettiOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 40,
@@ -1233,6 +1771,7 @@ const styles = StyleSheet.create({
   tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
   playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },
   statCol: { width: 34, minWidth: 34, fontSize: 11 },
+  swissPctCol: { width: 44, minWidth: 44, fontSize: 10 },
   dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
   playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   standingsAvatar: { marginRight: 6 },
@@ -1244,7 +1783,22 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   playerNameInner: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  playerNameWithByeRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flexShrink: 1,
+  },
   playerName: { flex: 1, flexShrink: 1, color: '#111', fontSize: 12, fontWeight: '600' },
+  playerNameSwiss: { color: '#111', fontSize: 12, fontWeight: '600' },
+  byeLMark: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#DC2626',
+    marginLeft: 2,
+    marginTop: -2,
+  },
   liveDotWrap: { justifyContent: 'center' },
   liveDot: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
   tourneyMeta: {
@@ -1273,5 +1827,83 @@ const styles = StyleSheet.create({
   legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
   legendStaticDot: { color: '#3B82F6', fontWeight: '700', fontSize: 11 },
   legendLiveCaption: { color: '#6B7280', fontSize: 11 },
-  legend: { marginTop: 10, color: '#666', fontSize: 12 },
+  legendWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    marginTop: 10,
+  },
+  legendSegment: { color: '#666', fontSize: 12, marginBottom: 4, marginRight: 4 },
+  legendFootnote: { marginTop: 8, color: '#666', fontSize: 12 },
+  tcSection: { marginTop: 22, marginBottom: 14, width: '100%', alignItems: 'center' },
+  tcBracketOuter: { marginTop: 4 },
+  tcHdrRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  tcHdrCol: { fontSize: 13, color: '#6B7280', fontWeight: '700', textAlign: 'center' },
+  tcBodyWrap: { position: 'relative' },
+  tcBodyRow: { flexDirection: 'row', alignItems: 'center', height: '100%', zIndex: 1 },
+  tcMatchCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  tcMatchCardFinal: {
+    backgroundColor: '#FAFAFA',
+    borderWidth: 2,
+    borderColor: '#9CA3AF',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
+  },
+  tcMatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: STC_ROW_H,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 8,
+  },
+  tcMatchRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  tcMatchRowWin: {
+    backgroundColor: '#FEF3C7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#D97706',
+  },
+  tcMatchRowLose: { opacity: 0.45 },
+  tcMatchName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  tcMatchNamePh: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  tcPhAvatarSm: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#E5E7EB' },
 });

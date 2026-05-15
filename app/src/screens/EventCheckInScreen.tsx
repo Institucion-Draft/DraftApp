@@ -288,7 +288,6 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>¿Qué colores sos?</Text>
-        <Text style={styles.label}>Colores jugados</Text>
         <View style={styles.colorsWrap}>
           {DECK_COLOR_OPTIONS.map((opt) => {
             const active = selectedColors.includes(opt.key);

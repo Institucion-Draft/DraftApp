@@ -38,7 +38,12 @@ export type MainStackParamList = {
     from?: 'Standings' | 'EventDetail';
   };
   PairingsList: { eventId: string; initialTab?: 'official' | 'revenge' };
-  PairingDetail: { pairingId: string; fromTab?: 'official' | 'revenge' };
+  PairingDetail: {
+    pairingId: string;
+    fromTab?: 'official' | 'revenge';
+    /** Origen perfil: el atrás del header vuelve a PlayerProfileInEvent. */
+    fromPlayerProfile?: { eventId: string; participantId: string; from?: 'Standings' | 'EventDetail' };
+  };
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
   LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge' };

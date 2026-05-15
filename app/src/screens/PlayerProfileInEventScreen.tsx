@@ -87,6 +87,29 @@ type TiebreakProfileRow = {
   tiebreakRound: number;
 };
 
+type BracketBmRow = {
+  bracket_phase: string;
+  pairing_id: string | null;
+  participant_a_id: string;
+  participant_b_id: string;
+};
+
+type MataPhaseBuckets = { semi: OfficialH2HRow[]; final: OfficialH2HRow[]; third: OfficialH2HRow[] };
+
+function bracketPhaseForPairing(bmRows: BracketBmRow[], pr: PairingRow): 'semi' | 'final' | 'third_place' | null {
+  const hit =
+    bmRows.find((b) => b.pairing_id === pr.id) ??
+    bmRows.find(
+      (b) =>
+        (b.participant_a_id === pr.participant_a_id && b.participant_b_id === pr.participant_b_id) ||
+        (b.participant_a_id === pr.participant_b_id && b.participant_b_id === pr.participant_a_id)
+    );
+  if (!hit) return null;
+  const ph = hit.bracket_phase;
+  if (ph === 'semi' || ph === 'final' || ph === 'third_place') return ph;
+  return null;
+}
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -162,16 +185,22 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [revengeH2h, setRevengeH2h] = useState<RevengeH2HRow[]>([]);
   const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
   const [profileInTiebreakGroup, setProfileInTiebreakGroup] = useState(false);
+  const [profileTiebreakGroupOrigin, setProfileTiebreakGroupOrigin] = useState<'tiebreak' | 'swiss_topcut'>('tiebreak');
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
+  const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
+  /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
+  const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
 
   const load = useCallback(async () => {
     const meRes = await supabase.auth.getUser();
     const currentUserId = meRes.data.user?.id ?? null;
     setMyUserId(currentUserId);
     setProfileInTiebreakGroup(false);
+    setProfileTiebreakGroupOrigin('tiebreak');
     setProfileTiebreakRows([]);
     setProfileTiebreakGroupRound(1);
+    setProfileMataByPhase(null);
 
     const { data: pRow, error: pErr } = await supabase
       .from('event_participants')
@@ -200,7 +229,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       return;
     }
 
-    const { data: evRow } = await supabase.from('draft_events').select('workspace_id').eq('id', eventId).maybeSingle();
+    const { data: evRow } = await supabase
+      .from('draft_events')
+      .select('workspace_id, competition_format')
+      .eq('id', eventId)
+      .maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
     const uid = pRow.user_id as string;
     setLeftEventAt((pRow as { left_event_at?: string | null }).left_event_at ?? null);
@@ -465,7 +498,24 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       if (a.sortTier !== b.sortTier) return a.sortTier - b.sortTier;
       return a.opponentName.localeCompare(b.opponentName, 'es');
     });
-    setOfficialH2h(officialRows);
+    const competitionFormat =
+      (evRow as { competition_format?: string | null } | null)?.competition_format === 'swiss'
+        ? 'swiss'
+        : 'round_robin';
+    setEventCompetitionFormat(competitionFormat);
+    const officialH2hFiltered =
+      competitionFormat === 'swiss'
+        ? officialRows.filter((row) => {
+            if (!row.pairingId) return false;
+            return matches.some(
+              (m) =>
+                m.pairing_id === row.pairingId &&
+                (m.match_type === 'draft' || m.match_type === 'final') &&
+                (m.status === 'completed' || m.status === 'in_progress')
+            );
+          })
+        : officialRows;
+    setOfficialH2h(officialH2hFiltered);
 
     const revRows: RevengeH2HRow[] = [];
     for (const opp of others) {
@@ -501,7 +551,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const tgRes = await supabase
       .from('event_tiebreak_groups')
-      .select('id, round_number')
+      .select('id, round_number, group_origin, group_type')
       .eq('event_id', eventId)
       .in('status', ['active', 'resolved', 'failed'])
       .order('created_at', { ascending: false })
@@ -510,6 +560,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     if (!tgRes.error && tgRes.data?.id) {
       const tgRound = (tgRes.data as { round_number?: number }).round_number ?? 1;
+      const tgOrigin = (tgRes.data as { group_origin?: string | null }).group_origin;
       const gpRes = await supabase
         .from('event_tiebreak_group_participants')
         .select('participant_id, user_id')
@@ -520,41 +571,120 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         const uidByPid = new Map(gList.map((r) => [r.participant_id, r.user_id]));
         if (gPidSet.has(participantId)) {
           setProfileInTiebreakGroup(true);
+          setProfileTiebreakGroupOrigin(tgOrigin === 'swiss_topcut' ? 'swiss_topcut' : 'tiebreak');
           setProfileTiebreakGroupRound(tgRound);
           const pairingById = new Map(pairings.map((p) => [p.id, p]));
-          const tbRows: TiebreakProfileRow[] = [];
-          for (const m of matches) {
-            if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
-            const pr = pairingById.get(m.pairing_id);
-            if (!pr) continue;
-            if (!gPidSet.has(pr.participant_a_id) || !gPidSet.has(pr.participant_b_id)) continue;
-            let oppId: string | null = null;
-            if (pr.participant_a_id === participantId) oppId = pr.participant_b_id;
-            else if (pr.participant_b_id === participantId) oppId = pr.participant_a_id;
-            else continue;
-            const oppPlayer = players.find((p) => p.id === oppId);
-            const winPid = String(m.winner_participant_id);
-            const winnerPlayer = players.find((p) => p.id === winPid);
-            const profileWon = winPid === participantId;
-            tbRows.push({
-              matchId: m.id,
-              pairingId: pr.id,
-              opponentParticipantId: oppId,
-              opponentUserId: oppPlayer?.userId ?? uidByPid.get(oppId) ?? '',
-              opponentName: oppPlayer?.displayName ?? 'Jugador',
-              profileGames: profileWon ? 1 : 0,
-              opponentGames: profileWon ? 0 : 1,
-              winnerName: winnerPlayer?.displayName ?? 'Jugador',
-              endedAt: m.ended_at,
-              tiebreakRound: m.tiebreak_round != null ? Number(m.tiebreak_round) : 1,
+          const tgType = (tgRes.data as { group_type?: string | null }).group_type ?? '';
+          const isSwissBracketMata = tgOrigin === 'swiss_topcut' && tgType === 'bracket';
+
+          if (isSwissBracketMata) {
+            const bmRes = await supabase
+              .from('event_tiebreak_bracket_matches')
+              .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
+              .eq('group_id', tgRes.data.id);
+            const bmRows = (bmRes.data ?? []) as BracketBmRow[];
+            type Agg = {
+              opponentId: string;
+              opponentName: string;
+              pairingId: string;
+              profileWins: number;
+              opponentWins: number;
+            };
+            const semiM = new Map<string, Agg>();
+            const finalM = new Map<string, Agg>();
+            const thirdM = new Map<string, Agg>();
+
+            for (const m of matches) {
+              if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
+              const pr = pairingById.get(m.pairing_id);
+              if (!pr) continue;
+              if (!gPidSet.has(pr.participant_a_id) || !gPidSet.has(pr.participant_b_id)) continue;
+              let oppId: string | null = null;
+              if (pr.participant_a_id === participantId) oppId = pr.participant_b_id;
+              else if (pr.participant_b_id === participantId) oppId = pr.participant_a_id;
+              else continue;
+              const phase = bracketPhaseForPairing(bmRows, pr);
+              if (!phase) continue;
+              const map = phase === 'semi' ? semiM : phase === 'final' ? finalM : thirdM;
+              const oppPlayer = players.find((p) => p.id === oppId);
+              const oppName = oppPlayer?.displayName ?? 'Jugador';
+              const winPid = String(m.winner_participant_id);
+              const cur = map.get(oppId) ?? {
+                opponentId: oppId,
+                opponentName: oppName,
+                pairingId: pr.id,
+                profileWins: 0,
+                opponentWins: 0,
+              };
+              if (winPid === participantId) cur.profileWins += 1;
+              else cur.opponentWins += 1;
+              map.set(oppId, cur);
+            }
+            const mapToRows = (mp: Map<string, Agg>): OfficialH2HRow[] =>
+              Array.from(mp.values())
+                .map((r) => ({
+                  opponentId: r.opponentId,
+                  opponentName: r.opponentName,
+                  pairingId: r.pairingId,
+                  profileWins: r.profileWins,
+                  opponentWins: r.opponentWins,
+                  sortTier: 0 as const,
+                }))
+                .sort((a, b) => a.opponentName.localeCompare(b.opponentName, 'es'));
+            setProfileMataByPhase({
+              semi: mapToRows(semiM),
+              final: mapToRows(finalM),
+              third: mapToRows(thirdM),
             });
+            setProfileTiebreakRows([]);
+          } else {
+            setProfileMataByPhase(null);
+            const tbRows: TiebreakProfileRow[] = [];
+            for (const m of matches) {
+              if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
+              const pr = pairingById.get(m.pairing_id);
+              if (!pr) continue;
+              if (!gPidSet.has(pr.participant_a_id) || !gPidSet.has(pr.participant_b_id)) continue;
+              let oppId: string | null = null;
+              if (pr.participant_a_id === participantId) oppId = pr.participant_b_id;
+              else if (pr.participant_b_id === participantId) oppId = pr.participant_a_id;
+              else continue;
+              const oppPlayer = players.find((p) => p.id === oppId);
+              const winPid = String(m.winner_participant_id);
+              const winnerPlayer = players.find((p) => p.id === winPid);
+              const profileWon = winPid === participantId;
+              tbRows.push({
+                matchId: m.id,
+                pairingId: pr.id,
+                opponentParticipantId: oppId,
+                opponentUserId: oppPlayer?.userId ?? uidByPid.get(oppId) ?? '',
+                opponentName: oppPlayer?.displayName ?? 'Jugador',
+                profileGames: profileWon ? 1 : 0,
+                opponentGames: profileWon ? 0 : 1,
+                winnerName: winnerPlayer?.displayName ?? 'Jugador',
+                endedAt: m.ended_at,
+                tiebreakRound: m.tiebreak_round != null ? Number(m.tiebreak_round) : 1,
+              });
+            }
+            tbRows.sort((a, b) => {
+              const ta = a.endedAt ? new Date(a.endedAt).getTime() : 0;
+              const tb = b.endedAt ? new Date(b.endedAt).getTime() : 0;
+              return ta - tb;
+            });
+            const merged = new Map<string, TiebreakProfileRow>();
+            for (const row of tbRows) {
+              const prev = merged.get(row.pairingId);
+              if (!prev) merged.set(row.pairingId, { ...row });
+              else {
+                merged.set(row.pairingId, {
+                  ...row,
+                  profileGames: prev.profileGames + row.profileGames,
+                  opponentGames: prev.opponentGames + row.opponentGames,
+                });
+              }
+            }
+            setProfileTiebreakRows(Array.from(merged.values()));
           }
-          tbRows.sort((a, b) => {
-            const ta = a.endedAt ? new Date(a.endedAt).getTime() : 0;
-            const tb = b.endedAt ? new Date(b.endedAt).getTime() : 0;
-            return tb - ta;
-          });
-          setProfileTiebreakRows(tbRows);
         }
       }
     }
@@ -620,31 +750,63 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     );
   }
 
-  const renderOfficialContent = () => (
-    <>
-      <View style={styles.statCard}>
-        <View style={styles.statCardLeft}>
-          <Text style={styles.statLine}>Enfrentamientos ganados: {pairingsWon}</Text>
-          <Text style={styles.statLine}>Enfrentamientos completados: {pairingsCompleted}</Text>
+  const renderOfficialContent = () => {
+    const bo3Pills = (winsProfile: number, winsOpp: number, tint: 'blue' | 'green') => {
+      const filled = tint === 'blue' ? styles.bo3FilledBlue : styles.bo3FilledGreen;
+      return (
+        <View style={styles.h2hBo3Outer}>
+          <View style={styles.h2hBo3Group}>
+            <View style={styles.bo3Row}>
+              <View style={[styles.bo3Box, winsProfile >= 1 && filled]} />
+              <View style={[styles.bo3Box, winsProfile >= 2 && filled]} />
+            </View>
+          </View>
+          <View style={styles.h2hBo3Group}>
+            <View style={[styles.bo3Row, styles.bo3RowRight]}>
+              <View style={[styles.bo3Box, winsOpp >= 1 && filled]} />
+              <View style={[styles.bo3Box, winsOpp >= 2 && filled]} />
+            </View>
+          </View>
         </View>
-        <View style={styles.winRateBox}>
-          <Text style={styles.winRateLabel}>Win Rate</Text>
-          <Text style={styles.winRateValue}>{formatWinRate(pairingsWon, pairingsCompleted)}</Text>
+      );
+    };
+
+    const officialPairingCard = (row: OfficialH2HRow, tint: 'blue' | 'green') => (
+      <TouchableOpacity
+        key={`${tint}-${row.pairingId}`}
+        style={styles.h2hCard}
+        activeOpacity={row.pairingId ? 0.7 : 1}
+        disabled={!row.pairingId}
+        onPress={() => {
+          if (!row.pairingId) return;
+          navigation.navigate('PairingDetail', {
+            pairingId: row.pairingId,
+            fromTab: 'official',
+            fromPlayerProfile: { eventId, participantId, from: profileFrom },
+          });
+        }}
+      >
+        <View style={styles.h2hNamesRow}>
+          <Text style={styles.h2hNameSide} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <Text style={styles.h2hVs}>vs</Text>
+          <Text style={[styles.h2hNameSide, styles.h2hNameSideRight]} numberOfLines={1}>
+            {row.opponentName}
+          </Text>
         </View>
-      </View>
-      <View style={styles.statCard}>
-        <View style={styles.statCardLeft}>
-          <Text style={styles.statLine}>Partidas jugadas: {matchesPlayed}</Text>
-          <Text style={styles.statLine}>Partidas ganadas: {matchesWon}</Text>
-        </View>
-        <View style={styles.winRateBox}>
-          <Text style={styles.winRateLabel}>Win Rate</Text>
-          <Text style={styles.winRateValue}>{formatWinRate(matchesWon, matchesPlayed)}</Text>
-        </View>
-      </View>
-      {profileInTiebreakGroup ? (
+        {bo3Pills(row.profileWins, row.opponentWins, tint)}
+      </TouchableOpacity>
+    );
+
+    const tiebreakRoundRobinCards = () => {
+      if (!profileInTiebreakGroup) return null;
+      if (eventCompetitionFormat === 'swiss') return null;
+      return (
         <>
-          <Text style={styles.sectionTitle}>Desempate</Text>
+          <Text style={styles.sectionTitle}>
+            {profileTiebreakGroupOrigin === 'swiss_topcut' ? 'Fase mata-mata' : 'Desempate'}
+          </Text>
           {profileTiebreakRows.length === 0 ? (
             <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
           ) : profileTiebreakGroupRound >= 2 ? (
@@ -762,18 +924,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             ))
           )}
         </>
-      ) : null}
-      <Text style={styles.sectionTitle}>Enfrentamientos</Text>
-      {officialH2h.map((row) => (
+      );
+    };
+
+    const swissTiebreakGreenCards = () => {
+      if (!profileInTiebreakGroup || profileTiebreakRows.length === 0) {
+        return <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>;
+      }
+      return profileTiebreakRows.map((row) => (
         <TouchableOpacity
-          key={row.opponentId}
+          key={row.matchId}
           style={styles.h2hCard}
-          activeOpacity={row.pairingId ? 0.7 : 1}
-          disabled={!row.pairingId}
-          onPress={() => {
-            if (!row.pairingId) return;
-            navigation.navigate('PairingDetail', { pairingId: row.pairingId, fromTab: 'official' });
-          }}
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate('MatchResult', { matchId: row.matchId })}
         >
           <View style={styles.h2hNamesRow}>
             <Text style={styles.h2hNameSide} numberOfLines={1}>
@@ -784,36 +947,118 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               {row.opponentName}
             </Text>
           </View>
-          <View style={styles.h2hBo3Outer}>
-            <View style={styles.h2hBo3Group}>
-              <View style={styles.bo3Row}>
-                <View style={[styles.bo3Box, row.profileWins >= 1 && styles.bo3Filled]} />
-                <View style={[styles.bo3Box, row.profileWins >= 2 && styles.bo3Filled]} />
-              </View>
-            </View>
-            <View style={styles.h2hBo3Group}>
-              <View style={[styles.bo3Row, styles.bo3RowRight]}>
-                <View style={[styles.bo3Box, row.opponentWins >= 1 && styles.bo3Filled]} />
-                <View style={[styles.bo3Box, row.opponentWins >= 2 && styles.bo3Filled]} />
-              </View>
-            </View>
-          </View>
+          {bo3Pills(row.profileGames, row.opponentGames, 'green')}
         </TouchableOpacity>
-      ))}
-      {isSelf ? (
-        <View style={styles.selfBlock}>
-          <Text style={styles.sectionTitle}>Tu valoración para hoy</Text>
-          {selfEval != null ? (
-            <Text style={styles.stars}>
-              {Array.from({ length: 10 }, (_, i) => (i < selfEval ? '★' : '☆')).join('')}
-            </Text>
+      ));
+    };
+
+    const swissMataBracketSection = () => {
+      if (!profileInTiebreakGroup || profileTiebreakGroupOrigin !== 'swiss_topcut') return null;
+      if (!profileMataByPhase) {
+        return (
+          <>
+            <Text style={styles.sectionTitle}>Fase mata-mata</Text>
+            {profileTiebreakRows.length === 0 ? (
+              <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
+            ) : (
+              swissTiebreakGreenCards()
+            )}
+          </>
+        );
+      }
+      const total =
+        profileMataByPhase.semi.length + profileMataByPhase.final.length + profileMataByPhase.third.length;
+      return (
+        <>
+          <Text style={styles.sectionTitle}>Fase mata-mata</Text>
+          {total === 0 ? (
+            <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
           ) : (
-            <Text style={styles.muted}>Sin valorar</Text>
+            <>
+              {profileMataByPhase.semi.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>Semifinal</Text>
+                  {profileMataByPhase.semi.map((row) => officialPairingCard(row, 'green'))}
+                </>
+              ) : null}
+              {profileMataByPhase.final.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>Final</Text>
+                  {profileMataByPhase.final.map((row) => officialPairingCard(row, 'green'))}
+                </>
+              ) : null}
+              {profileMataByPhase.third.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>3er y 4to puesto</Text>
+                  {profileMataByPhase.third.map((row) => officialPairingCard(row, 'green'))}
+                </>
+              ) : null}
+            </>
           )}
+        </>
+      );
+    };
+
+    return (
+      <>
+        <View style={styles.statCard}>
+          <View style={styles.statCardLeft}>
+            <Text style={styles.statLine}>Enfrentamientos ganados: {pairingsWon}</Text>
+            <Text style={styles.statLine}>Enfrentamientos completados: {pairingsCompleted}</Text>
+          </View>
+          <View style={styles.winRateBox}>
+            <Text style={styles.winRateLabel}>Win Rate</Text>
+            <Text style={styles.winRateValue}>{formatWinRate(pairingsWon, pairingsCompleted)}</Text>
+          </View>
         </View>
-      ) : null}
-    </>
-  );
+        <View style={styles.statCard}>
+          <View style={styles.statCardLeft}>
+            <Text style={styles.statLine}>Partidas jugadas: {matchesPlayed}</Text>
+            <Text style={styles.statLine}>Partidas ganadas: {matchesWon}</Text>
+          </View>
+          <View style={styles.winRateBox}>
+            <Text style={styles.winRateLabel}>Win Rate</Text>
+            <Text style={styles.winRateValue}>{formatWinRate(matchesWon, matchesPlayed)}</Text>
+          </View>
+        </View>
+        {eventCompetitionFormat === 'swiss' ? (
+          <>
+            {swissMataBracketSection()}
+            {profileInTiebreakGroup && profileTiebreakGroupOrigin !== 'swiss_topcut' ? (
+              <>
+                <Text style={styles.sectionTitle}>Desempate</Text>
+                {profileTiebreakRows.length === 0 ? (
+                  <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
+                ) : (
+                  swissTiebreakGreenCards()
+                )}
+              </>
+            ) : null}
+            <Text style={styles.sectionTitle}>Rondas suizas</Text>
+            {officialH2h.map((row) => officialPairingCard(row, 'blue'))}
+          </>
+        ) : (
+          <>
+            {tiebreakRoundRobinCards()}
+            <Text style={styles.sectionTitle}>Enfrentamientos</Text>
+            {officialH2h.map((row) => officialPairingCard(row, 'blue'))}
+          </>
+        )}
+        {isSelf ? (
+          <View style={styles.selfBlock}>
+            <Text style={styles.sectionTitle}>Tu valoración para hoy</Text>
+            {selfEval != null ? (
+              <Text style={styles.stars}>
+                {Array.from({ length: 10 }, (_, i) => (i < selfEval ? '★' : '☆')).join('')}
+              </Text>
+            ) : (
+              <Text style={styles.muted}>Sin valorar</Text>
+            )}
+          </View>
+        ) : null}
+      </>
+    );
+  };
 
   const renderRevengeContent = () => (
     <>
@@ -839,7 +1084,13 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           key={row.opponentId}
           style={styles.h2hCard}
           activeOpacity={0.7}
-          onPress={() => navigation.navigate('PairingDetail', { pairingId: row.pairingId, fromTab: 'revenge' })}
+          onPress={() =>
+            navigation.navigate('PairingDetail', {
+              pairingId: row.pairingId,
+              fromTab: 'revenge',
+              fromPlayerProfile: { eventId, participantId, from: profileFrom },
+            })
+          }
         >
           <View style={styles.revengeH2hRow}>
             <View style={styles.revengeH2hLeft}>
@@ -1201,6 +1452,15 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   bo3Filled: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
+  bo3FilledBlue: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
+  bo3FilledGreen: { backgroundColor: '#15803D', borderColor: '#15803D' },
+  profilePhaseSubtitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#14532D',
+    marginTop: 14,
+    marginBottom: 8,
+  },
   revengeH2hRow: {
     flexDirection: 'row',
     alignItems: 'center',
