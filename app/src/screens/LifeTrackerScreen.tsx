@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   ScrollView,
   StyleSheet,
   Text,
@@ -123,6 +124,641 @@ function flushLayout(): Promise<void> {
     });
   });
 }
+
+/** ~10 s para que un punto recorra el ancho visible del banner (ajustable). */
+const NEWS_TICKER_MS_PER_VIEWPORT_WIDTH = 10000;
+const NEWS_TICKER_LIVE_INTERVAL_MS = 120_000;
+const NEWS_TICKER_POLL_COMPLETED_MS = 30_000;
+const NEWS_TICKER_MESSAGE_GAP_PX = 40;
+
+function isDarkTickerAdjacentColor(colors: MtgColor[]): boolean {
+  return (colors[0] ?? 'C') === 'B';
+}
+
+const newsTickerStyles = StyleSheet.create({
+  strip: {
+    width: '100%',
+    height: 26,
+    backgroundColor: 'rgba(31, 41, 55, 0.85)',
+    overflow: 'hidden',
+  },
+  tickerTrack: { flexDirection: 'row', alignItems: 'center' },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  pairRow: { flexDirection: 'row', alignItems: 'center' },
+  rotated: { marginLeft: NEWS_TICKER_MESSAGE_GAP_PX, transform: [{ rotate: '180deg' }] },
+  msgLive: { fontSize: 11, color: '#FFFFFF', fontWeight: '400' },
+  msgPartial: { fontSize: 11, color: '#FBBF24', fontWeight: '400' },
+  msgClosesBo3: { fontSize: 11, color: '#D8B4FE', fontWeight: '400' },
+  bold: { fontWeight: '700' },
+});
+
+type TickerColorKey = 'live' | 'partial' | 'closes';
+
+type TickerQueueItem = {
+  key: string;
+  colorKey: TickerColorKey;
+  body: React.ReactNode;
+};
+
+type PendingFinishedTicker = {
+  matchId: string;
+  message: TickerQueueItem;
+};
+
+type EventTickerPairing = {
+  id: string;
+  participant_a_id: string;
+  participant_b_id: string;
+};
+
+type EventTickerMatch = {
+  id: string;
+  pairing_id: string;
+  status: string;
+  match_type: string;
+  winner_participant_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+  starting_life_a: number;
+  starting_life_b: number;
+};
+
+type EventTickerContext = {
+  eventId: string;
+  currentMatchId: string;
+  currentPairingId: string;
+  turnTrackingEnabled: boolean;
+  topcutFormat: string;
+  nameByParticipantId: Map<string, string>;
+  pairingById: Map<string, EventTickerPairing>;
+  bracketPhaseByPairingId: Map<string, 'semi' | 'final' | 'third_place'>;
+  bracketPairingIds: Set<string>;
+  matches: EventTickerMatch[];
+};
+
+function topcutWinsNeededTicker(
+  format: string | null | undefined,
+  phase: 'semi' | 'final' | 'third_place'
+): number {
+  const f = format ?? 'bo3';
+  if (f === 'bo1') return 1;
+  if (f === 'sf_bo1_f_bo3') return phase === 'semi' ? 1 : 2;
+  return 2;
+}
+
+function bracketPhaseTickerLabel(phase: 'semi' | 'final' | 'third_place'): string {
+  if (phase === 'semi') return 'SEMIFINAL';
+  if (phase === 'final') return 'FINAL';
+  return '3ER PUESTO';
+}
+
+function formatTickerDuration(startedAt: string | null, endedAt?: string | null): string {
+  if (!startedAt) return '';
+  const a = new Date(startedAt).getTime();
+  const b = endedAt ? new Date(endedAt).getTime() : Date.now();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '';
+  const totalMin = Math.floor((b - a) / 60_000);
+  if (totalMin <= 0) return '<1 min';
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return m > 0 ? `${h}h ${m} min` : `${h}h`;
+  return `${totalMin} min`;
+}
+
+/** Tiempo EN VIVO en el ticker: solo minutos enteros (hacia abajo), sin segundos. */
+function formatTickerLiveElapsedMinutes(startedAt: string | null): string {
+  if (!startedAt) return '';
+  const a = new Date(startedAt).getTime();
+  const b = Date.now();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '';
+  const totalMin = Math.floor((b - a) / 60_000);
+  if (totalMin <= 0) return '';
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return m > 0 ? `${h}h ${m} min` : `${h}h`;
+  return `${totalMin} min`;
+}
+
+function isTickerEligibleMatch(m: EventTickerMatch, bracketPairingIds: Set<string>): boolean {
+  if (m.match_type === 'revenge') return false;
+  if (m.match_type === 'draft' || m.match_type === 'final') return true;
+  if (m.match_type === 'tiebreak') return bracketPairingIds.has(m.pairing_id);
+  return false;
+}
+
+function resolveBracketPairingId(
+  row: { pairing_id: string | null; participant_a_id: string; participant_b_id: string },
+  pairingById: Map<string, EventTickerPairing>
+): string | null {
+  if (row.pairing_id) return row.pairing_id;
+  for (const p of pairingById.values()) {
+    if (
+      (p.participant_a_id === row.participant_a_id && p.participant_b_id === row.participant_b_id) ||
+      (p.participant_a_id === row.participant_b_id && p.participant_b_id === row.participant_a_id)
+    ) {
+      return p.id;
+    }
+  }
+  return null;
+}
+
+function pairingWinsForTicker(
+  ctx: EventTickerContext,
+  pairingId: string
+): { winsA: number; winsB: number } {
+  const p = ctx.pairingById.get(pairingId);
+  if (!p) return { winsA: 0, winsB: 0 };
+  const types = ctx.bracketPairingIds.has(pairingId) ? ['tiebreak'] : ['draft', 'final'];
+  const completed = ctx.matches.filter(
+    (m) =>
+      m.pairing_id === pairingId &&
+      m.status === 'completed' &&
+      m.winner_participant_id != null &&
+      types.includes(m.match_type)
+  );
+  return {
+    winsA: completed.filter((m) => m.winner_participant_id === p.participant_a_id).length,
+    winsB: completed.filter((m) => m.winner_participant_id === p.participant_b_id).length,
+  };
+}
+
+function matchClosesSeries(ctx: EventTickerContext, pairingId: string, winsA: number, winsB: number): boolean {
+  if (ctx.bracketPairingIds.has(pairingId)) {
+    const phase = ctx.bracketPhaseByPairingId.get(pairingId);
+    if (!phase) return false;
+    return Math.max(winsA, winsB) >= topcutWinsNeededTicker(ctx.topcutFormat, phase);
+  }
+  return winsA >= 2 || winsB >= 2;
+}
+
+function renderFinPartidaBody(
+  nameA: string,
+  nameB: string,
+  winnerParticipantId: string,
+  participantAId: string,
+  durationLabel: string,
+  seriesLabel: string,
+  winsA: number,
+  winsB: number,
+  closesSeries: boolean
+): React.ReactNode {
+  const winnerIsA = winnerParticipantId === participantAId;
+  const scoreA = String(winsA);
+  const scoreB = String(winsB);
+  return (
+    <>
+      Fin partida ·{' '}
+      {winnerIsA ? (
+        <>
+          <Text style={newsTickerStyles.bold}>{nameA}</Text> vs {nameB}
+        </>
+      ) : (
+        <>
+          {nameA} vs <Text style={newsTickerStyles.bold}>{nameB}</Text>
+        </>
+      )}
+      {' · '}
+      {durationLabel}
+      {' · '}
+      {seriesLabel}{' '}
+      {winnerIsA ? (
+        closesSeries ? (
+          <>
+            <Text style={newsTickerStyles.bold}>{scoreA}</Text>-{scoreB}
+          </>
+        ) : (
+          `${scoreA}-${scoreB}`
+        )
+      ) : closesSeries ? (
+        <>
+          {scoreA}-<Text style={newsTickerStyles.bold}>{scoreB}</Text>
+        </>
+      ) : (
+        `${scoreA}-${scoreB}`
+      )}
+    </>
+  );
+}
+
+async function fetchEventTickerContext(
+  eventId: string,
+  currentMatchId: string,
+  currentPairingId: string
+): Promise<EventTickerContext | null> {
+  const [eventRes, pairingsRes, participantsRes, tgRes] = await Promise.all([
+    supabase
+      .from('draft_events')
+      .select('turn_tracking_enabled, topcut_format, competition_format')
+      .eq('id', eventId)
+      .maybeSingle(),
+    supabase.from('pairings').select('id, participant_a_id, participant_b_id, swiss_round').eq('event_id', eventId),
+    supabase
+      .from('event_participants')
+      .select('id, users!event_participants_user_id_fkey (display_name, username)')
+      .eq('event_id', eventId)
+      .eq('role', 'player'),
+    supabase
+      .from('event_tiebreak_groups')
+      .select('id')
+      .eq('event_id', eventId)
+      .eq('group_origin', 'swiss_topcut')
+      .in('status', ['active', 'resolved'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (eventRes.error || pairingsRes.error || participantsRes.error) return null;
+
+  const competitionFormat =
+    (eventRes.data as { competition_format?: string | null } | null)?.competition_format === 'swiss'
+      ? 'swiss'
+      : 'round_robin';
+  const pairingRows = (pairingsRes.data ?? []) as {
+    id: string;
+    participant_a_id: string;
+    participant_b_id: string;
+    swiss_round: number | null;
+  }[];
+  const officialPairingIds = pairingRows
+    .filter((p) => (competitionFormat === 'swiss' ? p.swiss_round != null : true))
+    .map((p) => p.id);
+  const pairingById = new Map<string, EventTickerPairing>();
+  for (const p of pairingRows) {
+    pairingById.set(p.id, {
+      id: p.id,
+      participant_a_id: p.participant_a_id,
+      participant_b_id: p.participant_b_id,
+    });
+  }
+
+  const nameByParticipantId = new Map<string, string>();
+  for (const row of participantsRes.data ?? []) {
+    const u = relationOne(
+      (row as { users?: { display_name?: string | null; username?: string } | null }).users
+    );
+    nameByParticipantId.set(
+      String((row as { id: string }).id),
+      u?.display_name || u?.username || 'Jugador'
+    );
+  }
+
+  const bracketPhaseByPairingId = new Map<string, 'semi' | 'final' | 'third_place'>();
+  const bracketPairingIds = new Set<string>();
+  const tgId = (tgRes.data as { id?: string } | null)?.id;
+  if (tgId && !tgRes.error) {
+    const bmRes = await supabase
+      .from('event_tiebreak_bracket_matches')
+      .select('pairing_id, participant_a_id, participant_b_id, bracket_phase')
+      .eq('group_id', tgId);
+    if (!bmRes.error) {
+      for (const row of bmRes.data ?? []) {
+        const pid = resolveBracketPairingId(
+          row as { pairing_id: string | null; participant_a_id: string; participant_b_id: string },
+          pairingById
+        );
+        if (!pid) continue;
+        bracketPairingIds.add(pid);
+        bracketPhaseByPairingId.set(pid, (row as { bracket_phase: 'semi' | 'final' | 'third_place' }).bracket_phase);
+      }
+    }
+  }
+
+  const matchesRes =
+    officialPairingIds.length > 0
+      ? await supabase
+          .from('matches')
+          .select(
+            'id, pairing_id, status, match_type, winner_participant_id, started_at, ended_at, starting_life_a, starting_life_b'
+          )
+          .in('pairing_id', officialPairingIds)
+      : { data: [], error: null };
+
+  if (matchesRes.error) return null;
+
+  const tfRaw = (eventRes.data as { topcut_format?: string | null } | null)?.topcut_format;
+  const topcutFormat = tfRaw === 'bo1' || tfRaw === 'sf_bo1_f_bo3' || tfRaw === 'bo3' ? tfRaw : 'bo3';
+
+  return {
+    eventId,
+    currentMatchId,
+    currentPairingId,
+    turnTrackingEnabled: !!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)
+      ?.turn_tracking_enabled,
+    topcutFormat,
+    nameByParticipantId,
+    pairingById,
+    bracketPhaseByPairingId,
+    bracketPairingIds,
+    matches: (matchesRes.data ?? []) as EventTickerMatch[],
+  };
+}
+
+async function fetchLiveLivesByMatch(
+  matchIds: string[],
+  turnTrackingEnabled: boolean,
+  matches: EventTickerMatch[],
+  pairingById: Map<string, EventTickerPairing>
+): Promise<Record<string, { lifeA: number; lifeB: number }>> {
+  const out: Record<string, { lifeA: number; lifeB: number }> = {};
+  for (const m of matches) {
+    if (!matchIds.includes(m.id)) continue;
+    const p = pairingById.get(m.pairing_id);
+    if (!p) continue;
+    out[m.id] = {
+      lifeA: clampLife(Number(m.starting_life_a ?? 20)),
+      lifeB: clampLife(Number(m.starting_life_b ?? 20)),
+    };
+  }
+  if (matchIds.length === 0) return out;
+
+  const applyLifeEventsToOut = (
+    rows: { match_id: string; participant_id: string; resulting_life: number; occurred_at: string }[]
+  ) => {
+    const latest: Record<string, Record<string, { life: number; at: string }>> = {};
+    for (const row of rows) {
+      const mid = String(row.match_id);
+      const pid = String(row.participant_id);
+      const at = String(row.occurred_at);
+      if (!latest[mid]) latest[mid] = {};
+      const cur = latest[mid][pid];
+      if (!cur || cur.at < at) {
+        latest[mid][pid] = { life: Number(row.resulting_life), at };
+      }
+    }
+    for (const mid of matchIds) {
+      const matchRow = matches.find((x) => x.id === mid);
+      if (!matchRow) continue;
+      const p = pairingById.get(matchRow.pairing_id);
+      if (!p) continue;
+      const la = latest[mid]?.[p.participant_a_id]?.life;
+      const lb = latest[mid]?.[p.participant_b_id]?.life;
+      if (la != null) out[mid]!.lifeA = clampLife(la);
+      if (lb != null) out[mid]!.lifeB = clampLife(lb);
+    }
+  };
+
+  if (turnTrackingEnabled) {
+    const turnsRes = await supabase
+      .from('match_turns')
+      .select('match_id, turn_number, life_a_after, life_b_after')
+      .in('match_id', matchIds);
+    if (!turnsRes.error) {
+      const bestTurnByMatch = new Map<string, { turn: number; lifeA: number; lifeB: number }>();
+      for (const row of turnsRes.data ?? []) {
+        const mid = String(row.match_id);
+        const tn = Number(row.turn_number);
+        const cur = bestTurnByMatch.get(mid);
+        if (!cur || tn > cur.turn) {
+          bestTurnByMatch.set(mid, {
+            turn: tn,
+            lifeA: clampLife(Number(row.life_a_after)),
+            lifeB: clampLife(Number(row.life_b_after)),
+          });
+        }
+      }
+      for (const [mid, v] of bestTurnByMatch) {
+        out[mid] = { lifeA: v.lifeA, lifeB: v.lifeB };
+      }
+    }
+  }
+
+  const livesRes = await supabase
+    .from('life_events')
+    .select('match_id, participant_id, resulting_life, occurred_at')
+    .in('match_id', matchIds);
+  if (!livesRes.error && livesRes.data) {
+    applyLifeEventsToOut(
+      livesRes.data as {
+        match_id: string;
+        participant_id: string;
+        resulting_life: number;
+        occurred_at: string;
+      }[]
+    );
+  }
+  return out;
+}
+
+function buildCompletedTickerItem(ctx: EventTickerContext, m: EventTickerMatch): TickerQueueItem | null {
+  if (m.status !== 'completed' || !m.winner_participant_id || !m.ended_at) return null;
+  if (!isTickerEligibleMatch(m, ctx.bracketPairingIds)) return null;
+  if (m.id === ctx.currentMatchId) return null;
+
+  const pairing = ctx.pairingById.get(m.pairing_id);
+  if (!pairing) return null;
+
+  const nameA = ctx.nameByParticipantId.get(pairing.participant_a_id) ?? 'Jugador A';
+  const nameB = ctx.nameByParticipantId.get(pairing.participant_b_id) ?? 'Jugador B';
+  const { winsA, winsB } = pairingWinsForTicker(ctx, m.pairing_id);
+  const closes = matchClosesSeries(ctx, m.pairing_id, winsA, winsB);
+  const isBracket = ctx.bracketPairingIds.has(m.pairing_id);
+  const phase = ctx.bracketPhaseByPairingId.get(m.pairing_id);
+  const seriesLabel = isBracket && phase ? bracketPhaseTickerLabel(phase) : 'BO3';
+  const durationLabel = formatTickerDuration(m.started_at, m.ended_at);
+  const colorKey: TickerColorKey = closes ? 'closes' : 'partial';
+
+  return {
+    key: `completed:${m.id}`,
+    colorKey,
+    body: renderFinPartidaBody(
+      nameA,
+      nameB,
+      m.winner_participant_id,
+      pairing.participant_a_id,
+      durationLabel,
+      seriesLabel,
+      winsA,
+      winsB,
+      closes
+    ),
+  };
+}
+
+async function enqueueLiveTickerMessages(
+  ctx: EventTickerContext,
+  enqueue: (item: TickerQueueItem) => void,
+  liveNonce: number
+): Promise<void> {
+  const inProgress = ctx.matches.filter(
+    (m) =>
+      m.status === 'in_progress' &&
+      m.id !== ctx.currentMatchId &&
+      isTickerEligibleMatch(m, ctx.bracketPairingIds)
+  );
+  if (inProgress.length === 0) return;
+
+  const lives = await fetchLiveLivesByMatch(
+    inProgress.map((m) => m.id),
+    ctx.turnTrackingEnabled,
+    ctx.matches,
+    ctx.pairingById
+  );
+  for (const m of inProgress) {
+    const pairing = ctx.pairingById.get(m.pairing_id);
+    if (!pairing) continue;
+    const nameA = ctx.nameByParticipantId.get(pairing.participant_a_id) ?? 'Jugador A';
+    const nameB = ctx.nameByParticipantId.get(pairing.participant_b_id) ?? 'Jugador B';
+    const life = lives[m.id] ?? {
+      lifeA: clampLife(Number(m.starting_life_a ?? 20)),
+      lifeB: clampLife(Number(m.starting_life_b ?? 20)),
+    };
+    const durationLabel = formatTickerLiveElapsedMinutes(m.started_at);
+    enqueue({
+      key: `live:${m.id}:${liveNonce}`,
+      colorKey: 'live',
+      body: (
+        <>
+          EN VIVO · {nameA} {life.lifeA} - {life.lifeB} {nameB}
+          {durationLabel ? ` · ${durationLabel}` : ''}
+        </>
+      ),
+    });
+  }
+}
+
+const TICKER_COLOR_STYLE = {
+  live: newsTickerStyles.msgLive,
+  partial: newsTickerStyles.msgPartial,
+  closes: newsTickerStyles.msgClosesBo3,
+} as const;
+
+function NewsTickerMessagePair({
+  style,
+  children,
+}: {
+  style: { fontSize: number; color: string; fontWeight: '400' | '700' };
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={newsTickerStyles.pairRow}>
+      <Text style={style}>{children}</Text>
+      <View style={newsTickerStyles.rotated}>
+        <Text style={style}>{children}</Text>
+      </View>
+    </View>
+  );
+}
+
+const NewsTickerStrip = React.memo(function NewsTickerStrip({
+  item,
+  leadingGap,
+  playbackKey,
+  onCycleComplete,
+}: {
+  item: TickerQueueItem | null;
+  leadingGap: boolean;
+  playbackKey: number;
+  onCycleComplete: () => void;
+}) {
+  const itemId = item?.key ?? null;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [contentLayoutEpoch, setContentLayoutEpoch] = useState(0);
+  const onCycleCompleteRef = useRef(onCycleComplete);
+  const animGenRef = useRef(0);
+  onCycleCompleteRef.current = onCycleComplete;
+
+  useLayoutEffect(() => {
+    if (__DEV__) {
+      console.log('[NewsTicker] anim effect run', {
+        playbackKey,
+        viewportWidth,
+        contentWidth,
+        contentLayoutEpoch,
+        hasItem: !!item,
+        itemId,
+      });
+    }
+    if (!item || !itemId || contentLayoutEpoch <= 0 || contentWidth <= 0 || viewportWidth <= 0) return;
+
+    const startX = viewportWidth + (leadingGap ? NEWS_TICKER_MESSAGE_GAP_PX : 0);
+    const endX = -contentWidth;
+    const travelPx = startX - endX;
+    const duration = (travelPx / viewportWidth) * NEWS_TICKER_MS_PER_VIEWPORT_WIDTH;
+    const gen = ++animGenRef.current;
+    translateX.setValue(startX);
+    if (__DEV__) {
+      console.log('[NewsTicker] anim start', { startX, endX, duration, itemId, playbackKey, leadingGap });
+    }
+
+    animRef.current?.stop();
+    const anim = Animated.timing(translateX, {
+      toValue: endX,
+      duration,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    });
+    animRef.current = anim;
+    anim.start(({ finished }) => {
+      if (__DEV__) {
+        console.log('[NewsTicker] anim end', { finished, itemId, gen, curGen: animGenRef.current });
+      }
+      if (finished && gen === animGenRef.current) {
+        animRef.current = null;
+        onCycleCompleteRef.current();
+      }
+    });
+
+    return () => {
+      if (__DEV__) {
+        console.log('[NewsTicker] anim cleanup', itemId);
+      }
+      anim.stop();
+      if (animRef.current === anim) animRef.current = null;
+    };
+  }, [itemId, playbackKey, viewportWidth, contentWidth, contentLayoutEpoch, leadingGap, translateX]);
+
+  const colorStyle = item ? TICKER_COLOR_STYLE[item.colorKey] : newsTickerStyles.msgLive;
+
+  return (
+    <View
+      style={newsTickerStyles.strip}
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width;
+        if (w > 0) setViewportWidth(w);
+      }}
+      pointerEvents="none"
+      collapsable={false}
+    >
+      {item && itemId ? (
+        <Animated.View
+          key={`ticker-play-${itemId}-${playbackKey}`}
+          style={[newsTickerStyles.tickerTrack, { transform: [{ translateX }] }]}
+          collapsable={false}
+        >
+          <View
+            collapsable={false}
+            onLayout={(e) => {
+              const w = e.nativeEvent.layout.width;
+              if (w <= 0) return;
+              setContentWidth(w);
+              setContentLayoutEpoch((n) => n + 1);
+            }}
+          >
+            <View style={newsTickerStyles.content}>
+              <NewsTickerMessagePair style={colorStyle}>{item.body}</NewsTickerMessagePair>
+            </View>
+          </View>
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}, (prev, next) => {
+  return (
+    prev.item?.key === next.item?.key &&
+    prev.playbackKey === next.playbackKey &&
+    prev.leadingGap === next.leadingGap &&
+    prev.onCycleComplete === next.onCycleComplete
+  );
+});
 
 const computeSurroundPositions = (count: number, radius = 50) => {
   if (count === 3) {
@@ -277,6 +913,22 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const avatarWrapMeasureRefB = useRef<View>(null);
   const avatarPositionA = useRef(0);
   const avatarPositionB = useRef(0);
+  const [tickerPlay, setTickerPlay] = useState<{
+    current: TickerQueueItem | null;
+    leadingGap: boolean;
+    playbackKey: number;
+  }>({ current: null, leadingGap: false, playbackKey: 0 });
+  const tickerQueueRef = useRef<TickerQueueItem[]>([]);
+  const tickerDedupeRef = useRef(new Set<string>());
+  const tickerCtxRef = useRef<EventTickerContext | null>(null);
+  const finishedMatchesRef = useRef(new Set<string>());
+  const pendingFinishedRef = useRef<PendingFinishedTicker[]>([]);
+  const liveTickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const checkpointRef = useRef(0);
+  const liveFireNonceRef = useRef(0);
+  const lastTickerEventIdRef = useRef<string | null>(null);
+  const processBannerIdleRef = useRef<() => void>(() => {});
 
   const aLife = pendingA ?? stableA;
   const bLife = pendingB ?? stableB;
@@ -310,6 +962,160 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       useNativeDriver: true,
     }).start();
   }, [deltaB, diffOpacityB]);
+
+  const enqueueTickerItem = useCallback((item: TickerQueueItem) => {
+    if (tickerDedupeRef.current.has(item.key)) return;
+    tickerDedupeRef.current.add(item.key);
+    const wasEmpty = tickerQueueRef.current.length === 0;
+    tickerQueueRef.current = [...tickerQueueRef.current, item];
+    if (__DEV__) {
+      console.log('[NewsTicker] enqueue', item.key, 'len', tickerQueueRef.current.length, 'wasEmpty', wasEmpty);
+    }
+    if (wasEmpty) {
+      if (__DEV__) console.log('[NewsTicker] show', item.key);
+      setTickerPlay((prev) => ({
+        current: item,
+        leadingGap: false,
+        playbackKey: prev.playbackKey + 1,
+      }));
+    }
+  }, []);
+
+  const onTickerCycleComplete = useCallback(() => {
+    const finishedKey = tickerQueueRef.current[0]?.key;
+    tickerQueueRef.current = tickerQueueRef.current.slice(1);
+    const next = tickerQueueRef.current[0] ?? null;
+    if (__DEV__) {
+      console.log('[NewsTicker] onCycleComplete', finishedKey, 'next', next?.key ?? '(empty)');
+    }
+    setTickerPlay((prev) => ({
+      current: next,
+      leadingGap: next != null,
+      playbackKey: prev.playbackKey + 1,
+    }));
+    if (!next && __DEV__) {
+      console.log('[NewsTicker] idle (cleared current)');
+    }
+    if (__DEV__ && next) {
+      console.log('[NewsTicker] show', next.key, 'leadingGap', true);
+    }
+    if (!next) {
+      processBannerIdleRef.current();
+    }
+  }, []);
+
+  const reloadTickerContext = useCallback(async () => {
+    if (!pairing?.event_id) return null;
+    const ctx = await fetchEventTickerContext(pairing.event_id, matchId, pairing.id);
+    tickerCtxRef.current = ctx;
+    return ctx;
+  }, [pairing?.event_id, pairing?.id, matchId]);
+
+  useEffect(() => {
+    if (!pairing || loading || blocked || concurrentBlockMessage) return;
+
+    let cancelled = false;
+    checkpointRef.current = Date.now();
+
+    if (lastTickerEventIdRef.current !== pairing.event_id) {
+      lastTickerEventIdRef.current = pairing.event_id;
+      finishedMatchesRef.current.clear();
+      pendingFinishedRef.current = [];
+    }
+
+    const scheduleLiveTickFromIdle = () => {
+      if (cancelled) return;
+      if (liveTickTimeoutRef.current) clearTimeout(liveTickTimeoutRef.current);
+      if (__DEV__) {
+        console.log('[NewsTicker] schedule EN VIVO in', NEWS_TICKER_LIVE_INTERVAL_MS / 1000, 's');
+      }
+      liveTickTimeoutRef.current = setTimeout(() => {
+        liveTickTimeoutRef.current = null;
+        void fireLiveTick();
+      }, NEWS_TICKER_LIVE_INTERVAL_MS);
+    };
+
+    async function fireLiveTick() {
+      if (cancelled) return;
+      liveFireNonceRef.current += 1;
+      const nonce = liveFireNonceRef.current;
+      const ctx = await reloadTickerContext();
+      const lenBefore = tickerQueueRef.current.length;
+      if (ctx) {
+        await enqueueLiveTickerMessages(ctx, enqueueTickerItem, nonce);
+      }
+      if (!cancelled && tickerQueueRef.current.length === lenBefore) {
+        scheduleLiveTickFromIdle();
+      }
+    }
+
+    const flushPendingFinishedToQueue = () => {
+      const batch = [...pendingFinishedRef.current];
+      if (batch.length === 0) return false;
+      pendingFinishedRef.current = [];
+      for (const row of batch) {
+        finishedMatchesRef.current.add(row.matchId);
+        enqueueTickerItem(row.message);
+      }
+      return true;
+    };
+
+    const processBannerIdle = () => {
+      if (tickerQueueRef.current.length > 0) return;
+      if (flushPendingFinishedToQueue()) return;
+      scheduleLiveTickFromIdle();
+    };
+    processBannerIdleRef.current = processBannerIdle;
+
+    const runCompletedPoll = async () => {
+      if (cancelled) return;
+      const chk = checkpointRef.current;
+      const ctx = await reloadTickerContext();
+      checkpointRef.current = Date.now();
+      if (!ctx) return;
+
+      const pendingIds = new Set(pendingFinishedRef.current.map((p) => p.matchId));
+
+      let added = false;
+      for (const m of ctx.matches) {
+        if (m.status !== 'completed' || !m.ended_at) continue;
+        if (new Date(m.ended_at).getTime() <= chk) continue;
+        if (m.id === ctx.currentMatchId) continue;
+        if (!isTickerEligibleMatch(m, ctx.bracketPairingIds)) continue;
+        if (finishedMatchesRef.current.has(m.id)) continue;
+        if (pendingIds.has(m.id)) continue;
+        const item = buildCompletedTickerItem(ctx, m);
+        if (!item) continue;
+        pendingFinishedRef.current.push({ matchId: m.id, message: item });
+        pendingIds.add(m.id);
+        added = true;
+      }
+
+      if (added && !cancelled && tickerQueueRef.current.length === 0) {
+        processBannerIdle();
+      }
+    };
+
+    void reloadTickerContext();
+    pollIntervalRef.current = setInterval(() => {
+      void runCompletedPoll();
+    }, NEWS_TICKER_POLL_COMPLETED_MS);
+    void runCompletedPoll();
+    scheduleLiveTickFromIdle();
+
+    return () => {
+      cancelled = true;
+      processBannerIdleRef.current = () => {};
+      if (liveTickTimeoutRef.current) {
+        clearTimeout(liveTickTimeoutRef.current);
+        liveTickTimeoutRef.current = null;
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [pairing, loading, blocked, concurrentBlockMessage, reloadTickerContext, enqueueTickerItem]);
 
   const updateAvatarYInScrollContent = useCallback((slot: 'a' | 'b') => {
     const wrap = slot === 'a' ? avatarWrapMeasureRefA.current : avatarWrapMeasureRefB.current;
@@ -1295,6 +2101,10 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     if (sessionUserId === pb.user_id) return { top: 'a' as const, bottom: 'b' as const };
     return { top: 'a' as const, bottom: 'b' as const };
   }, [sessionUserId, pa, pb]);
+  const topPlayerColors = layoutAB.top === 'a' ? colorsA : colorsB;
+  const bottomPlayerColors = layoutAB.bottom === 'a' ? colorsA : colorsB;
+  const showTickerTopSeparator = isDarkTickerAdjacentColor(topPlayerColors);
+  const showTickerBottomSeparator = isDarkTickerAdjacentColor(bottomPlayerColors);
   const canDecreaseA = aLife > 0;
   const canDecreaseB = bLife > 0;
 
@@ -1373,8 +2183,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const life = isA ? aLife : bLife;
     const lifeForHpBar = isA ? lifeDisplayedA : lifeDisplayedB;
     const canDec = isA ? canDecreaseA : canDecreaseB;
-    const pending = isA ? pendingA : pendingB;
-    const persisting = isA ? persistingA : persistingB;
     const colors = isA ? colorsA : colorsB;
     const isDarkBg = colors[0] === 'B';
     const t = isA ? ('a' as const) : ('b' as const);
@@ -1566,7 +2374,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
-        {pending != null || persisting ? <Text style={styles.pending}>Pendiente...</Text> : null}
+        <View style={styles.pendingReserveSlot} pointerEvents="none" />
       </>
     );
     return (
@@ -1645,15 +2453,27 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             layoutAB.top === 'a' ? diffOpacityA : diffOpacityB
           )}
 
+          {showTickerTopSeparator ? <View style={styles.tickerZoneSeparator} /> : null}
           <View style={styles.undoWrap}>
-            <TouchableOpacity
-              style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
-              disabled={!canUndo}
-              onPress={() => void onUndo()}
-            >
-              <Text style={styles.undoTxt}>Undo</Text>
-            </TouchableOpacity>
+            <View style={styles.undoTickerRow}>
+              <NewsTickerStrip
+                item={tickerPlay.current}
+                leadingGap={tickerPlay.leadingGap}
+                playbackKey={tickerPlay.playbackKey}
+                onCycleComplete={onTickerCycleComplete}
+              />
+            </View>
+            <View style={styles.undoBtnRow}>
+              <TouchableOpacity
+                style={[styles.undoBtn, !canUndo && styles.undoDisabled]}
+                disabled={!canUndo}
+                onPress={() => void onUndo()}
+              >
+                <Text style={styles.undoTxt}>Undo</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+          {showTickerBottomSeparator ? <View style={styles.tickerZoneSeparator} /> : null}
 
           {renderPlayerHalf(
             layoutAB.bottom,
@@ -1797,12 +2617,12 @@ const styles = StyleSheet.create({
   linkBtn: { marginTop: 6 },
   concurrentBackBtn: { marginTop: 18 },
   linkTxt: { color: '#3B82F6', fontWeight: '700' },
-  half: { flex: 1, minHeight: 300, padding: 16, justifyContent: 'center', position: 'relative' },
+  half: { flex: 1, minHeight: 272, padding: 16, justifyContent: 'center', position: 'relative' },
   halfTurnTrack: { paddingVertical: 10, paddingHorizontal: 12 },
   rotated: { transform: [{ rotate: '180deg' }] },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   topRowTurn: { marginBottom: 12 },
-  bo3Wrap: { flexDirection: 'row' },
+  bo3Wrap: { flexDirection: 'row', transform: [{ translateY: 12 }] },
   bo3Box: { width: 24, height: 10, borderRadius: 3, borderWidth: 1, borderColor: '#9CA3AF', marginRight: 6 },
   bo3Filled: { backgroundColor: '#22C55E', borderColor: '#22C55E' },
   flag: { fontSize: 18 },
@@ -1968,9 +2788,19 @@ const styles = StyleSheet.create({
   lifeDiffWrap: { minHeight: 48, justifyContent: 'flex-end', marginBottom: 2 },
   lifeDiff: { fontSize: 44, fontWeight: '800', lineHeight: 48 },
   lifeNumber: { fontSize: 72, color: '#111', fontWeight: '800', lineHeight: 80 },
-  pending: { marginTop: 6, fontSize: 12, color: '#666', textAlign: 'center' },
-  undoWrap: { alignItems: 'center', paddingVertical: 8, backgroundColor: '#fff' },
-  undoBtn: { borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 14 },
+  pendingReserveSlot: { marginTop: 6, height: 16 },
+  tickerZoneSeparator: { width: '100%', height: 1, backgroundColor: '#E5E7EB' },
+  undoWrap: { width: '100%', backgroundColor: '#fff' },
+  undoTickerRow: { width: '100%', height: 26, justifyContent: 'center' },
+  undoBtnRow: { alignItems: 'center', paddingVertical: 6 },
+  undoBtn: {
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 13,
+  },
   undoDisabled: { opacity: 0.5 },
   undoTxt: { color: '#3B82F6', fontWeight: '700' },
 });
