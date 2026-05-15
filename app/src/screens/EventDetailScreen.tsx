@@ -38,6 +38,7 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled';
   event_type: 'draft' | 'tournament' | 'pepidraft';
+  competition_format?: 'round_robin' | 'swiss' | null;
   scheduled_for: string;
   cube_id: string | null;
   venue_id: string | null;
@@ -99,6 +100,8 @@ type ActiveTiebreakGroupState = {
   group_type: string;
   round_number: number;
   champion_user_id: string | null;
+  /** 'swiss_topcut' = bracket post-suizo; 'tiebreak' = desempate clásico. */
+  group_origin?: string | null;
   participants: TiebreakGroupParticipantRow[];
 };
 
@@ -115,16 +118,6 @@ function formatDraftNetDuration(ms: number): string {
   if (h > 0) return m > 0 ? `${h}h ${m}min` : `${h}h`;
   if (m > 0) return s > 0 ? `${m} min ${s}s` : `${m} min`;
   return `${s}s`;
-}
-
-function formatWinRate(wins: number, total: number): string {
-  if (total <= 0) return '-';
-  const pct = (wins / total) * 100;
-  const roundedOneDecimal = Math.round(pct * 10) / 10;
-  if (Math.abs(roundedOneDecimal - Math.round(roundedOneDecimal)) < 0.00001) {
-    return `${Math.round(roundedOneDecimal)}%`;
-  }
-  return `${roundedOneDecimal.toFixed(1).replace('.', ',')}%`;
 }
 
 /** Lista legible en español: "A, B y C". */
@@ -154,8 +147,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [venueName, setVenueName] = useState<string | null>(null);
   const [championName, setChampionName] = useState<string | null>(null);
   const [championGender, setChampionGender] = useState<Gender | null>(null);
-  const [championOfficialWins, setChampionOfficialWins] = useState(0);
-  const [championOfficialPlayed, setChampionOfficialPlayed] = useState(0);
   const [tiebreakBanner, setTiebreakBanner] = useState<{
     pairingId: string;
     nameA: string;
@@ -172,7 +163,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -193,8 +184,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setCurrentUserInBracketWaiting(false);
     setChampionName(null);
     setChampionGender(null);
-    setChampionOfficialWins(0);
-    setChampionOfficialPlayed(0);
 
     if (e.champion_user_id) {
       const championRes = await supabase
@@ -270,7 +259,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     let multiTiebreakGroup: ActiveTiebreakGroupState | null = null;
     const activeGroupRes = await supabase
       .from('event_tiebreak_groups')
-      .select('id, group_type, round_number, champion_user_id')
+      .select('id, group_type, round_number, champion_user_id, group_origin')
       .eq('event_id', e.id)
       .eq('status', 'active')
       .maybeSingle();
@@ -281,6 +270,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         group_type: string;
         round_number: number;
         champion_user_id: string | null;
+        group_origin?: string | null;
       };
       const gpRes = await supabase
         .from('event_tiebreak_group_participants')
@@ -408,30 +398,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
 
     const mine = p.find((x) => x.user_id === (currentUserId ?? ''));
-    const championParticipant = e.champion_user_id ? p.find((x) => x.user_id === e.champion_user_id) : undefined;
     setMyParticipantId(mine?.id ?? null);
     setCubeName((cubeRes.data as any)?.name ?? null);
     setVenueName((venueRes.data as any)?.name ?? null);
-
-    if (e.champion_user_id && championParticipant?.id) {
-      const championParticipantId = championParticipant.id;
-      const [winsRes, playedRes] = await Promise.all([
-        supabase
-          .from('pairings')
-          .select('id', { count: 'exact', head: true })
-          .eq('event_id', e.id)
-          .eq('official_winner_participant_id', championParticipantId),
-        supabase
-          .from('pairings')
-          .select('id', { count: 'exact', head: true })
-          .eq('event_id', e.id)
-          .not('official_winner_participant_id', 'is', null)
-          .or(`participant_a_id.eq.${championParticipantId},participant_b_id.eq.${championParticipantId}`),
-      ]);
-
-      if (!winsRes.error) setChampionOfficialWins(winsRes.count ?? 0);
-      if (!playedRes.error) setChampionOfficialPlayed(playedRes.count ?? 0);
-    }
 
     if (p.length > 0) {
       const ids = p.map((x) => x.id);
@@ -595,6 +564,57 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
 
     players.sort((a, b) => a.sortName.localeCompare(b.sortName, 'es', { sensitivity: 'base' }));
+
+    const competitionFormat = event.competition_format ?? 'round_robin';
+    if (competitionFormat === 'swiss') {
+      const nPlayers = players.length;
+      const swiss_rounds_total = Math.max(1, Math.ceil(Math.log2(Math.max(nPlayers, 2))));
+      const updSwiss = await supabase.from('draft_events').update({ swiss_rounds_total }).eq('id', event.id);
+      if (updSwiss.error) {
+        if (__DEV__) {
+          console.error('[finishDraft] Error guardando swiss_rounds_total', updSwiss.error);
+        }
+        await supabase
+          .from('draft_events')
+          .update({ status: 'drafting', draft_ended_at: null })
+          .eq('id', event.id);
+        Alert.alert('Error', updSwiss.error.message ?? 'No se pudo configurar el formato suizo.');
+        await load();
+        return;
+      }
+
+      const allPairRes = await supabase.rpc('generate_all_pairings', { p_event_id: event.id });
+      if (allPairRes.error) {
+        if (__DEV__) {
+          console.error('[finishDraft] Error generate_all_pairings', allPairRes.error);
+        }
+        await supabase
+          .from('draft_events')
+          .update({ status: 'drafting', draft_ended_at: null })
+          .eq('id', event.id);
+        Alert.alert('Error', allPairRes.error.message ?? 'No se pudieron crear los enfrentamientos.');
+        await load();
+        return;
+      }
+
+      const rpcRes = await supabase.rpc('generate_swiss_round', { p_event_id: event.id, p_round: 1 });
+      if (rpcRes.error) {
+        if (__DEV__) {
+          console.error('[finishDraft] Error generate_swiss_round', rpcRes.error);
+        }
+        await supabase
+          .from('draft_events')
+          .update({ status: 'drafting', draft_ended_at: null })
+          .eq('id', event.id);
+        Alert.alert('Error', rpcRes.error.message ?? 'No se pudo generar la ronda suiza.');
+        await load();
+        return;
+      }
+
+      Alert.alert('Listo', 'Se generó la ronda 1 (formato suizo).');
+      await load();
+      return;
+    }
 
     const inserts: PairingInsert[] = [];
     for (let i = 0; i < players.length; i += 1) {
@@ -782,17 +802,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     ? participants.find((p) => p.user_id === event.champion_user_id) ?? null
     : null;
   const championDisplayName = championName?.trim() || 'Campeón';
-  const championTitle = resolveGenderedText(championGender, 'Campeón', 'Campeona');
-  const championWinRate =
-    formatWinRate(championOfficialWins, championOfficialPlayed);
+  const championHonorific = resolveGenderedText(championGender, 'campeón', 'campeona');
 
   const multiTiebreakBannerVisible =
     activeTiebreakGroup != null &&
+    activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
-    multiTiebreakBannerVisible ||
-    (event.status === 'playing' && event.final_pending && !event.champion_user_id);
+    activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
+    (multiTiebreakBannerVisible ||
+      (event.status === 'playing' && event.final_pending && !event.champion_user_id));
 
   const participantNamesOrdered = activeTiebreakGroup
     ? [...activeTiebreakGroup.participants]
@@ -943,18 +963,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.championBody}>
               <View style={styles.championRightContent}>
-                <View style={styles.championHeroBadge}>
-                  <Text style={styles.championBadgeText}>🏆 {championTitle}</Text>
-                </View>
                 <Text style={styles.championName}>{championDisplayName}</Text>
-                <Text style={styles.championMeta}>
-                  EG: {championOfficialWins} · EC: {championOfficialPlayed}
-                </Text>
-              </View>
-              <View style={styles.championWinRateWrap}>
-                <View style={styles.winRateBox}>
-                  <Text style={styles.winRateLabel}>Win Rate</Text>
-                  <Text style={styles.winRateValue}>{championWinRate}</Text>
+                <View style={styles.championHeroBadge}>
+                  <Text style={styles.championBadgeText}>
+                    🏆 {championHonorific}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -1371,10 +1384,9 @@ const styles = StyleSheet.create({
     minHeight: 94,
   },
   championAvatarWrap: { marginRight: 18 },
-  championBody: { flex: 1, minWidth: 0, minHeight: 72, justifyContent: 'flex-start', paddingRight: 86 },
+  championBody: { flex: 1, minWidth: 0, minHeight: 72, justifyContent: 'flex-start' },
   championRightContent: { flex: 1, minHeight: 72, justifyContent: 'flex-start' },
   championName: { fontSize: 18, fontWeight: '700', color: '#111' },
-  championMeta: { fontSize: 12, color: '#666', marginTop: 4 },
   championBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1391,7 +1403,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF3C7',
     borderColor: '#FBBF24',
     alignSelf: 'flex-start',
-    marginBottom: 12,
+    marginTop: 8,
   },
   championBadgeText: { fontSize: 11, fontWeight: '700', color: '#B45309' },
   polemicaBadge: {
@@ -1430,19 +1442,6 @@ const styles = StyleSheet.create({
     borderColor: '#D1D5DB',
   },
   leftEventChipText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
-  championWinRateWrap: { position: 'absolute', top: 0, right: 0 },
-  winRateBox: {
-    borderWidth: 1,
-    borderColor: '#B45309',
-    backgroundColor: '#FEF3C7',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  winRateLabel: { fontSize: 9, color: '#B45309', fontWeight: '600' },
-  winRateValue: { fontSize: 13, color: '#B45309', fontWeight: '800' },
   metaSmall: { fontSize: 12, color: '#666' },
   inlineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   registeredTxt: { color: '#166534', fontSize: 14, fontWeight: '600' },

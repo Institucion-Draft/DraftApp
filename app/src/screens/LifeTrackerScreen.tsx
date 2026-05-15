@@ -105,6 +105,17 @@ function clampLife(value: number): number {
   return Math.max(0, value);
 }
 
+function bracketRowMatchesPairing(
+  row: { pairing_id: string | null; participant_a_id: string; participant_b_id: string },
+  pairing: { id: string; participant_a_id: string; participant_b_id: string }
+): boolean {
+  if (row.pairing_id === pairing.id) return true;
+  return (
+    (row.participant_a_id === pairing.participant_a_id && row.participant_b_id === pairing.participant_b_id) ||
+    (row.participant_a_id === pairing.participant_b_id && row.participant_b_id === pairing.participant_a_id)
+  );
+}
+
 function flushLayout(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -349,7 +360,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const pairingRow = pData as PairingRow;
     setPairing(pairingRow);
 
-    const [eventRes, participantsRes, colorsRes, lifeRes, winsRes] = await Promise.all([
+    const [eventRes, participantsRes, colorsRes, lifeRes, winsRes, latestTgRes] = await Promise.all([
       supabase
         .from('draft_events')
         .select('workspace_id, turn_tracking_enabled')
@@ -379,13 +390,28 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       supabase.from('life_events').select('participant_id, resulting_life, occurred_at').eq('match_id', matchId),
       supabase
         .from('matches')
-        .select('winner_participant_id, match_type, status')
+        .select('id, winner_participant_id, match_type, status')
         .eq('pairing_id', pairingRow.id)
         .eq('status', 'completed')
         .not('winner_participant_id', 'is', null),
+      supabase
+        .from('event_tiebreak_groups')
+        .select('id, group_type, group_origin')
+        .eq('event_id', pairingRow.event_id)
+        .in('status', ['active', 'resolved'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
-    if (participantsRes.error || colorsRes.error || lifeRes.error || winsRes.error) {
+    if (
+      participantsRes.error ||
+      colorsRes.error ||
+      lifeRes.error ||
+      winsRes.error ||
+      eventRes.error ||
+      latestTgRes.error
+    ) {
       Alert.alert('Error', 'No se pudo cargar el estado del life tracker.');
       setLoading(false);
       return;
@@ -478,10 +504,40 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     pendingBRef.current = null;
     historyRef.current = [{ a: initialA, b: initialB }];
 
-    const wins = (winsRes.data ?? []) as { winner_participant_id: string; match_type: string }[];
+    const wins = (winsRes.data ?? []) as { id: string; winner_participant_id: string; match_type: string }[];
+    let pillWinsA = 0;
+    let pillWinsB = 0;
     const officialWins = wins.filter((w) => w.match_type === 'draft' || w.match_type === 'final');
-    setWinsA(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length);
-    setWinsB(officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length);
+    const tg = latestTgRes.data as { id: string; group_type: string; group_origin: string | null } | null;
+    const isSwissTopcutBracketTiebreak =
+      matchRow.match_type === 'tiebreak' &&
+      tg?.group_type === 'bracket' &&
+      tg.group_origin === 'swiss_topcut';
+    if (isSwissTopcutBracketTiebreak) {
+      const bmr = await supabase
+        .from('event_tiebreak_bracket_matches')
+        .select('pairing_id, participant_a_id, participant_b_id')
+        .eq('group_id', tg.id);
+      const rows = (bmr.data ?? []) as {
+        pairing_id: string | null;
+        participant_a_id: string;
+        participant_b_id: string;
+      }[];
+      const inBracketLeg = !bmr.error && rows.some((r) => bracketRowMatchesPairing(r, pairingRow));
+      if (inBracketLeg) {
+        const priorTiebreak = wins.filter((w) => w.match_type === 'tiebreak' && w.id !== matchRow.id);
+        pillWinsA = priorTiebreak.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length;
+        pillWinsB = priorTiebreak.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length;
+      } else {
+        pillWinsA = officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length;
+        pillWinsB = officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length;
+      }
+    } else {
+      pillWinsA = officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_a_id).length;
+      pillWinsB = officialWins.filter((w) => w.winner_participant_id === pairingRow.participant_b_id).length;
+    }
+    setWinsA(pillWinsA);
+    setWinsB(pillWinsB);
 
     let lifeDispA = clampLife(matchRow.starting_life_a);
     let lifeDispB = clampLife(matchRow.starting_life_b);

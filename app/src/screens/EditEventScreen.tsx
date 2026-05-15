@@ -22,6 +22,13 @@ import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
 
+type CompetitionFormat = 'round_robin' | 'swiss';
+
+function getCompetitionFormatLabel(f: CompetitionFormat): string {
+  if (f === 'swiss') return 'Suizo';
+  return 'Todos contra todos';
+}
+
 type FormBaseline = {
   name: string;
   eventType: EventType;
@@ -32,6 +39,7 @@ type FormBaseline = {
   notes: string;
   forceEditOverride: boolean;
   turnTrackingEnabled: boolean;
+  eliminatoriasBo3: boolean;
 };
 
 const EVENT_TYPES: { value: EventType; label: string }[] = [
@@ -56,6 +64,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   const [eventType, setEventType] = useState<EventType>('draft');
   const [status, setStatus] = useState<EventStatus>('scheduled');
   const [scheduledFor, setScheduledFor] = useState(new Date());
@@ -64,6 +73,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  /** Suizo: ON = topcut_format bo3, OFF = bo1. */
+  const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
+  const [topcutFormatLocked, setTopcutFormatLocked] = useState(false);
   const [cubes, setCubes] = useState<SimpleOption[]>([]);
   const [venues, setVenues] = useState<SimpleOption[]>([]);
   /** Solo aplica si status es playing/completed: permite editar cubo, sede, tipo, fecha (no estado). */
@@ -80,7 +92,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
     void (async () => {
       const { data, error } = await supabase
         .from('draft_events')
-        .select('id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled')
+        .select(
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, competition_format, topcut_format'
+        )
         .eq('id', eventId)
         .maybeSingle();
 
@@ -94,6 +108,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const row = data as any;
       setWorkspaceId(row.workspace_id);
       setName(row.name);
+      const cf = (row.competition_format as CompetitionFormat | null | undefined) ?? 'round_robin';
+      setCompetitionFormat(cf === 'swiss' ? 'swiss' : 'round_robin');
       setEventType(row.event_type as EventType);
       const st = row.status as EventStatus;
       setLoadedStatus(st);
@@ -105,6 +121,42 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setForceEditOverride(false);
       const tt = !!row.turn_tracking_enabled;
       setTurnTrackingEnabled(tt);
+      const rawTf = (row.topcut_format as string | null | undefined) ?? 'bo3';
+      const elimBo3 = rawTf !== 'bo1';
+      setEliminatoriasBo3(elimBo3);
+
+      let swissTopcutBracketLocked = false;
+      if (cf === 'swiss') {
+        const grpRes = await supabase
+          .from('event_tiebreak_groups')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('group_origin', 'swiss_topcut');
+        const groupIds = (grpRes.data ?? []).map((r: { id: string }) => r.id);
+        if (groupIds.length > 0) {
+          const bmRes = await supabase
+            .from('event_tiebreak_bracket_matches')
+            .select('pairing_id')
+            .in('group_id', groupIds);
+          const pairingIds = [
+            ...new Set(
+              (bmRes.data ?? [])
+                .map((r: { pairing_id: string | null }) => r.pairing_id)
+                .filter((pid): pid is string => pid != null && String(pid).length > 0)
+            ),
+          ];
+          if (pairingIds.length > 0) {
+            const mRes = await supabase
+              .from('matches')
+              .select('id', { count: 'exact', head: true })
+              .in('pairing_id', pairingIds)
+              .eq('match_type', 'tiebreak');
+            swissTopcutBracketLocked = (mRes.count ?? 0) > 0;
+          }
+        }
+      }
+      setTopcutFormatLocked(swissTopcutBracketLocked);
+
       setBaseline({
         name: row.name,
         eventType: row.event_type as EventType,
@@ -115,6 +167,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         notes: row.notes ?? '',
         forceEditOverride: false,
         turnTrackingEnabled: tt,
+        eliminatoriasBo3: elimBo3,
       });
 
       const [cubesRes, venuesRes] = await Promise.all([
@@ -142,9 +195,22 @@ export default function EditEventScreen({ route, navigation }: Props) {
       venueId !== baseline.venueId ||
       (notes.trim() || '') !== (baseline.notes.trim() || '') ||
       forceEditOverride !== baseline.forceEditOverride ||
-      turnTrackingEnabled !== baseline.turnTrackingEnabled
+      turnTrackingEnabled !== baseline.turnTrackingEnabled ||
+      eliminatoriasBo3 !== baseline.eliminatoriasBo3
     );
-  }, [baseline, name, eventType, status, scheduledFor, cubeId, venueId, notes, forceEditOverride, turnTrackingEnabled]);
+  }, [
+    baseline,
+    name,
+    eventType,
+    status,
+    scheduledFor,
+    cubeId,
+    venueId,
+    notes,
+    forceEditOverride,
+    turnTrackingEnabled,
+    eliminatoriasBo3,
+  ]);
 
   const openStatusPicker = () => {
     if (statusPickerLocked || !loadedStatus) return;
@@ -207,6 +273,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
       patch.cube_id = cubeId;
       patch.venue_id = venueId;
     }
+    if (competitionFormat === 'swiss' && !topcutFormatLocked) {
+      patch.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+    }
     if (!statusPickerLocked && loadedStatus) {
       if (loadedStatus === 'drafting') {
         if (status === 'scheduled' || status === 'cancelled') {
@@ -258,6 +327,24 @@ export default function EditEventScreen({ route, navigation }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
+
+      <Text style={styles.label}>Formato de competición</Text>
+      <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
+        <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getCompetitionFormatLabel(competitionFormat)}</Text>
+      </View>
+      <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
+
+      {competitionFormat === 'swiss' ? (
+        <>
+          <View style={styles.turnTrackingRow}>
+            <Text style={styles.turnTrackingLabel}>Eliminatorias BO3</Text>
+            <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} disabled={topcutFormatLocked} />
+          </View>
+          {topcutFormatLocked ? (
+            <Text style={styles.topcutLockedHint}>Ya no editable: las eliminatorias comenzaron.</Text>
+          ) : null}
+        </>
+      ) : null}
 
       {isAdvancedStatus ? (
         <View style={styles.forceEditBlock}>
@@ -413,6 +500,8 @@ const styles = StyleSheet.create({
   },
   pickerTxt: { fontSize: 16, color: '#111' },
   pickerTxtMuted: { color: '#6B7280' },
+  readOnlyHint: { fontSize: 12, color: '#9CA3AF', marginTop: 4, marginBottom: 16 },
+  topcutLockedHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 16 },
   labelMuted: { color: '#6B7280' },
   forceEditBlock: { marginBottom: 8 },
   switchRow: {

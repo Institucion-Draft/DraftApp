@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,11 +24,14 @@ type PairingRow = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  swiss_round: number | null;
 };
 
 type ParticipantRow = {
   id: string;
   user_id: string;
+  bye_rounds?: number[] | null;
+  left_event_at?: string | null;
   users:
     | {
         username: string;
@@ -112,6 +115,7 @@ type TiebreakOfficialSection = {
   kind: 'round_robin' | 'bracket';
   groupRoundNumber: number;
   rounds: TiebreakOfficialRoundBlock[];
+  groupOrigin: 'tiebreak' | 'swiss_topcut';
 };
 
 type RevengeItemView = {
@@ -144,6 +148,80 @@ type RevengeGroupView = {
   items: RevengeItemView[];
 };
 
+type SwissRevengeStandaloneRow = {
+  pairingId: string;
+  participantAId: string;
+  participantBId: string;
+  aName: string;
+  bName: string;
+  aUserId: string;
+  bUserId: string;
+};
+
+type OfficialByeCard = { participantId: string; userId: string; name: string };
+
+type OfficialListRow =
+  | { kind: 'header'; id: string; title: string }
+  | { kind: 'pairing'; id: string; item: ItemView }
+  | { kind: 'bye'; id: string; round: number; participantId: string; userId: string; name: string };
+
+function rankOfficialItemStatus(s: ItemView['status']): number {
+  return s === 'in_progress' ? 0 : s === 'scheduled' ? 1 : 2;
+}
+
+function sortOfficialItemsForDisplay(a: ItemView, b: ItemView, currentUserId: string | null): number {
+  const s = rankOfficialItemStatus(a.status) - rankOfficialItemStatus(b.status);
+  if (s !== 0) return s;
+  const mineA = !!currentUserId && (a.aUserId === currentUserId || a.bUserId === currentUserId);
+  const mineB = !!currentUserId && (b.aUserId === currentUserId || b.bUserId === currentUserId);
+  if (mineA !== mineB) return mineA ? -1 : 1;
+  return `${a.aName} ${a.bName}`.localeCompare(`${b.aName} ${b.bName}`, 'es', { sensitivity: 'base' });
+}
+
+function buildSwissOfficialFlatRows(
+  items: ItemView[],
+  currentSwissRound: number,
+  byeByRound: Record<number, OfficialByeCard[]>,
+  currentUserId: string | null
+): OfficialListRow[] {
+  const byRound = new Map<number, ItemView[]>();
+  for (const it of items) {
+    const r = it.swiss_round;
+    if (r == null || typeof r !== 'number') continue;
+    if (!byRound.has(r)) byRound.set(r, []);
+    byRound.get(r)!.push(it);
+  }
+  for (const arr of byRound.values()) {
+    arr.sort((a, b) => sortOfficialItemsForDisplay(a, b, currentUserId));
+  }
+  const rows: OfficialListRow[] = [];
+  for (let r = currentSwissRound; r >= 1; r--) {
+    const roundItems = byRound.get(r) ?? [];
+    const byes = byeByRound[r] ?? [];
+    if (roundItems.length === 0 && byes.length === 0) continue;
+    rows.push({ kind: 'header', id: `hdr-swiss-${r}`, title: `Ronda Suiza ${r}` });
+    for (const item of roundItems) {
+      rows.push({ kind: 'pairing', id: item.id, item });
+    }
+    for (const b of byes) {
+      rows.push({
+        kind: 'bye',
+        id: `bye-r${r}-${b.participantId}`,
+        round: r,
+        participantId: b.participantId,
+        userId: b.userId,
+        name: b.name,
+      });
+    }
+  }
+  return rows;
+}
+
+function pairingInSwissRevengeTab(p: PairingRow, currentSwissRound: number | null): boolean {
+  if (currentSwissRound == null) return p.swiss_round == null;
+  return p.swiss_round == null || p.swiss_round !== currentSwissRound;
+}
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -172,6 +250,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
   const [items, setItems] = useState<ItemView[]>([]);
+  const [officialByeByRound, setOfficialByeByRound] = useState<Record<number, OfficialByeCard[]>>({});
+  const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
+  const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
+  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
   const [tiebreakOfficialSection, setTiebreakOfficialSection] = useState<TiebreakOfficialSection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -202,10 +284,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setMyUserId(currentUserId);
 
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
-      supabase.from('draft_events').select('status').eq('id', eventId).maybeSingle(),
+      supabase
+        .from('draft_events')
+        .select('status, competition_format, current_swiss_round')
+        .eq('id', eventId)
+        .maybeSingle(),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, swiss_round')
         .eq('event_id', eventId),
       supabase
         .from('event_participants')
@@ -213,6 +299,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          bye_rounds,
+          left_event_at,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -228,17 +316,42 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     if (pairingsRes.error || participantsRes.error) {
       Alert.alert('Error', 'No se pudieron cargar los enfrentamientos.');
       setItems([]);
+      setOfficialByeByRound({});
+      setCurrentSwissRoundStored(null);
+      setSwissRevengeStandalone([]);
       setRevengeItems([]);
       setTiebreakOfficialSection(null);
+      setCompetitionFormat('round_robin');
       return false;
     }
 
     const eventStatus = eventRes.data?.status as string | undefined;
-    const pairings = (pairingsRes.data ?? []) as PairingRow[];
+    const eventFlags = eventRes.data as {
+      competition_format?: string | null;
+      current_swiss_round?: number | null;
+    } | null;
+    const competitionFormat = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    setCompetitionFormat(competitionFormat);
+    const csrRaw = eventFlags?.current_swiss_round;
+    const currentSwissRound: number | null =
+      csrRaw == null
+        ? null
+        : (() => {
+            const n = Number(csrRaw);
+            return Number.isFinite(n) ? n : null;
+          })();
+    setCurrentSwissRoundStored(currentSwissRound);
+
+    const pairingsAll = (pairingsRes.data ?? []) as PairingRow[];
+    const pairingsForOfficial: PairingRow[] =
+      competitionFormat === 'swiss'
+        ? pairingsAll.filter((p) => p.swiss_round != null)
+        : pairingsAll;
+
     const participants = (participantsRes.data ?? []) as ParticipantRow[];
     const pMap = new Map<string, ParticipantRow>(participants.map((p) => [p.id, p]));
 
-    const pairingIds = pairings.map((p) => p.id);
+    const pairingIds = pairingsAll.map((p) => p.id);
     const matchesRes = await (
       pairingIds.length > 0
         ? supabase
@@ -251,8 +364,12 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     if (matchesRes.error) {
       Alert.alert('Error', 'No se pudieron cargar detalles de enfrentamientos.');
       setItems([]);
+      setOfficialByeByRound({});
+      setCurrentSwissRoundStored(null);
+      setSwissRevengeStandalone([]);
       setRevengeItems([]);
       setTiebreakOfficialSection(null);
+      setCompetitionFormat('round_robin');
       return false;
     }
 
@@ -303,7 +420,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       }
     }
 
-    const mapped: ItemView[] = pairings.map((pairing) => {
+    const mapped: ItemView[] = pairingsForOfficial.map((pairing) => {
       const pa = pMap.get(pairing.participant_a_id);
       const pb = pMap.get(pairing.participant_b_id);
       const ua = relationOne(pa?.users);
@@ -370,28 +487,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       };
     });
 
-    const rankStatus = (s: ItemView['status']) =>
-      s === 'in_progress' ? 0 : s === 'scheduled' ? 1 : 2;
+    mapped.sort((a, b) => sortOfficialItemsForDisplay(a, b, currentUserId));
 
-    mapped.sort((x, y) => {
-      const s = rankStatus(x.status) - rankStatus(y.status);
-      if (s !== 0) return s;
-      if (x.mine !== y.mine) return x.mine ? -1 : 1;
-      const n = `${x.aName} ${x.bName}`.localeCompare(`${y.aName} ${y.bName}`, 'es', {
-        sensitivity: 'base',
-      });
-      return n;
-    });
-
-    const pairingById = new Map(pairings.map((p) => [p.id, p]));
+    const pairingById = new Map(pairingsAll.map((p) => [p.id, p]));
     const revengeMapped: RevengeItemView[] = [];
     for (const m of safeMatches) {
       if (m.match_type !== 'revenge') continue;
       if (m.status === 'aborted') continue;
       const pairing = pairingById.get(m.pairing_id);
       if (!pairing) continue;
+      if (competitionFormat === 'swiss') {
+        if (!pairingInSwissRevengeTab(pairing, currentSwissRound)) continue;
+      }
       const pa = pMap.get(pairing.participant_a_id);
       const pb = pMap.get(pairing.participant_b_id);
+      if (competitionFormat === 'swiss' && currentUserId) {
+        if (pa?.user_id !== currentUserId && pb?.user_id !== currentUserId) continue;
+      }
       const ua = relationOne(pa?.users);
       const ub = relationOne(pb?.users);
       const aName = ua?.display_name || ua?.username || 'Jugador A';
@@ -445,13 +557,101 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       item.revengeOrder = next;
     }
 
+    const revengeGroupsTemp: RevengeGroupView[] = [];
+    const groupByPairingTemp = new Map<string, RevengeGroupView>();
+    for (const item of revengeMapped) {
+      if (item.status !== 'completed') continue;
+      const existing = groupByPairingTemp.get(item.pairingId);
+      if (existing) {
+        existing.items.push(item);
+        if (item.winnerName === item.aName) existing.winsA += 1;
+        if (item.winnerName === item.bName) existing.winsB += 1;
+        continue;
+      }
+      const next: RevengeGroupView = {
+        pairingId: item.pairingId,
+        aName: item.aName,
+        bName: item.bName,
+        aUserId: item.aUserId,
+        bUserId: item.bUserId,
+        winsA: item.winnerName === item.aName ? 1 : 0,
+        winsB: item.winnerName === item.bName ? 1 : 0,
+        items: [item],
+      };
+      groupByPairingTemp.set(item.pairingId, next);
+      revengeGroupsTemp.push(next);
+    }
+    revengeGroupsTemp.sort((x, y) => {
+      const xMine = !!currentUserId && (x.aUserId === currentUserId || x.bUserId === currentUserId);
+      const yMine = !!currentUserId && (y.aUserId === currentUserId || y.bUserId === currentUserId);
+      if (xMine && !yMine) return -1;
+      if (!xMine && yMine) return 1;
+      return 0;
+    });
+
+    const pairedForSwissStandalone = new Set<string>();
+    for (const item of revengeMapped) {
+      if (item.status === 'in_progress') pairedForSwissStandalone.add(item.pairingId);
+    }
+    for (const g of revengeGroupsTemp) pairedForSwissStandalone.add(g.pairingId);
+
+    let standaloneRows: SwissRevengeStandaloneRow[] = [];
+    if (competitionFormat === 'swiss' && currentUserId) {
+      for (const pr of pairingsAll) {
+        if (!pairingInSwissRevengeTab(pr, currentSwissRound)) continue;
+        const pa2 = pMap.get(pr.participant_a_id);
+        const pb2 = pMap.get(pr.participant_b_id);
+        if (pa2?.user_id !== currentUserId && pb2?.user_id !== currentUserId) continue;
+        if (pairedForSwissStandalone.has(pr.id)) continue;
+        const ua2 = relationOne(pa2?.users);
+        const ub2 = relationOne(pb2?.users);
+        standaloneRows.push({
+          pairingId: pr.id,
+          participantAId: pr.participant_a_id,
+          participantBId: pr.participant_b_id,
+          aName: ua2?.display_name || ua2?.username || 'Jugador A',
+          bName: ub2?.display_name || ub2?.username || 'Jugador B',
+          aUserId: pa2?.user_id ?? '',
+          bUserId: pb2?.user_id ?? '',
+        });
+      }
+    }
+    setSwissRevengeStandalone(standaloneRows);
+
+    const byeByRound: Record<number, OfficialByeCard[]> = {};
+    if (competitionFormat === 'swiss' && currentSwissRound != null) {
+      for (let R = 1; R <= currentSwissRound; R += 1) {
+        const inRound = new Set<string>();
+        for (const p of pairingsAll) {
+          if (p.swiss_round !== R) continue;
+          inRound.add(p.participant_a_id);
+          inRound.add(p.participant_b_id);
+        }
+        const cards: OfficialByeCard[] = [];
+        for (const ep of participants) {
+          if (ep.left_event_at) continue;
+          const br = Array.isArray(ep.bye_rounds) ? ep.bye_rounds : [];
+          if (!br.includes(R)) continue;
+          if (inRound.has(ep.id)) continue;
+          const u = relationOne(ep.users);
+          cards.push({
+            participantId: ep.id,
+            userId: ep.user_id,
+            name: u?.display_name || u?.username || 'Jugador',
+          });
+        }
+        byeByRound[R] = cards;
+      }
+    }
+    setOfficialByeByRound(byeByRound);
+
     setItems(mapped);
     setRevengeItems(revengeMapped);
 
     let tiebreakSection: TiebreakOfficialSection | null = null;
     const agRes = await supabase
       .from('event_tiebreak_groups')
-      .select('id, group_type, round_number, champion_user_id, status, created_at')
+      .select('id, group_type, round_number, champion_user_id, status, created_at, group_origin')
       .eq('event_id', eventId)
       .in('status', ['active', 'resolved', 'failed'])
       .order('created_at', { ascending: false })
@@ -463,6 +663,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         group_type: string;
         round_number: number;
         champion_user_id: string | null;
+        group_origin?: string | null;
       };
       const gpRes = await supabase
         .from('event_tiebreak_group_participants')
@@ -472,6 +673,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         const gIds = new Set((gpRes.data as { participant_id: string }[]).map((x) => x.participant_id));
         if (gIds.size >= 2) {
           const groupRoundNumber = ag.round_number ?? 1;
+          const groupOrigin: 'tiebreak' | 'swiss_topcut' =
+            ag.group_origin === 'swiss_topcut' ? 'swiss_topcut' : 'tiebreak';
 
           const itemForPairing = (
             pairing: PairingRow,
@@ -641,7 +844,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               const tbItems: TiebreakOfficialItem[] = [];
               for (const bm of sortedBracketRows) {
                 if (bm.pairing_id) {
-                  const pairing = pairings.find((p) => p.id === bm.pairing_id);
+                  const pairing = pairingsAll.find((p) => p.id === bm.pairing_id);
                   if (pairing) {
                     tbItems.push(
                       itemForPairing(pairing, 1, bm.bracket_phase, bm.winner_participant_id)
@@ -656,13 +859,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   kind: 'bracket',
                   groupRoundNumber: 1,
                   rounds: [{ round: 1, items: tbItems }],
+                  groupOrigin,
                 };
               }
             }
           } else {
             const buildTiebreakItemsForRound = (roundNum: number): TiebreakOfficialItem[] => {
               const tbItems: TiebreakOfficialItem[] = [];
-              for (const pairing of pairings) {
+              for (const pairing of pairingsAll) {
                 if (!gIds.has(pairing.participant_a_id) || !gIds.has(pairing.participant_b_id)) continue;
                 tbItems.push(itemForPairing(pairing, roundNum, null, null));
               }
@@ -681,7 +885,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     { round: 1, items: buildTiebreakItemsForRound(1) },
                   ]
                 : [{ round: 1, items: buildTiebreakItemsForRound(1) }];
-            tiebreakSection = { kind: 'round_robin', groupRoundNumber, rounds };
+            tiebreakSection = { kind: 'round_robin', groupRoundNumber, rounds, groupOrigin };
           }
         }
       }
@@ -772,6 +976,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   }, [load]);
   const liveRevengeItems = revengeItems
     .filter((item) => item.status === 'in_progress')
+    .filter((item) => competitionFormat !== 'swiss' || item.mine)
     .sort((x, y) => {
       if (x.mine && !y.mine) return -1;
       if (!x.mine && y.mine) return 1;
@@ -809,6 +1014,106 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     return 0;
   });
 
+  const tiebreakCardsTotal =
+    tiebreakOfficialSection?.rounds.reduce((sum, b) => sum + b.items.length, 0) ?? 0;
+
+  const isSwissOfficialSectioned = competitionFormat === 'swiss' && currentSwissRoundStored != null;
+
+  const officialSwissFlatRows = useMemo(() => {
+    if (!isSwissOfficialSectioned || currentSwissRoundStored == null) return [];
+    return buildSwissOfficialFlatRows(items, currentSwissRoundStored, officialByeByRound, myUserId);
+  }, [isSwissOfficialSectioned, items, currentSwissRoundStored, officialByeByRound, myUserId]);
+
+  const officialMainListEmpty = isSwissOfficialSectioned
+    ? officialSwissFlatRows.length === 0
+    : items.length === 0;
+
+  const renderOfficialPairingCard = useCallback(
+    (item: ItemView) => {
+      const swapSides = !!myUserId && item.bUserId === myUserId;
+      const leftUserId = swapSides ? item.bUserId : item.aUserId;
+      const rightUserId = swapSides ? item.aUserId : item.bUserId;
+      const leftPid = swapSides ? item.participant_b_id : item.participant_a_id;
+      const rightPid = swapSides ? item.participant_a_id : item.participant_b_id;
+      const leftName = swapSides ? item.bName : item.aName;
+      const rightName = swapSides ? item.aName : item.bName;
+      const winsLeft = swapSides ? item.winsB : item.winsA;
+      const winsRight = swapSides ? item.winsA : item.winsB;
+      const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
+      const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
+      return (
+        <TouchableOpacity
+          style={styles.card}
+          onPress={() =>
+            navigation.navigate('PairingDetail', { pairingId: item.id, fromTab: 'official' })
+          }
+        >
+          <View style={styles.compactRow}>
+            <View style={styles.inlinePlayer}>
+              <PlayerAvatar
+                userId={leftUserId}
+                participantId={leftPid}
+                size="small"
+                withColorBorder
+                borderWidth={3}
+              />
+              <View>
+                <Text style={styles.name}>{leftName}</Text>
+                <View style={styles.bo3Row}>
+                  <View style={[styles.bo3Box, winsLeft >= 1 && styles.bo3Filled]} />
+                  <View style={[styles.bo3Box, winsLeft >= 2 && styles.bo3Filled]} />
+                </View>
+              </View>
+            </View>
+            <View style={styles.scoreWrap}>
+              {item.status === 'in_progress' ? (
+                <Text style={styles.scoreNum}>
+                  {liveL ?? 20} <Text style={styles.vs}>vs</Text> {liveR ?? 20}
+                </Text>
+              ) : (
+                <Text style={styles.scoreNumIdle}>vs</Text>
+              )}
+            </View>
+            <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
+              <View style={styles.playerRightText}>
+                <Text style={styles.nameRight}>{rightName}</Text>
+                <View style={[styles.bo3Row, styles.bo3RowRight]}>
+                  <View style={[styles.bo3Box, winsRight >= 1 && styles.bo3Filled]} />
+                  <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
+                </View>
+              </View>
+              <PlayerAvatar
+                userId={rightUserId}
+                participantId={rightPid}
+                size="small"
+                withColorBorder
+                borderWidth={3}
+              />
+            </View>
+          </View>
+          <View style={styles.footer}>
+            <View style={styles.footerLeft}>
+              {item.inProgressMatchStartedAt ? (
+                <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+              ) : item.winnerName && item.official_winner_participant_id ? (
+                <Text style={styles.tiebreakGanoLine}>Ganó: {item.winnerName}</Text>
+              ) : null}
+            </View>
+            <View style={styles.footerCenter}>
+              {item.status === 'in_progress' ? (
+                <Text style={styles.liveCentered}>● EN VIVO</Text>
+              ) : (
+                <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
+              )}
+            </View>
+            <View style={styles.footerRight} />
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [navigation, myUserId]
+  );
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -816,9 +1121,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       </View>
     );
   }
-
-  const tiebreakCardsTotal =
-    tiebreakOfficialSection?.rounds.reduce((sum, b) => sum + b.items.length, 0) ?? 0;
 
   return (
     <View style={styles.root}>
@@ -837,21 +1139,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </View>
       {tab === 'officials' ? (
-        <FlatList
-          data={items}
+        <FlatList<ItemView | OfficialListRow>
+          data={isSwissOfficialSectioned ? officialSwissFlatRows : items}
           keyExtractor={(it) => it.id}
           contentContainerStyle={
-            items.length === 0 && tiebreakCardsTotal === 0 ? styles.emptyWrap : styles.listWrap
+            officialMainListEmpty && tiebreakCardsTotal === 0 ? styles.emptyWrap : styles.listWrap
           }
           ListEmptyComponent={
-            items.length === 0 && tiebreakCardsTotal === 0 ? (
+            officialMainListEmpty && tiebreakCardsTotal === 0 ? (
               <Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>
             ) : null
           }
           ListHeaderComponent={
             tiebreakOfficialSection && tiebreakCardsTotal > 0 ? (
               <View style={styles.tiebreakOfficialHeaderWrap}>
-                <Text style={styles.groupHeader}>Desempate</Text>
+                <Text style={styles.groupHeader}>
+                  {tiebreakOfficialSection.groupOrigin === 'swiss_topcut' ? 'Fase mata-mata' : 'Desempate'}
+                </Text>
                 {tiebreakOfficialSection.rounds.map((block) => {
                   const isBracket = tiebreakOfficialSection.kind === 'bracket';
                   const itemsToRender = block.items;
@@ -1042,92 +1346,44 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   </React.Fragment>
                   );
                 })}
-                <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>Enfrentamientos</Text>
+                {!isSwissOfficialSectioned ? (
+                  <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>Enfrentamientos</Text>
+                ) : null}
               </View>
             ) : null
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => {
-            const swapSides = !!myUserId && item.bUserId === myUserId;
-            const leftUserId = swapSides ? item.bUserId : item.aUserId;
-            const rightUserId = swapSides ? item.aUserId : item.bUserId;
-            const leftPid = swapSides ? item.participant_b_id : item.participant_a_id;
-            const rightPid = swapSides ? item.participant_a_id : item.participant_b_id;
-            const leftName = swapSides ? item.bName : item.aName;
-            const rightName = swapSides ? item.aName : item.bName;
-            const winsLeft = swapSides ? item.winsB : item.winsA;
-            const winsRight = swapSides ? item.winsA : item.winsB;
-            const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
-            const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
-            return (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() =>
-                navigation.navigate('PairingDetail', { pairingId: item.id, fromTab: 'official' })
+            if ('kind' in item) {
+              if (item.kind === 'header') {
+                return (
+                  <Text
+                    style={[styles.groupHeader, styles.officialListSectionTitle, styles.swissRoundHeader]}
+                  >
+                    {item.title}
+                  </Text>
+                );
               }
-            >
-              <View style={styles.compactRow}>
-                <View style={styles.inlinePlayer}>
-                  <PlayerAvatar
-                    userId={leftUserId}
-                    participantId={leftPid}
-                    size="small"
-                    withColorBorder
-                    borderWidth={3}
-                  />
-                  <View>
-                    <Text style={styles.name}>{leftName}</Text>
-                    <View style={styles.bo3Row}>
-                      <View style={[styles.bo3Box, winsLeft >= 1 && styles.bo3Filled]} />
-                      <View style={[styles.bo3Box, winsLeft >= 2 && styles.bo3Filled]} />
+              if (item.kind === 'bye') {
+                return (
+                  <View style={[styles.card, styles.byeCard]}>
+                    <Text style={styles.byeLabel}>Libre</Text>
+                    <View style={styles.byeRow}>
+                      <PlayerAvatar
+                        userId={item.userId}
+                        participantId={item.participantId}
+                        size="small"
+                        withColorBorder
+                        borderWidth={3}
+                      />
+                      <Text style={styles.byeName}>{item.name}</Text>
                     </View>
                   </View>
-                </View>
-                <View style={styles.scoreWrap}>
-                  {item.status === 'in_progress' ? (
-                    <Text style={styles.scoreNum}>
-                      {liveL ?? 20} <Text style={styles.vs}>vs</Text> {liveR ?? 20}
-                    </Text>
-                  ) : (
-                    <Text style={styles.scoreNumIdle}>vs</Text>
-                  )}
-                </View>
-                <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
-                  <View style={styles.playerRightText}>
-                    <Text style={styles.nameRight}>{rightName}</Text>
-                    <View style={[styles.bo3Row, styles.bo3RowRight]}>
-                      <View style={[styles.bo3Box, winsRight >= 1 && styles.bo3Filled]} />
-                      <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
-                    </View>
-                  </View>
-                  <PlayerAvatar
-                    userId={rightUserId}
-                    participantId={rightPid}
-                    size="small"
-                    withColorBorder
-                    borderWidth={3}
-                  />
-                </View>
-              </View>
-              <View style={styles.footer}>
-                <View style={styles.footerLeft}>
-                  {item.inProgressMatchStartedAt ? (
-                    <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
-                  ) : item.winnerName && item.official_winner_participant_id ? (
-                    <Text style={styles.tiebreakGanoLine}>Ganó: {item.winnerName}</Text>
-                  ) : null}
-                </View>
-                <View style={styles.footerCenter}>
-                  {item.status === 'in_progress' ? (
-                    <Text style={styles.liveCentered}>● EN VIVO</Text>
-                  ) : (
-                    <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
-                  )}
-                </View>
-                <View style={styles.footerRight} />
-              </View>
-            </TouchableOpacity>
-            );
+                );
+              }
+              return renderOfficialPairingCard(item.item);
+            }
+            return renderOfficialPairingCard(item);
           }}
         />
       ) : (
@@ -1135,10 +1391,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           data={revengeGroups}
           keyExtractor={(it) => it.pairingId}
           contentContainerStyle={
-            revengeGroups.length === 0 && liveRevengeItems.length === 0 ? styles.emptyWrap : styles.listWrap
+            revengeGroups.length === 0 &&
+            liveRevengeItems.length === 0 &&
+            swissRevengeStandalone.length === 0
+              ? styles.emptyWrap
+              : styles.listWrap
           }
           ListEmptyComponent={
-            liveRevengeItems.length === 0 ? <Text style={styles.empty}>Todavía no hay venganzas.</Text> : null
+            revengeGroups.length === 0 &&
+            liveRevengeItems.length === 0 &&
+            swissRevengeStandalone.length === 0 ? (
+              <Text style={styles.empty}>Todavía no hay venganzas.</Text>
+            ) : null
           }
           ListHeaderComponent={
             liveRevengeItems.length > 0 ? (
@@ -1205,6 +1469,57 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   );
                 })}
               </>
+            ) : null
+          }
+          ListFooterComponent={
+            swissRevengeStandalone.length > 0 ? (
+              <View style={styles.swissRevengeStandaloneWrap}>
+                {swissRevengeStandalone.map((row) => {
+                  const swapSides = !!myUserId && row.bUserId === myUserId;
+                  const leftUserId = swapSides ? row.bUserId : row.aUserId;
+                  const rightUserId = swapSides ? row.aUserId : row.bUserId;
+                  const leftPid = swapSides ? row.participantBId : row.participantAId;
+                  const rightPid = swapSides ? row.participantAId : row.participantBId;
+                  const leftName = swapSides ? row.bName : row.aName;
+                  const rightName = swapSides ? row.aName : row.bName;
+                  return (
+                    <TouchableOpacity
+                      key={row.pairingId}
+                      style={styles.card}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        navigation.navigate('PairingDetail', { pairingId: row.pairingId, fromTab: 'revenge' })
+                      }
+                    >
+                      <View style={styles.compactRow}>
+                        <View style={styles.inlinePlayer}>
+                          <PlayerAvatar
+                            userId={leftUserId}
+                            participantId={leftPid}
+                            size="small"
+                            withColorBorder
+                            borderWidth={3}
+                          />
+                          <Text style={styles.name}>{leftName}</Text>
+                        </View>
+                        <View style={styles.scoreWrap}>
+                          <Text style={styles.scoreNumIdle}>vs</Text>
+                        </View>
+                        <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
+                          <Text style={styles.nameRight}>{rightName}</Text>
+                          <PlayerAvatar
+                            userId={rightUserId}
+                            participantId={rightPid}
+                            size="small"
+                            withColorBorder
+                            borderWidth={3}
+                          />
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             ) : null
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -1302,6 +1617,7 @@ const styles = StyleSheet.create({
   groupHeader: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 8, marginTop: 2 },
   tiebreakOfficialHeaderWrap: { marginBottom: 4 },
   officialListSectionTitle: { marginTop: 18 },
+  swissRoundHeader: { marginBottom: 6 },
   tiebreakRoundSubheader: { marginTop: 12, marginBottom: 2 },
   bracketPhaseSubheader: {
     fontSize: 13,
@@ -1338,6 +1654,12 @@ const styles = StyleSheet.create({
   },
   emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   empty: { color: '#666', fontSize: 15 },
+  byeFooterWrap: { paddingTop: 4, paddingBottom: 8 },
+  byeCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
+  byeLabel: { fontSize: 12, fontWeight: '800', color: '#166534', marginBottom: 6 },
+  byeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  byeName: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  swissRevengeStandaloneWrap: { paddingTop: 8, paddingBottom: 16 },
   card: {
     backgroundColor: '#fafafa',
     borderWidth: 1,

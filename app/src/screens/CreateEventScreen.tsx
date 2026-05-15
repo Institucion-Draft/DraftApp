@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Switch,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,6 +22,13 @@ import { getEventTypeLabel } from '../lib/labels';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
+
+type CompetitionFormat = 'round_robin' | 'swiss';
+
+const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
+  { value: 'round_robin', label: 'Todos contra todos' },
+  { value: 'swiss', label: 'Suizo' },
+];
 
 const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
@@ -48,6 +56,10 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [eventType, setEventType] = useState<EventType>('draft');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
+  /** Solo suizo: ON = topcut_format bo3, OFF = bo1. */
+  const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
+  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
   const [cubeId, setCubeId] = useState<string | null>(null);
@@ -87,6 +99,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const cubeLabel = useMemo(() => cubes.find((c) => c.id === cubeId)?.name ?? 'Sin definir', [cubeId, cubes]);
   const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
   const typeLabel = EVENT_TYPE_OPTIONS.find((t) => t.value === eventType)?.label ?? eventType;
+  const competitionFormatLabel =
+    COMPETITION_FORMAT_OPTIONS.find((f) => f.value === competitionFormat)?.label ?? competitionFormat;
 
   const validate = (): string | null => {
     const n = name.trim();
@@ -101,19 +115,23 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     if (!user?.id) return Alert.alert('Error', 'No hay sesión activa.');
 
     setSubmitting(true);
-    const { data, error } = await supabase
-      .from('draft_events')
-      .insert({
-        workspace_id: workspaceId,
-        name: name.trim(),
-        event_type: eventType,
-        scheduled_for: scheduledFor.toISOString(),
-        cube_id: cubeId,
-        venue_id: venueId,
-        notes: notes.trim() || null,
-        created_by: user.id,
-        status: 'scheduled',
-      })
+    const insertRow: Record<string, unknown> = {
+      workspace_id: workspaceId,
+      name: name.trim(),
+      event_type: eventType,
+      competition_format: competitionFormat,
+      scheduled_for: scheduledFor.toISOString(),
+      cube_id: cubeId,
+      venue_id: venueId,
+      notes: notes.trim() || null,
+      created_by: user.id,
+      status: 'scheduled',
+      turn_tracking_enabled: turnTrackingEnabled,
+    };
+    if (competitionFormat === 'swiss') {
+      insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+    }
+    const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
       .maybeSingle();
     setSubmitting(false);
@@ -132,6 +150,16 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         id: opt.value,
         label: opt.label,
         onPress: () => setEventType(opt.value),
+      }))
+    );
+
+  const openCompetitionFormatPicker = () =>
+    pickFromOptions(
+      'Formato de competición',
+      COMPETITION_FORMAT_OPTIONS.map((opt) => ({
+        id: opt.value,
+        label: opt.label,
+        onPress: () => setCompetitionFormat(opt.value),
       }))
     );
 
@@ -192,6 +220,23 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       <TouchableOpacity style={styles.pickerBtn} onPress={openEventTypePicker}>
         <Text style={styles.pickerTxt}>{typeLabel}</Text>
       </TouchableOpacity>
+
+      <Text style={styles.label}>Formato de competición</Text>
+      <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
+        <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
+      </TouchableOpacity>
+
+      {competitionFormat === 'swiss' ? (
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
+          <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />
+        </View>
+      ) : null}
+
+      <View style={styles.switchRow}>
+        <Text style={styles.switchLabel}>Sistema de turnos con animaciones</Text>
+        <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
+      </View>
 
       <Text style={styles.label}>Fecha y hora</Text>
       <TouchableOpacity style={styles.pickerBtn} onPress={openDatePicker}>
@@ -275,4 +320,13 @@ const styles = StyleSheet.create({
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
   primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
   primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 16,
+    paddingVertical: 4,
+  },
+  switchLabel: { flex: 1, fontSize: 15, color: '#111', fontWeight: '500', marginRight: 12 },
 });

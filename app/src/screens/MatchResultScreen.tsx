@@ -56,6 +56,17 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
   return Array.isArray(x) ? (x[0] ?? null) : x;
 }
 
+/** Alineado con `public.topcut_wins_needed` (migración 0039). */
+function topcutWinsNeededClient(
+  format: string | null | undefined,
+  phase: 'semi' | 'final' | 'third_place'
+): number {
+  const f = format ?? 'bo3';
+  if (f === 'bo1') return 1;
+  if (f === 'sf_bo1_f_bo3') return phase === 'semi' ? 1 : 2;
+  return 2;
+}
+
 export default function MatchResultScreen({ route, navigation }: Props) {
   const { matchId } = route.params;
   const [loading, setLoading] = useState(true);
@@ -66,12 +77,13 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [winsA, setWinsA] = useState(0);
   const [winsB, setWinsB] = useState(0);
   const [completedPairingMatchCount, setCompletedPairingMatchCount] = useState(0);
-  const [tiebreakCompletedCount, setTiebreakCompletedCount] = useState(0);
   const [tiebreakWinsA, setTiebreakWinsA] = useState(0);
   const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
   const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  /** Solo mata-mata suizo bracket: victorias necesarias en la llave; null si no aplica. */
+  const [bracketTiebreakWinsNeeded, setBracketTiebreakWinsNeeded] = useState<number | null>(null);
   const firstRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -87,6 +99,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     }
     const m = mRes.data as MatchRow;
     setMatch(m);
+    setBracketTiebreakWinsNeeded(null);
 
     const pRes = await supabase
       .from('pairings')
@@ -105,7 +118,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setSuperCupWinnerName(null);
     setRevengeCupWinnerName(null);
 
-    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, tiebreakCompletedRes, superCupWinnerRes, revengeCupWinnerRes, eventFlagsRes] =
+    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, superCupWinnerRes, revengeCupWinnerRes, eventFlagsRes, tiebreakGroupRes] =
       await Promise.all([
       supabase
         .from('event_participants')
@@ -140,12 +153,6 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         .select('id', { count: 'exact', head: true })
         .eq('pairing_id', p.id)
         .eq('status', 'completed'),
-      supabase
-        .from('matches')
-        .select('id', { count: 'exact', head: true })
-        .eq('pairing_id', p.id)
-        .eq('status', 'completed')
-        .eq('match_type', 'tiebreak'),
       p.super_cup_winner_participant_id
         ? supabase
             .from('event_participants')
@@ -174,8 +181,16 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled')
+        .select('turn_tracking_enabled, topcut_format')
         .eq('id', p.event_id)
+        .maybeSingle(),
+      supabase
+        .from('event_tiebreak_groups')
+        .select('id, group_type, group_origin')
+        .eq('event_id', p.event_id)
+        .in('status', ['active', 'resolved'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle(),
     ]);
     if (
@@ -183,10 +198,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       winsRes.error ||
       tiebreakWinsRes.error ||
       completedCountRes.error ||
-      tiebreakCompletedRes.error ||
       superCupWinnerRes.error ||
       revengeCupWinnerRes.error ||
-      eventFlagsRes.error
+      eventFlagsRes.error ||
+      tiebreakGroupRes.error
     ) {
       Alert.alert('Error', 'No se pudo cargar el estado del resultado.');
       setLoading(false);
@@ -214,10 +229,47 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setSuperCupWinnerName(superWinnerUser?.display_name ?? null);
     setRevengeCupWinnerName(revengeWinnerUser?.display_name ?? null);
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
-    setTiebreakCompletedCount(tiebreakCompletedRes.count ?? 0);
     setTurnTrackingEnabled(
       !!(eventFlagsRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled
     );
+
+    const tfRaw = (eventFlagsRes.data as { topcut_format?: string | null } | null)?.topcut_format;
+    const tf = tfRaw === 'bo1' || tfRaw === 'sf_bo1_f_bo3' || tfRaw === 'bo3' ? tfRaw : 'bo3';
+    let bracketWN: number | null = null;
+    if (m.match_type === 'tiebreak') {
+      const tgd = tiebreakGroupRes.data as {
+        id: string;
+        group_type: string;
+        group_origin: string | null;
+      } | null;
+      if (tgd?.group_type === 'bracket' && tgd.group_origin === 'swiss_topcut') {
+        const bmRes = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
+          .eq('group_id', tgd.id);
+        if (!bmRes.error && bmRes.data) {
+          const rows = bmRes.data as {
+            bracket_phase: 'semi' | 'final' | 'third_place';
+            pairing_id: string | null;
+            participant_a_id: string;
+            participant_b_id: string;
+          }[];
+          const row =
+            rows.find((r) => r.pairing_id === p.id) ??
+            rows.find(
+              (r) =>
+                (r.participant_a_id === p.participant_a_id && r.participant_b_id === p.participant_b_id) ||
+                (r.participant_a_id === p.participant_b_id && r.participant_b_id === p.participant_a_id)
+            ) ??
+            null;
+          if (row) {
+            bracketWN = topcutWinsNeededClient(tf, row.bracket_phase);
+          }
+        }
+      }
+    }
+    setBracketTiebreakWinsNeeded(bracketWN);
+
     setLoading(false);
   }, [matchId]);
 
@@ -255,16 +307,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const winnerName = winnerIsA ? aName : winnerIsB ? bName : 'Sin definir';
   const rematchLabel =
     match.match_type === 'tiebreak'
-      ? tiebreakCompletedCount >= 2
+      ? tiebreakWinsA >= 1 && tiebreakWinsB >= 1
         ? 'Jugar el bueno'
         : 'Jugar la vuelta'
       : match.match_type === 'revenge'
         ? 'Otra venganza'
-        : pairing.official_winner_participant_id
-          ? 'Venganza'
-          : completedPairingMatchCount >= 2
-            ? 'Jugar el bueno'
-            : 'Jugar la vuelta';
+        : completedPairingMatchCount >= 2
+          ? 'Jugar el bueno'
+          : 'Jugar la vuelta';
   const durationMs =
     match.ended_at != null
       ? new Date(match.ended_at).getTime() - new Date(match.started_at).getTime()
@@ -272,7 +322,18 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const durSec = Math.max(0, Math.floor(durationMs / 1000));
   const durMm = String(Math.floor(durSec / 60)).padStart(2, '0');
   const durSs = String(durSec % 60).padStart(2, '0');
-  const showRematchBtn = match.match_type !== 'tiebreak';
+  const officialBo3StillOpen =
+    (match.match_type === 'draft' || match.match_type === 'final') &&
+    pairing.official_winner_participant_id == null &&
+    winsA < 2 &&
+    winsB < 2;
+  const bracketTiebreakSeriesStillOpen =
+    match.match_type === 'tiebreak' &&
+    bracketTiebreakWinsNeeded != null &&
+    Math.max(tiebreakWinsA, tiebreakWinsB) < bracketTiebreakWinsNeeded;
+  const showRematchBtn =
+    bracketTiebreakSeriesStillOpen ||
+    (match.match_type !== 'tiebreak' && (match.match_type === 'revenge' || officialBo3StillOpen));
 
   const isOfficialOpen =
     (match.match_type === 'draft' || match.match_type === 'final') && winsA < 2 && winsB < 2;
