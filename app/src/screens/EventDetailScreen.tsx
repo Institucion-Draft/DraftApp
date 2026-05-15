@@ -129,6 +129,14 @@ function formatNamesList(names: string[]): string {
   return `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}`;
 }
 
+function isBuenosAiresSameCalendarDay(scheduledFor: string, when: Date = new Date()): boolean {
+  const dayA = new Date(scheduledFor).toLocaleDateString('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  const dayB = when.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  return dayA === dayB;
+}
+
 export default function EventDetailScreen({ route, navigation }: Props) {
   const isFocused = useIsFocused();
   const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
@@ -839,6 +847,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     prodeCVoteCount != null &&
     prodeCVoteCount >= participantCount;
 
+  const showDiaryBlock =
+    event.status !== 'cancelled' && (myParticipantId != null || isOrganizer);
+  const diaryNavigateAllowed =
+    showDiaryBlock &&
+    (isOrganizer ||
+      (myParticipantId != null &&
+        (event.status === 'completed' ||
+          event.status === 'drafting' ||
+          event.status === 'playing' ||
+          isBuenosAiresSameCalendarDay(event.scheduled_for))));
+
   const goEnfrentamientos = () => {
     if (myParticipantId && !hasDeclaredColors && playingOrDone) {
       navigation.navigate('EventCheckIn', { eventId: event.id, returnTo: 'EventDetail' });
@@ -1238,15 +1257,21 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      <View style={[styles.block, styles.blockLast]}>
-        <TouchableOpacity
-          style={styles.placeholderBtn}
-          onPress={() => Alert.alert('Próximamente', 'Bitácora digital llegará en una próxima versión.')}
-        >
-          <Text style={styles.placeholderTxt}>Bitácora digital</Text>
-          <Text style={styles.placeholderSub}>Próximamente</Text>
-        </TouchableOpacity>
-      </View>
+      {showDiaryBlock ? (
+        <View style={[styles.block, styles.blockLast]}>
+          <Text style={styles.blockTitle}>Bitácora digital</Text>
+          {diaryNavigateAllowed ? (
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => navigation.navigate('EventDiary', { eventId: event.id })}
+            >
+              <Text style={styles.primaryBtnTxt}>Bitácora digital</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.muted}>Bitácora digital (próximamente)</Text>
+          )}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
