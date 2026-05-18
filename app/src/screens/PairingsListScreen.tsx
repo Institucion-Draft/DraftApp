@@ -135,6 +135,7 @@ type RevengeItemView = {
   liveScoreB: number | null;
   mine: boolean;
   inProgressMatchStartedAt: string | null;
+  activityAt: string;
 };
 
 type RevengeGroupView = {
@@ -143,9 +144,13 @@ type RevengeGroupView = {
   bName: string;
   aUserId: string;
   bUserId: string;
+  participantAId: string;
+  participantBId: string;
   winsA: number;
   winsB: number;
   items: RevengeItemView[];
+  lastActivityAt: string;
+  mine: boolean;
 };
 
 type SwissRevengeStandaloneRow = {
@@ -501,9 +506,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       }
       const pa = pMap.get(pairing.participant_a_id);
       const pb = pMap.get(pairing.participant_b_id);
-      if (competitionFormat === 'swiss' && currentUserId) {
-        if (pa?.user_id !== currentUserId && pb?.user_id !== currentUserId) continue;
-      }
       const ua = relationOne(pa?.users);
       const ub = relationOne(pb?.users);
       const aName = ua?.display_name || ua?.username || 'Jugador A';
@@ -543,6 +545,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         liveScoreB,
         mine,
         inProgressMatchStartedAt: m.status === 'in_progress' ? m.started_at : null,
+        activityAt: m.started_at ?? '',
       });
     }
     revengeMapped.sort((x, y) => {
@@ -566,17 +569,25 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         existing.items.push(item);
         if (item.winnerName === item.aName) existing.winsA += 1;
         if (item.winnerName === item.bName) existing.winsB += 1;
+        if (item.activityAt > existing.lastActivityAt) existing.lastActivityAt = item.activityAt;
         continue;
       }
+      const lastActivityAt = revengeMapped
+        .filter((x) => x.pairingId === item.pairingId)
+        .reduce((max, x) => (x.activityAt > max ? x.activityAt : max), item.activityAt);
       const next: RevengeGroupView = {
         pairingId: item.pairingId,
         aName: item.aName,
         bName: item.bName,
         aUserId: item.aUserId,
         bUserId: item.bUserId,
+        participantAId: item.participantAId,
+        participantBId: item.participantBId,
         winsA: item.winnerName === item.aName ? 1 : 0,
         winsB: item.winnerName === item.bName ? 1 : 0,
         items: [item],
+        lastActivityAt,
+        mine: item.mine,
       };
       groupByPairingTemp.set(item.pairingId, next);
       revengeGroupsTemp.push(next);
@@ -977,11 +988,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const liveRevengeItems = revengeItems
     .filter((item) => item.status === 'in_progress')
     .filter((item) => competitionFormat !== 'swiss' || item.mine)
-    .sort((x, y) => {
-      if (x.mine && !y.mine) return -1;
-      if (!x.mine && y.mine) return 1;
-      return 0;
-    });
+    .sort((x, y) => y.activityAt.localeCompare(x.activityAt));
   const revengeGroups: RevengeGroupView[] = [];
   const groupByPairing = new Map<string, RevengeGroupView>();
   for (const item of revengeItems) {
@@ -991,28 +998,55 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       existing.items.push(item);
       if (item.winnerName === item.aName) existing.winsA += 1;
       if (item.winnerName === item.bName) existing.winsB += 1;
+      if (item.activityAt > existing.lastActivityAt) existing.lastActivityAt = item.activityAt;
       continue;
     }
+    const lastActivityAt = revengeItems
+      .filter((x) => x.pairingId === item.pairingId)
+      .reduce((max, x) => (x.activityAt > max ? x.activityAt : max), item.activityAt);
     const next: RevengeGroupView = {
       pairingId: item.pairingId,
       aName: item.aName,
       bName: item.bName,
       aUserId: item.aUserId,
       bUserId: item.bUserId,
+      participantAId: item.participantAId,
+      participantBId: item.participantBId,
       winsA: item.winnerName === item.aName ? 1 : 0,
       winsB: item.winnerName === item.bName ? 1 : 0,
       items: [item],
+      lastActivityAt,
+      mine: item.mine,
     };
     groupByPairing.set(item.pairingId, next);
     revengeGroups.push(next);
   }
-  revengeGroups.sort((x, y) => {
-    const xMine = !!myUserId && (x.aUserId === myUserId || x.bUserId === myUserId);
-    const yMine = !!myUserId && (y.aUserId === myUserId || y.bUserId === myUserId);
-    if (xMine && !yMine) return -1;
-    if (!xMine && yMine) return 1;
-    return 0;
-  });
+  const myRevengeGroups =
+    competitionFormat === 'swiss'
+      ? revengeGroups.filter(
+          (g) => !!myUserId && (g.aUserId === myUserId || g.bUserId === myUserId)
+        )
+      : revengeGroups;
+  const otherLiveRevengeItems =
+    competitionFormat === 'swiss'
+      ? revengeItems
+          .filter((item) => item.status === 'in_progress' && !item.mine)
+          .sort((x, y) => y.activityAt.localeCompare(x.activityAt))
+      : [];
+  const otherRevengeGroups =
+    competitionFormat === 'swiss'
+      ? revengeGroups
+          .filter((g) => !myUserId || (g.aUserId !== myUserId && g.bUserId !== myUserId))
+          .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
+      : [];
+  const hasOtherSwissRevenge =
+    competitionFormat === 'swiss' &&
+    (otherRevengeGroups.length > 0 || otherLiveRevengeItems.length > 0);
+  const revengeListEmpty =
+    myRevengeGroups.length === 0 &&
+    liveRevengeItems.length === 0 &&
+    swissRevengeStandalone.length === 0 &&
+    !hasOtherSwissRevenge;
 
   const tiebreakCardsTotal =
     tiebreakOfficialSection?.rounds.reduce((sum, b) => sum + b.items.length, 0) ?? 0;
@@ -1388,21 +1422,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         />
       ) : (
         <FlatList
-          data={revengeGroups}
+          data={myRevengeGroups}
           keyExtractor={(it) => it.pairingId}
-          contentContainerStyle={
-            revengeGroups.length === 0 &&
-            liveRevengeItems.length === 0 &&
-            swissRevengeStandalone.length === 0
-              ? styles.emptyWrap
-              : styles.listWrap
-          }
+          contentContainerStyle={revengeListEmpty ? styles.emptyWrap : styles.listWrap}
           ListEmptyComponent={
-            revengeGroups.length === 0 &&
-            liveRevengeItems.length === 0 &&
-            swissRevengeStandalone.length === 0 ? (
-              <Text style={styles.empty}>Todavía no hay venganzas.</Text>
-            ) : null
+            revengeListEmpty ? <Text style={styles.empty}>Todavía no hay venganzas.</Text> : null
           }
           ListHeaderComponent={
             liveRevengeItems.length > 0 ? (
@@ -1472,7 +1496,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             ) : null
           }
           ListFooterComponent={
-            swissRevengeStandalone.length > 0 ? (
+            swissRevengeStandalone.length > 0 || hasOtherSwissRevenge ? (
               <View style={styles.swissRevengeStandaloneWrap}>
                 {swissRevengeStandalone.map((row) => {
                   const swapSides = !!myUserId && row.bUserId === myUserId;
@@ -1519,6 +1543,122 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     </TouchableOpacity>
                   );
                 })}
+                {hasOtherSwissRevenge ? (
+                  <>
+                    <Text style={[styles.groupHeader, styles.otherRevengeSectionTitle]}>
+                      Otras venganzas en el evento
+                    </Text>
+                    {otherLiveRevengeItems.map((item) => (
+                      <TouchableOpacity
+                        key={item.matchId}
+                        style={styles.card}
+                        onPress={() =>
+                          navigation.navigate('PairingDetail', {
+                            pairingId: item.pairingId,
+                            fromTab: 'revenge',
+                          })
+                        }
+                      >
+                        <View style={styles.compactRow}>
+                          <View style={styles.inlinePlayer}>
+                            <PlayerAvatar
+                              userId={item.aUserId}
+                              participantId={item.participantAId}
+                              size="small"
+                              withColorBorder
+                              borderWidth={3}
+                            />
+                            <Text style={styles.name}>{item.aName}</Text>
+                          </View>
+                          <View style={styles.scoreWrap}>
+                            <Text style={styles.scoreNum}>
+                              {item.liveScoreA ?? 20} <Text style={styles.vs}>vs</Text> {item.liveScoreB ?? 20}
+                            </Text>
+                          </View>
+                          <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
+                            <Text style={styles.nameRight}>{item.bName}</Text>
+                            <PlayerAvatar
+                              userId={item.bUserId}
+                              participantId={item.participantBId}
+                              size="small"
+                              withColorBorder
+                              borderWidth={3}
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.footer}>
+                          <View style={styles.footerLeft}>
+                            {item.inProgressMatchStartedAt ? (
+                              <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+                            ) : null}
+                          </View>
+                          <View style={styles.footerCenter}>
+                            <Text style={styles.liveCentered}>
+                              Venganza N°{item.revengeOrder} · ● EN VIVO
+                            </Text>
+                          </View>
+                          <View style={styles.footerRight} />
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                    {otherRevengeGroups.map((group) => (
+                      <View key={group.pairingId} style={styles.groupWrap}>
+                        <Text style={styles.groupHeader}>
+                          {shortName(group.aName)} {group.winsA} - {group.winsB} {shortName(group.bName)}
+                        </Text>
+                        {group.items.map((item) => (
+                          <TouchableOpacity
+                            key={item.matchId}
+                            style={styles.card}
+                            onPress={() =>
+                              navigation.navigate('PairingDetail', {
+                                pairingId: item.pairingId,
+                                fromTab: 'revenge',
+                              })
+                            }
+                          >
+                            <View style={styles.compactRow}>
+                              <View style={styles.inlinePlayer}>
+                                <PlayerAvatar
+                                  userId={item.aUserId}
+                                  participantId={item.participantAId}
+                                  size="small"
+                                  withColorBorder
+                                  borderWidth={3}
+                                />
+                                <Text style={styles.name}>{item.aName}</Text>
+                              </View>
+                              <View style={styles.scoreWrap}>
+                                <Text style={styles.scoreNumIdle}>vs</Text>
+                              </View>
+                              <View style={[styles.inlinePlayer, styles.inlinePlayerRight]}>
+                                <Text style={styles.nameRight}>{item.bName}</Text>
+                                <PlayerAvatar
+                                  userId={item.bUserId}
+                                  participantId={item.participantBId}
+                                  size="small"
+                                  withColorBorder
+                                  borderWidth={3}
+                                />
+                              </View>
+                            </View>
+                            <View style={styles.footer}>
+                              {item.winnerName ? (
+                                <Text style={styles.winnerTxt}>
+                                  Venganza N°{item.revengeOrder} - Ganó {item.winnerName}
+                                </Text>
+                              ) : (
+                                <Text style={styles.status}>
+                                  Venganza N°{item.revengeOrder} · Completada
+                                </Text>
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ))}
+                  </>
+                ) : null}
               </View>
             ) : null
           }
@@ -1660,6 +1800,7 @@ const styles = StyleSheet.create({
   byeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   byeName: { fontSize: 14, fontWeight: '700', color: '#111827' },
   swissRevengeStandaloneWrap: { paddingTop: 8, paddingBottom: 16 },
+  otherRevengeSectionTitle: { marginTop: 16 },
   card: {
     backgroundColor: '#fafafa',
     borderWidth: 1,
