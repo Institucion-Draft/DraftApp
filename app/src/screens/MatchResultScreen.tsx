@@ -24,6 +24,7 @@ type PairingRow = {
   event_id: string;
   participant_a_id: string;
   participant_b_id: string;
+  swiss_round: number | null;
   official_winner_participant_id: string | null;
   tiebreak_winner_participant_id: string | null;
   super_cup_winner_participant_id: string | null;
@@ -82,6 +83,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   /** Solo mata-mata suizo bracket: victorias necesarias en la llave; null si no aplica. */
   const [bracketTiebreakWinsNeeded, setBracketTiebreakWinsNeeded] = useState<number | null>(null);
   const firstRef = useRef(true);
@@ -104,7 +107,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const pRes = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, swiss_round, official_winner_participant_id, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
       )
       .eq('id', m.pairing_id)
       .maybeSingle();
@@ -181,7 +184,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled, topcut_format')
+        .select('turn_tracking_enabled, topcut_format, competition_format, current_swiss_round')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -229,11 +232,20 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setSuperCupWinnerName(superWinnerUser?.display_name ?? null);
     setRevengeCupWinnerName(revengeWinnerUser?.display_name ?? null);
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
-    setTurnTrackingEnabled(
-      !!(eventFlagsRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled
-    );
+    const eventFlags = eventFlagsRes.data as {
+      turn_tracking_enabled?: boolean | null;
+      topcut_format?: string | null;
+      competition_format?: string | null;
+      current_swiss_round?: number | string | null;
+    } | null;
+    setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
+    const fmt = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    setCompetitionFormat(fmt);
+    const csrRaw = eventFlags?.current_swiss_round;
+    const csrNum = csrRaw != null && csrRaw !== '' ? Number(csrRaw) : null;
+    setCurrentSwissRound(csrNum != null && Number.isFinite(csrNum) ? csrNum : null);
 
-    const tfRaw = (eventFlagsRes.data as { topcut_format?: string | null } | null)?.topcut_format;
+    const tfRaw = eventFlags?.topcut_format;
     const tf = tfRaw === 'bo1' || tfRaw === 'sf_bo1_f_bo3' || tfRaw === 'bo3' ? tfRaw : 'bo3';
     let bracketWN: number | null = null;
     if (m.match_type === 'tiebreak') {
@@ -375,9 +387,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const type =
       match.match_type === 'tiebreak'
         ? 'tiebreak'
-        : pairing.official_winner_participant_id
+        : competitionFormat === 'swiss' &&
+            (pairing.swiss_round == null ||
+              currentSwissRound == null ||
+              pairing.swiss_round !== currentSwissRound)
           ? 'revenge'
-          : 'draft';
+          : pairing.official_winner_participant_id
+            ? 'revenge'
+            : 'draft';
     const insRes = await supabase
       .from('matches')
       .insert({ pairing_id: pairing.id, match_number: number, match_type: type, started_at: new Date().toISOString() })

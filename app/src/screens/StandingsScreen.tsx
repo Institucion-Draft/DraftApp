@@ -628,6 +628,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   /** Suizo completado: nombre + campeón/campeona (sin otras estadísticas en el banner ni en la meta junto al banner). */
   const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
+  const [eventChampionUserId, setEventChampionUserId] = useState<string | null>(null);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -693,6 +694,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissTopcutBracketView(null);
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
+      setEventChampionUserId(null);
       return;
     }
 
@@ -727,6 +729,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissTopcutBracketView(null);
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
+      setEventChampionUserId(null);
       return;
     }
     const colorMap: Record<string, MtgColor[]> = {};
@@ -793,6 +796,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissTopcutBracketView(null);
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
+      setEventChampionUserId(null);
       return;
     }
 
@@ -825,12 +829,18 @@ export default function StandingsScreen({ route, navigation }: Props) {
     }
     setSwissChampionName(swissChampName);
     setSwissChampionHonorific(swissChampHonorific);
+    setEventChampionUserId(
+      championUserId != null && String(championUserId).trim() !== '' ? String(championUserId) : null
+    );
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
       (pr: any) => pr.official_winner_participant_id != null
     ).length;
     let torneoLine: string | null = null;
-    if (eventStatus === 'playing' || eventStatus === 'completed') {
+    if (
+      fmt !== 'swiss' &&
+      (eventStatus === 'playing' || eventStatus === 'completed')
+    ) {
       const frac = totalPairings > 0 ? resolvedPairings / totalPairings : 0;
       torneoLine = `Completitud: ${formatPctOneDecimal(frac)} (${resolvedPairings}/${totalPairings})`;
     }
@@ -1350,54 +1360,66 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const compactOuter = Math.max(12, Math.min(20, compactFitMax));
     const compactScale = compactOuter / compactNativeOuter;
 
-    const renderOneAvatar = (pl: (typeof players)[number]) => (
-      <TouchableOpacity
-        key={pl.participantId}
-        activeOpacity={0.75}
-        style={[styles.podiumPlayerStack, styles.podiumAvatarCol]}
-        onPress={() =>
-          navigation.navigate('PlayerProfileInEvent', {
-            eventId,
-            participantId: pl.participantId,
-            from: 'Standings',
-          })
-        }
-      >
-        {isCompactStep ? (
-          <View
-            style={{
-              width: compactOuter,
-              height: compactOuter,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <View style={{ transform: [{ scale: compactScale }] }}>
-              <PlayerAvatar
-                userId={pl.avatarUserId}
-                participantId={pl.participantId}
-                size="tiny"
-                withColorBorder
-                borderWidth={compactBorder}
-              />
+    const renderOneAvatar = (pl: (typeof players)[number]) => {
+      const isEventChampion =
+        rank === 1 &&
+        eventChampionUserId != null &&
+        String(pl.userId) === String(eventChampionUserId);
+
+      return (
+        <TouchableOpacity
+          key={pl.participantId}
+          activeOpacity={0.75}
+          style={[styles.podiumPlayerStack, styles.podiumAvatarCol]}
+          onPress={() =>
+            navigation.navigate('PlayerProfileInEvent', {
+              eventId,
+              participantId: pl.participantId,
+              from: 'Standings',
+            })
+          }
+        >
+          {isEventChampion ? (
+            <Text style={styles.podiumCrownMark} accessibilityLabel="Campeón del evento">
+              👑
+            </Text>
+          ) : null}
+          {isCompactStep ? (
+            <View
+              style={{
+                width: compactOuter,
+                height: compactOuter,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <View style={{ transform: [{ scale: compactScale }] }}>
+                <PlayerAvatar
+                  userId={pl.avatarUserId}
+                  participantId={pl.participantId}
+                  size="tiny"
+                  withColorBorder
+                  borderWidth={compactBorder}
+                />
+              </View>
             </View>
-          </View>
-        ) : (
-          <PlayerAvatar
-            userId={pl.avatarUserId}
-            participantId={pl.participantId}
-            size={avatarSize}
-            withColorBorder
-            borderWidth={avatarBorder}
-          />
-        )}
-        {(pl.onStool === true || stoolId === pl.participantId) ? (
-          <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
-            🪑
-          </Text>
-        ) : null}
-      </TouchableOpacity>
-    );
+          ) : (
+            <PlayerAvatar
+              userId={pl.avatarUserId}
+              participantId={pl.participantId}
+              size={avatarSize}
+              withColorBorder
+              borderWidth={avatarBorder}
+            />
+          )}
+          {(pl.onStool === true || stoolId === pl.participantId) ? (
+            <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
+              🪑
+            </Text>
+          ) : null}
+        </TouchableOpacity>
+      );
+    };
 
     return (
       <View key={rank} style={styles.podiumCol}>
@@ -1440,13 +1462,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
         </View>
       ) : null}
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      {tab === 'official' && swissChampionName && swissChampionHonorific ? (
-        <View style={styles.swissChampionBanner}>
-          <Text style={styles.swissChampionBannerText}>
-            {swissChampionName} {swissChampionHonorific}
-          </Text>
-        </View>
-      ) : null}
       {podiumBlock}
       {revengeRows.length > 0 ? (
         <View style={styles.tabsRow}>
@@ -1727,6 +1742,7 @@ const styles = StyleSheet.create({
   },
   podiumPlayerStack: { flexShrink: 0, alignItems: 'center' },
   podiumAvatarCol: { flexDirection: 'column', alignItems: 'center' },
+  podiumCrownMark: { fontSize: 14, lineHeight: 16, marginBottom: 2 },
   podiumStoolMark: { fontSize: 12, lineHeight: 14, marginTop: 2 },
   podiumBaseBlock: {
     width: '100%',

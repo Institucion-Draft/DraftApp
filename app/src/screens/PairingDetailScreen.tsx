@@ -942,6 +942,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (isTiebreakPending && (isBracketGroup || pairing.tiebreak_winner_participant_id == null)) {
       matchType = 'tiebreak';
     } else if (
+      competitionFormat === 'swiss' &&
+      (pairing.swiss_round == null ||
+        currentSwissRound == null ||
+        pairing.swiss_round !== currentSwissRound)
+    ) {
+      matchType = 'revenge';
+    } else if (
       !pairing.official_winner_participant_id &&
       (competitionFormat !== 'swiss' ||
         (pairing.swiss_round != null &&
