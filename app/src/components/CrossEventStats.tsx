@@ -77,6 +77,23 @@ type Streaks = {
   longest_loss_streak: number;
 };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function pct(won: number, lost: number): number | null {
+  const total = won + lost;
+  return total > 0 ? Math.round((won / total) * 100) : null;
+}
+
+function CellStat({ won, lost }: { won: number; lost: number }) {
+  const p = pct(won, lost);
+  return (
+    <View style={styles.h2hCell}>
+      <Text style={styles.h2hCellRecord}>{won}G-{lost}P</Text>
+      {p !== null && <Text style={styles.h2hCellPct}>{p}%</Text>}
+    </View>
+  );
+}
+
 // ── Componente ────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -204,6 +221,11 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
   const matchWinPct = totalMatches > 0
     ? Math.round((aggStats!.draft_matches_won / totalMatches) * 100) : null;
 
+  // Colores ordenados por WR% para la sección Win Rate
+  const colorsByWr = [...colorStats]
+    .filter(c => c.pairings_played > 0 && c.bo3_winrate !== null)
+    .sort((a, b) => (b.bo3_winrate ?? 0) - (a.bo3_winrate ?? 0));
+
   return (
     <>
       {/* ── Estadísticas ───────────────────────────────────────────────── */}
@@ -241,9 +263,22 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                 <ManaSymbol color={c.color} size={MANA_SIZE_LG} />
                 <Text style={styles.colorLabel}>{c.color}</Text>
                 <Text style={styles.colorPct}>{c.percentage}%</Text>
-                {c.bo3_winrate !== null && (
-                  <Text style={styles.colorWr}>{c.bo3_winrate}% WR</Text>
-                )}
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* ── Win Rate por color ─────────────────────────────────────────── */}
+      {colorsByWr.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Win Rate</Text>
+          <View style={styles.colorsRow}>
+            {colorsByWr.map(c => (
+              <View key={c.color} style={styles.colorItem}>
+                <ManaSymbol color={c.color} size={MANA_SIZE_LG} />
+                <Text style={styles.colorLabel}>{c.color}</Text>
+                <Text style={styles.colorWr}>{c.bo3_winrate}%</Text>
               </View>
             ))}
           </View>
@@ -278,50 +313,56 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       {h2h.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Historial vs rivales</Text>
-          {h2h.map(h => {
-            const bo3Total   = h.pairings_won + h.pairings_lost;
-            const draftTotal = h.draft_matches_won + h.draft_matches_lost;
-            const revTotal   = h.revenge_matches_won + h.revenge_matches_lost;
-            const bo1Total   = h.total_matches_won + h.total_matches_lost;
 
-            const bo3Pct   = bo3Total   > 0 ? Math.round(h.pairings_won        / bo3Total   * 100) : null;
-            const draftPct = draftTotal > 0 ? Math.round(h.draft_matches_won   / draftTotal * 100) : null;
-            const revPct   = revTotal   > 0 ? Math.round(h.revenge_matches_won / revTotal   * 100) : null;
-            const bo1Pct   = bo1Total   > 0 ? Math.round(h.total_matches_won   / bo1Total   * 100) : null;
-
-            const rows: Array<{ label: string; won: number; lost: number; pct: number | null }> = [
-              { label: 'Bo3',      won: h.pairings_won,        lost: h.pairings_lost,        pct: bo3Pct   },
-              { label: 'Draft',    won: h.draft_matches_won,   lost: h.draft_matches_lost,   pct: draftPct },
-              ...(revTotal > 0
-                ? [{ label: 'Venganza', won: h.revenge_matches_won, lost: h.revenge_matches_lost, pct: revPct }]
-                : []),
-              ...(bo1Total > 0
-                ? [{ label: 'Total Bo1', won: h.total_matches_won, lost: h.total_matches_lost, pct: bo1Pct }]
-                : []),
-            ];
-
-            return (
-              <View key={h.opponent_user_id} style={styles.h2hCard}>
-                <View style={styles.h2hPlayerRow}>
-                  <PlayerAvatar
-                    userId={h.opponent_user_id}
-                    size="small"
-                    withColorBorder={false}
-                    outsideEvent
-                    style={styles.h2hAvatar}
-                  />
-                  <Text style={styles.h2hName} numberOfLines={1}>{h.opponent_name}</Text>
-                </View>
-                {rows.map(row => (
-                  <View key={row.label} style={styles.h2hSubRow}>
-                    <Text style={styles.h2hSubLabel}>{row.label}</Text>
-                    <Text style={styles.h2hRecord}>{row.won}G – {row.lost}P</Text>
-                    {row.pct !== null && <Text style={styles.h2hPct}>  {row.pct}%</Text>}
-                  </View>
-                ))}
+          {/* Cabecera de tabla */}
+          <View style={styles.h2hHeaderRow}>
+            <View style={styles.h2hPlayerCol} />
+            {/* Draft: agrupa Bo3 + Bo1 */}
+            <View style={styles.h2hDraftGroup}>
+              <Text style={styles.h2hGroupLabel}>Draft</Text>
+              <View style={styles.h2hGroupSubs}>
+                <Text style={styles.h2hColSub}>Bo3</Text>
+                <Text style={styles.h2hColSub}>Bo1</Text>
               </View>
-            );
-          })}
+            </View>
+            <View style={styles.h2hSingleCol}>
+              <Text style={styles.h2hGroupLabel}>Veng.</Text>
+              <Text style={styles.h2hColSub}>Bo1</Text>
+            </View>
+            <View style={styles.h2hSingleCol}>
+              <Text style={styles.h2hGroupLabel}>Total</Text>
+              <Text style={styles.h2hColSub}>Bo1</Text>
+            </View>
+          </View>
+
+          {/* Filas por rival */}
+          {h2h.map(h => (
+            <View key={h.opponent_user_id} style={styles.h2hRow}>
+              <View style={styles.h2hPlayerCol}>
+                <PlayerAvatar
+                  userId={h.opponent_user_id}
+                  size="small"
+                  withColorBorder={false}
+                  outsideEvent
+                  style={styles.h2hAvatar}
+                />
+                <Text style={styles.h2hName} numberOfLines={1}>{h.opponent_name}</Text>
+              </View>
+              {/* Draft: Bo3 y Bo1 side by side */}
+              <View style={styles.h2hDraftGroup}>
+                <CellStat won={h.pairings_won}      lost={h.pairings_lost}      />
+                <CellStat won={h.draft_matches_won} lost={h.draft_matches_lost} />
+              </View>
+              {/* Venganza */}
+              <View style={styles.h2hSingleCol}>
+                <CellStat won={h.revenge_matches_won} lost={h.revenge_matches_lost} />
+              </View>
+              {/* Total Bo1 */}
+              <View style={styles.h2hSingleCol}>
+                <CellStat won={h.total_matches_won} lost={h.total_matches_lost} />
+              </View>
+            </View>
+          ))}
         </View>
       )}
 
@@ -342,6 +383,10 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
     </>
   );
 }
+
+const H2H_DRAFT_W = 104; // ancho total del grupo Draft (2 × 52)
+const H2H_SUB_W   = 52;  // ancho de cada subcolumna dentro de Draft
+const H2H_SINGLE_W = 56; // ancho de Venganza y Total
 
 const styles = StyleSheet.create({
   loadingBox: { paddingVertical: 32, alignItems: 'center' },
@@ -365,11 +410,15 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 15, color: '#374151' },
   statValue: { fontSize: 15, fontWeight: '600', color: '#111' },
   emptyText: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic' },
+
+  // Colores
   colorsRow: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
   colorItem: { alignItems: 'center', gap: 4 },
   colorLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
   colorPct: { fontSize: 11, color: '#6B7280' },
-  colorWr: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
+  colorWr:  { fontSize: 11, fontWeight: '700', color: '#3B82F6' },
+
+  // Historial drafts
   historyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -382,16 +431,50 @@ const styles = StyleSheet.create({
   historyName: { fontSize: 15, color: '#374151', marginBottom: 4 },
   historyColors: { flexDirection: 'row', gap: 4 },
   historyPlacement: { fontSize: 15, fontWeight: '700', color: '#111' },
-  h2hCard: {
-    paddingVertical: 12,
+
+  // H2H tabla
+  h2hHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingBottom: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB',
   },
-  h2hPlayerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  h2hAvatar: { marginRight: 8 },
-  h2hName: { flex: 1, fontSize: 15, color: '#111', fontWeight: '600' },
-  h2hSubRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2, paddingLeft: 2 },
-  h2hSubLabel: { width: 76, fontSize: 13, color: '#6B7280' },
-  h2hRecord: { fontSize: 13, fontWeight: '600', color: '#111' },
-  h2hPct: { fontSize: 13, color: '#6B7280' },
+  h2hRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  h2hPlayerCol: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  h2hAvatar: { marginRight: 6 },
+  h2hName: { flex: 1, fontSize: 13, color: '#111', fontWeight: '500' },
+
+  // Grupo Draft (Bo3 + Bo1 draft, lado a lado)
+  h2hDraftGroup: {
+    width: H2H_DRAFT_W,
+    alignItems: 'center',
+  },
+  h2hGroupLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  h2hGroupSubs: { flexDirection: 'row', width: H2H_DRAFT_W },
+  h2hColSub: {
+    width: H2H_SUB_W,
+    fontSize: 10,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+
+  // Columna simple (Venganza, Total)
+  h2hSingleCol: { width: H2H_SINGLE_W, alignItems: 'center' },
+
+  // Celda de dato
+  h2hCell: { width: H2H_SUB_W, alignItems: 'center' },
+  h2hCellRecord: { fontSize: 11, fontWeight: '600', color: '#111', textAlign: 'center' },
+  h2hCellPct:    { fontSize: 10, color: '#6B7280', textAlign: 'center' },
 });
