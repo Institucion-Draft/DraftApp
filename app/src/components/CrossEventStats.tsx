@@ -63,6 +63,9 @@ type H2HEntry = {
   total_pairings: number;
   pairings_won: number;
   pairings_lost: number;
+  total_matches: number;
+  matches_won: number;
+  matches_lost: number;
 };
 
 type Streaks = {
@@ -112,7 +115,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           .limit(10),
         supabase
           .from('v_head_to_head_stats')
-          .select('opponent_user_id, total_pairings, pairings_won, pairings_lost')
+          .select('opponent_user_id, total_pairings, pairings_won, pairings_lost, total_matches, matches_won, matches_lost')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .order('total_pairings', { ascending: false }),
@@ -150,6 +153,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       const rawH2H = (h2hRes.data ?? []) as Array<{
         opponent_user_id: string; total_pairings: number;
         pairings_won: number; pairings_lost: number;
+        total_matches: number; matches_won: number; matches_lost: number;
       }>;
       const opponentIds = rawH2H.map(h => h.opponent_user_id);
       let opponentNames: Record<string, string> = {};
@@ -265,28 +269,37 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       {h2h.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Historial vs rivales</Text>
+          {/* Cabecera de tabla */}
+          <View style={styles.h2hHeaderRow}>
+            <View style={styles.h2hPlayerCol} />
+            <Text style={styles.h2hColHeader}>Bo3</Text>
+            <Text style={styles.h2hColHeader}>Bo1</Text>
+          </View>
           {h2h.map(h => {
-            const pct = h.total_pairings > 0
-              ? Math.round((h.pairings_won / h.total_pairings) * 100) : 0;
+            const bo3Total = h.pairings_won + h.pairings_lost;
+            const bo3Pct = bo3Total > 0 ? Math.round((h.pairings_won / bo3Total) * 100) : null;
+            const bo1Total = h.matches_won + h.matches_lost;
+            const bo1Pct = bo1Total > 0 ? Math.round((h.matches_won / bo1Total) * 100) : null;
             return (
               <View key={h.opponent_user_id} style={styles.h2hRow}>
-                <PlayerAvatar
-                  userId={h.opponent_user_id}
-                  size="small"
-                  withColorBorder={false}
-                  outsideEvent
-                  style={styles.h2hAvatar}
-                />
-                <View style={styles.h2hBody}>
+                <View style={styles.h2hPlayerCol}>
+                  <PlayerAvatar
+                    userId={h.opponent_user_id}
+                    size="small"
+                    withColorBorder={false}
+                    outsideEvent
+                    style={styles.h2hAvatar}
+                  />
                   <Text style={styles.h2hName} numberOfLines={1}>{h.opponent_name}</Text>
-                  <Text style={styles.h2hSub}>
-                    {h.total_pairings} {h.total_pairings === 1 ? 'jugada' : 'jugadas'}
-                  </Text>
                 </View>
-                <Text style={styles.h2hRecord}>
-                  {h.pairings_won}G – {h.pairings_lost}P{'  '}
-                  <Text style={styles.h2hPct}>({pct}%)</Text>
-                </Text>
+                <View style={styles.h2hStatCol}>
+                  <Text style={styles.h2hRecord}>{h.pairings_won}G – {h.pairings_lost}P</Text>
+                  {bo3Pct !== null && <Text style={styles.h2hPct}>{bo3Pct}%</Text>}
+                </View>
+                <View style={styles.h2hStatCol}>
+                  <Text style={styles.h2hRecord}>{h.matches_won}G – {h.matches_lost}P</Text>
+                  {bo1Pct !== null && <Text style={styles.h2hPct}>{bo1Pct}%</Text>}
+                </View>
               </View>
             );
           })}
@@ -349,6 +362,21 @@ const styles = StyleSheet.create({
   historyName: { fontSize: 15, color: '#374151', marginBottom: 4 },
   historyColors: { flexDirection: 'row', gap: 4 },
   historyPlacement: { fontSize: 15, fontWeight: '700', color: '#111' },
+  h2hHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  h2hPlayerCol: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  h2hColHeader: {
+    width: 76,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+    textAlign: 'center',
+  },
   h2hRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -356,10 +384,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB',
   },
-  h2hAvatar: { marginRight: 10 },
-  h2hBody: { flex: 1 },
-  h2hName: { fontSize: 15, color: '#111', fontWeight: '500' },
-  h2hSub: { fontSize: 12, color: '#6B7280', marginTop: 1 },
-  h2hRecord: { fontSize: 14, fontWeight: '600', color: '#111' },
-  h2hPct: { fontWeight: '400', color: '#6B7280' },
+  h2hAvatar: { marginRight: 8 },
+  h2hName: { flex: 1, fontSize: 14, color: '#111', fontWeight: '500' },
+  h2hStatCol: { width: 76, alignItems: 'center' },
+  h2hRecord: { fontSize: 13, fontWeight: '600', color: '#111' },
+  h2hPct: { fontSize: 11, color: '#6B7280', marginTop: 1 },
 });
