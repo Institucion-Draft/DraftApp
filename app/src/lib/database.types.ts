@@ -74,15 +74,6 @@ export type Venue = {
 export type DraftEvent = {
   id: string;
   workspace_id: string;
-  name: string;
-  cube_id: string | null;
-  venue_id: string | null;
-  avatar_path: string | null;
-  notes: string | null;
-  scheduled_for: string;
-  draft_started_at: string | null;
-  draft_ended_at: string | null;
-  event_ended_at: string | null;
   status: EventStatus;
   event_type: EventType;
   champion_user_id: string | null;
@@ -145,4 +136,65 @@ export type LifeEvent = {
   occurred_at: string;
   is_undo: boolean;
   undoes_event_id: string | null;
+};
+
+// ── Vistas de estadísticas cross-event ─────────────────────────────────────
+
+export type PlayerWorkspaceStat = {
+  user_id: string;
+  workspace_id: string;
+  pairings_won: number;
+  pairings_lost: number;
+  pairings_pending: number;
+  draft_matches_won: number;
+  draft_matches_lost: number;
+  revenge_matches_won: number;
+  revenge_matches_lost: number;
+  super_cups_won: number;
+  championships: number;
+  events_as_player: number;
+  events_as_ghost: number;
+  avg_match_duration_minutes: number | null;
+};
+
+export type ParticipantEventPlacement = {
+  participant_id: string;
+  event_id: string;
+  user_id: string;
+  workspace_id: string;
+  event_name: string;
+  event_ended_at: string | null;
+  event_status: EventStatus;
+  scheduled_for: string | null;
+  bo3_won: number;
+  bo3_completed: number;
+  matches_won: number;
+  matches_completed: number;
+  placement: number;
+  total_players: number;
+};
+
+export type PlayerColorStat = {
+  user_id: string;
+  workspace_id: string;
+  color: MtgColor;
+  times_played: number;
+  total_color_picks: number;
+  percentage: number;
+};
+
+export type HeadToHeadStat = {
+  user_id: string;
+  opponent_user_id: string;
+  workspace_id: string;
+  total_pairings: number;
+  pairings_won: number;
+  pairings_lost: number;
+};
+
+export type PlayerStreak = {
+  user_id: string;
+  workspace_id: string;
+  longest_win_streak: number;
+  longest_loss_streak: number;
 };

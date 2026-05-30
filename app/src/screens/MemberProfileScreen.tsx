@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import CrossEventStats from '../components/CrossEventStats';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MemberProfile'>;
 
@@ -33,8 +34,7 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
       return;
     }
     const row = userRes.data as { display_name?: string; username?: string } | null;
-    const name = row?.display_name || row?.username || 'Sin nombre';
-    setDisplayName(name);
+    setDisplayName(row?.display_name || row?.username || 'Sin nombre');
     setIsOrganizer(roleRes.data?.role === 'organizer');
     if (roleRes.error && __DEV__) {
       console.error('MemberProfile role', roleRes.error);
@@ -74,6 +74,10 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
           <Text style={styles.badgeTxt}>Organizador</Text>
         </View>
       ) : null}
+
+      <View style={styles.divider} />
+
+      <CrossEventStats userId={userId} workspaceId={workspaceId} />
     </ScrollView>
   );
 }
@@ -93,4 +97,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   badgeTxt: { color: '#1D4ED8', fontSize: 14, fontWeight: '700' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E5E7EB', marginTop: 24 },
 });
