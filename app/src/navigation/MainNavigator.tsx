@@ -1,6 +1,5 @@
 import React from 'react';
 import { Text, Pressable } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import WorkspacesListScreen from '../screens/WorkspacesListScreen';
 import MyProfileScreen from '../screens/MyProfileScreen';
@@ -40,15 +39,14 @@ export type { MainStackParamList } from './mainStackParams';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
-export default function MainNavigator() {
+export default function MainStackNavigator() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: '#fff' },
-        }}
-      >
+    <Stack.Navigator
+      screenOptions={{
+        headerShadowVisible: false,
+        contentStyle: { backgroundColor: '#fff' },
+      }}
+    >
         <Stack.Screen
           name="WorkspacesList"
           component={WorkspacesListScreen}
@@ -155,8 +153,7 @@ export default function MainNavigator() {
         <Stack.Screen name="LifeChart" component={LifeChartScreen} options={{ title: 'Evolución de vida', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="MatchResult" component={MatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Standings" component={StandingsScreen} options={{ title: 'Tabla de posiciones', headerBackTitle: 'Atrás' }} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    </Stack.Navigator>
   );
 }
 

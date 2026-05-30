@@ -1,15 +1,35 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 
-type Screen = 'login' | 'signup';
+export type AuthStackParamList = {
+  Login: undefined;
+  SignUp: undefined;
+};
 
-export default function AuthNavigator() {
-  const [screen, setScreen] = useState<Screen>('login');
+const Stack = createNativeStackNavigator<AuthStackParamList>();
 
-  if (screen === 'login') {
-    return <LoginScreen onNavigateToSignUp={() => setScreen('signup')} />;
-  }
+function LoginRoute({ navigation }: NativeStackScreenProps<AuthStackParamList, 'Login'>) {
+  return <LoginScreen onNavigateToSignUp={() => navigation.navigate('SignUp')} />;
+}
 
-  return <SignUpScreen onNavigateToLogin={() => setScreen('login')} />;
+function SignUpRoute({ navigation }: NativeStackScreenProps<AuthStackParamList, 'SignUp'>) {
+  return <SignUpScreen onNavigateToLogin={() => navigation.navigate('Login')} />;
+}
+
+export default function AuthStackNavigator() {
+  return (
+    <Stack.Navigator
+      initialRouteName="Login"
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: '#ffffff' },
+      }}
+    >
+      <Stack.Screen name="Login" component={LoginRoute} />
+      <Stack.Screen name="SignUp" component={SignUpRoute} />
+    </Stack.Navigator>
+  );
 }
