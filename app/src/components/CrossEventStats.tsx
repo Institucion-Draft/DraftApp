@@ -37,8 +37,8 @@ function ManaSymbol({ color, size = MANA_SIZE_LG }: { color: string; size?: numb
 type AggStats = {
   pairings_won: number;
   pairings_lost: number;
-  draft_matches_won: number;
-  draft_matches_lost: number;
+  total_matches_won: number;
+  total_matches_lost: number;
 };
 
 type ColorStat = {
@@ -116,7 +116,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       const [statsRes, colorsRes, historyRes, h2hRes, streaksRes] = await Promise.all([
         supabase
           .from('v_player_workspace_stats')
-          .select('pairings_won, pairings_lost, draft_matches_won, draft_matches_lost')
+          .select('pairings_won, pairings_lost, total_matches_won, total_matches_lost')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .maybeSingle(),
@@ -217,9 +217,9 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
   const totalPairings = (aggStats?.pairings_won ?? 0) + (aggStats?.pairings_lost ?? 0);
   const pairingWinPct = totalPairings > 0
     ? Math.round((aggStats!.pairings_won / totalPairings) * 100) : null;
-  const totalMatches = (aggStats?.draft_matches_won ?? 0) + (aggStats?.draft_matches_lost ?? 0);
+  const totalMatches = (aggStats?.total_matches_won ?? 0) + (aggStats?.total_matches_lost ?? 0);
   const matchWinPct = totalMatches > 0
-    ? Math.round((aggStats!.draft_matches_won / totalMatches) * 100) : null;
+    ? Math.round((aggStats!.total_matches_won / totalMatches) * 100) : null;
 
   // Colores ordenados por WR% para la sección Win Rate
   const colorsByWr = [...colorStats]
@@ -241,9 +241,9 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
               </Text>
             </View>
             <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Partidas Bo1</Text>
+              <Text style={styles.statLabel}>Partidas totales</Text>
               <Text style={styles.statValue}>
-                {aggStats!.draft_matches_won}G – {aggStats!.draft_matches_lost}P
+                {aggStats!.total_matches_won}G – {aggStats!.total_matches_lost}P
                 {matchWinPct !== null ? `  (${matchWinPct}%)` : ''}
               </Text>
             </View>
@@ -317,21 +317,21 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           {/* Cabecera de tabla */}
           <View style={styles.h2hHeaderRow}>
             <View style={styles.h2hPlayerCol} />
-            {/* Draft: agrupa Bo3 + Bo1 */}
-            <View style={styles.h2hDraftGroup}>
-              <Text style={styles.h2hGroupLabel}>Draft</Text>
+            {/* Oficiales: agrupa Bo3 + MaM */}
+            <View style={styles.h2hDraftHeaderGroup}>
+              <Text style={styles.h2hGroupLabel}>Oficiales</Text>
               <View style={styles.h2hGroupSubs}>
                 <Text style={styles.h2hColSub}>Bo3</Text>
-                <Text style={styles.h2hColSub}>Bo1</Text>
+                <Text style={styles.h2hColSub}>MaM</Text>
               </View>
             </View>
             <View style={styles.h2hSingleCol}>
               <Text style={styles.h2hGroupLabel}>Veng.</Text>
-              <Text style={styles.h2hColSub}>Bo1</Text>
+              <Text style={styles.h2hColSub}>MaM</Text>
             </View>
             <View style={styles.h2hSingleCol}>
               <Text style={styles.h2hGroupLabel}>Total</Text>
-              <Text style={styles.h2hColSub}>Bo1</Text>
+              <Text style={styles.h2hColSub}>MaM</Text>
             </View>
           </View>
 
@@ -348,7 +348,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                 />
                 <Text style={styles.h2hName} numberOfLines={1}>{h.opponent_name}</Text>
               </View>
-              {/* Draft: Bo3 y Bo1 side by side */}
+              {/* Oficiales: Bo3 y MaM side by side */}
               <View style={styles.h2hDraftGroup}>
                 <CellStat won={h.pairings_won}      lost={h.pairings_lost}      />
                 <CellStat won={h.draft_matches_won} lost={h.draft_matches_lost} />
@@ -357,7 +357,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
               <View style={styles.h2hSingleCol}>
                 <CellStat won={h.revenge_matches_won} lost={h.revenge_matches_lost} />
               </View>
-              {/* Total Bo1 */}
+              {/* Total MaM */}
               <View style={styles.h2hSingleCol}>
                 <CellStat won={h.total_matches_won} lost={h.total_matches_lost} />
               </View>
@@ -384,7 +384,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
   );
 }
 
-const H2H_DRAFT_W = 104; // ancho total del grupo Draft (2 × 52)
+const H2H_DRAFT_W = 104; // ancho total del grupo Oficiales (2 × 52)
 const H2H_SUB_W   = 52;  // ancho de cada subcolumna dentro de Draft
 const H2H_SINGLE_W = 56; // ancho de Venganza y Total
 
@@ -451,10 +451,16 @@ const styles = StyleSheet.create({
   h2hAvatar: { marginRight: 6 },
   h2hName: { flex: 1, fontSize: 13, color: '#111', fontWeight: '500' },
 
-  // Grupo Draft (Bo3 + Bo1 draft, lado a lado)
-  h2hDraftGroup: {
+  // Grupo Oficiales (Bo3 + MaM)
+  h2hDraftHeaderGroup: {
     width: H2H_DRAFT_W,
     alignItems: 'center',
+  },
+  h2hDraftGroup: {
+    width: H2H_DRAFT_W,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   h2hGroupLabel: {
     fontSize: 11,
