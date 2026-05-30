@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import CrossEventStats from '../components/CrossEventStats';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MyProfile'>;
 type MyProfileParams = { from?: 'WorkspacesList' | 'WorkspaceDetail'; workspaceId?: string };
@@ -238,6 +239,13 @@ export default function MyProfileScreen({ navigation, route }: Props) {
         {cooldown && nextChangeDate ? (
           <Text style={styles.cooldownHint}>Vas a poder cambiarlo de nuevo el {nextChangeDate}</Text>
         ) : null}
+
+        {userId && backWorkspaceId ? (
+          <>
+            <View style={styles.divider} />
+            <CrossEventStats userId={userId} workspaceId={backWorkspaceId} />
+          </>
+        ) : null}
       </ScrollView>
 
       <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={closeModal}>
@@ -303,6 +311,7 @@ const styles = StyleSheet.create({
   editBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
   editBtnTxtMuted: { color: '#F9FAFB' },
   cooldownHint: { marginTop: 10, fontSize: 13, color: '#6B7280' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E5E7EB', marginTop: 24 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: '#00000066',

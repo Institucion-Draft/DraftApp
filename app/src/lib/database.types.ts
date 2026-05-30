@@ -182,3 +182,19 @@ export type PlayerColorStat = {
   total_color_picks: number;
   percentage: number;
 };
+
+export type HeadToHeadStat = {
+  user_id: string;
+  opponent_user_id: string;
+  workspace_id: string;
+  total_pairings: number;
+  pairings_won: number;
+  pairings_lost: number;
+};
+
+export type PlayerStreak = {
+  user_id: string;
+  workspace_id: string;
+  longest_win_streak: number;
+  longest_loss_streak: number;
+};
