@@ -1,27 +1,17 @@
 import React from 'react';
-import {
-  View,
-  ActivityIndicator,
-  StyleSheet,
-  StatusBar,
-} from 'react-native';
+import { View, StyleSheet, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
-import AuthNavigator from './src/navigation/AuthNavigator';
-import MainNavigator from './src/navigation/MainNavigator';
+import RootNavigator from './src/navigation/RootNavigator';
 
 function AppContent() {
-  const { session, loading } = useAuth();
+  const { loading } = useAuth();
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-      </View>
-    );
+    return <View style={styles.loadingContainer} />;
   }
 
-  return session ? <MainNavigator /> : <AuthNavigator />;
+  return <RootNavigator />;
 }
 
 export default function App() {
@@ -38,9 +28,6 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
   },
 });
-
