@@ -29,7 +29,6 @@ function ManaSymbol({ color, size = MANA_SIZE_LG }: { color: string; size?: numb
       <Image source={src} style={{ width: size, height: size }} resizeMode="contain" />
     );
   }
-  // Fallback para colores sin imagen (ej. C - incoloro)
   return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#9CA3AF' }} />;
 }
 
@@ -46,6 +45,8 @@ type ColorStat = {
   color: string;
   times_played: number;
   percentage: number;
+  pairings_played: number;
+  bo3_winrate: number | null;
 };
 
 type EventEntry = {
@@ -63,9 +64,12 @@ type H2HEntry = {
   total_pairings: number;
   pairings_won: number;
   pairings_lost: number;
-  total_matches: number;
-  matches_won: number;
-  matches_lost: number;
+  draft_matches_won: number;
+  draft_matches_lost: number;
+  revenge_matches_won: number;
+  revenge_matches_lost: number;
+  total_matches_won: number;
+  total_matches_lost: number;
 };
 
 type Streaks = {
@@ -101,7 +105,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           .maybeSingle(),
         supabase
           .from('v_player_color_stats')
-          .select('color, times_played, percentage')
+          .select('color, times_played, percentage, pairings_played, bo3_winrate')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .order('times_played', { ascending: false }),
@@ -115,7 +119,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           .limit(10),
         supabase
           .from('v_head_to_head_stats')
-          .select('opponent_user_id, total_pairings, pairings_won, pairings_lost, total_matches, matches_won, matches_lost')
+          .select('opponent_user_id, total_pairings, pairings_won, pairings_lost, draft_matches_won, draft_matches_lost, revenge_matches_won, revenge_matches_lost, total_matches_won, total_matches_lost')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .order('total_pairings', { ascending: false }),
@@ -153,7 +157,9 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       const rawH2H = (h2hRes.data ?? []) as Array<{
         opponent_user_id: string; total_pairings: number;
         pairings_won: number; pairings_lost: number;
-        total_matches: number; matches_won: number; matches_lost: number;
+        draft_matches_won: number; draft_matches_lost: number;
+        revenge_matches_won: number; revenge_matches_lost: number;
+        total_matches_won: number; total_matches_lost: number;
       }>;
       const opponentIds = rawH2H.map(h => h.opponent_user_id);
       let opponentNames: Record<string, string> = {};
@@ -235,6 +241,9 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                 <ManaSymbol color={c.color} size={MANA_SIZE_LG} />
                 <Text style={styles.colorLabel}>{c.color}</Text>
                 <Text style={styles.colorPct}>{c.percentage}%</Text>
+                {c.bo3_winrate !== null && (
+                  <Text style={styles.colorWr}>{c.bo3_winrate}% WR</Text>
+                )}
               </View>
             ))}
           </View>
@@ -269,20 +278,31 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       {h2h.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Historial vs rivales</Text>
-          {/* Cabecera de tabla */}
-          <View style={styles.h2hHeaderRow}>
-            <View style={styles.h2hPlayerCol} />
-            <Text style={styles.h2hColHeader}>Bo3</Text>
-            <Text style={styles.h2hColHeader}>Bo1</Text>
-          </View>
           {h2h.map(h => {
-            const bo3Total = h.pairings_won + h.pairings_lost;
-            const bo3Pct = bo3Total > 0 ? Math.round((h.pairings_won / bo3Total) * 100) : null;
-            const bo1Total = h.matches_won + h.matches_lost;
-            const bo1Pct = bo1Total > 0 ? Math.round((h.matches_won / bo1Total) * 100) : null;
+            const bo3Total   = h.pairings_won + h.pairings_lost;
+            const draftTotal = h.draft_matches_won + h.draft_matches_lost;
+            const revTotal   = h.revenge_matches_won + h.revenge_matches_lost;
+            const bo1Total   = h.total_matches_won + h.total_matches_lost;
+
+            const bo3Pct   = bo3Total   > 0 ? Math.round(h.pairings_won        / bo3Total   * 100) : null;
+            const draftPct = draftTotal > 0 ? Math.round(h.draft_matches_won   / draftTotal * 100) : null;
+            const revPct   = revTotal   > 0 ? Math.round(h.revenge_matches_won / revTotal   * 100) : null;
+            const bo1Pct   = bo1Total   > 0 ? Math.round(h.total_matches_won   / bo1Total   * 100) : null;
+
+            const rows: Array<{ label: string; won: number; lost: number; pct: number | null }> = [
+              { label: 'Bo3',      won: h.pairings_won,        lost: h.pairings_lost,        pct: bo3Pct   },
+              { label: 'Draft',    won: h.draft_matches_won,   lost: h.draft_matches_lost,   pct: draftPct },
+              ...(revTotal > 0
+                ? [{ label: 'Venganza', won: h.revenge_matches_won, lost: h.revenge_matches_lost, pct: revPct }]
+                : []),
+              ...(bo1Total > 0
+                ? [{ label: 'Total Bo1', won: h.total_matches_won, lost: h.total_matches_lost, pct: bo1Pct }]
+                : []),
+            ];
+
             return (
-              <View key={h.opponent_user_id} style={styles.h2hRow}>
-                <View style={styles.h2hPlayerCol}>
+              <View key={h.opponent_user_id} style={styles.h2hCard}>
+                <View style={styles.h2hPlayerRow}>
                   <PlayerAvatar
                     userId={h.opponent_user_id}
                     size="small"
@@ -292,14 +312,13 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                   />
                   <Text style={styles.h2hName} numberOfLines={1}>{h.opponent_name}</Text>
                 </View>
-                <View style={styles.h2hStatCol}>
-                  <Text style={styles.h2hRecord}>{h.pairings_won}G – {h.pairings_lost}P</Text>
-                  {bo3Pct !== null && <Text style={styles.h2hPct}>{bo3Pct}%</Text>}
-                </View>
-                <View style={styles.h2hStatCol}>
-                  <Text style={styles.h2hRecord}>{h.matches_won}G – {h.matches_lost}P</Text>
-                  {bo1Pct !== null && <Text style={styles.h2hPct}>{bo1Pct}%</Text>}
-                </View>
+                {rows.map(row => (
+                  <View key={row.label} style={styles.h2hSubRow}>
+                    <Text style={styles.h2hSubLabel}>{row.label}</Text>
+                    <Text style={styles.h2hRecord}>{row.won}G – {row.lost}P</Text>
+                    {row.pct !== null && <Text style={styles.h2hPct}>  {row.pct}%</Text>}
+                  </View>
+                ))}
               </View>
             );
           })}
@@ -350,6 +369,7 @@ const styles = StyleSheet.create({
   colorItem: { alignItems: 'center', gap: 4 },
   colorLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
   colorPct: { fontSize: 11, color: '#6B7280' },
+  colorWr: { fontSize: 11, fontWeight: '600', color: '#3B82F6' },
   historyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -362,31 +382,16 @@ const styles = StyleSheet.create({
   historyName: { fontSize: 15, color: '#374151', marginBottom: 4 },
   historyColors: { flexDirection: 'row', gap: 4 },
   historyPlacement: { fontSize: 15, fontWeight: '700', color: '#111' },
-  h2hHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingBottom: 8,
+  h2hCard: {
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB',
   },
-  h2hPlayerCol: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  h2hColHeader: {
-    width: 76,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  h2hRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
+  h2hPlayerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   h2hAvatar: { marginRight: 8 },
-  h2hName: { flex: 1, fontSize: 14, color: '#111', fontWeight: '500' },
-  h2hStatCol: { width: 76, alignItems: 'center' },
+  h2hName: { flex: 1, fontSize: 15, color: '#111', fontWeight: '600' },
+  h2hSubRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2, paddingLeft: 2 },
+  h2hSubLabel: { width: 76, fontSize: 13, color: '#6B7280' },
   h2hRecord: { fontSize: 13, fontWeight: '600', color: '#111' },
-  h2hPct: { fontSize: 11, color: '#6B7280', marginTop: 1 },
+  h2hPct: { fontSize: 13, color: '#6B7280' },
 });
