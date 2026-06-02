@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Image, type StyleProp, type ViewStyle } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, Animated, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
@@ -52,11 +52,96 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   /** Fuera de eventos: inicial sobre color (sin Pokémon); custom sigue mostrando imagen. */
   outsideEvent?: boolean;
+  /** Si true y el participante es shiny, animación de estrellas ~1.5s. */
+  showShinyAnimation?: boolean;
 };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
+}
+
+const SHINY_STAR_COUNT = 5;
+
+function ShinyStarBurst({ active, outerSize }: { active: boolean; outerSize: number }) {
+  const opacities = useRef(Array.from({ length: SHINY_STAR_COUNT }, () => new Animated.Value(0))).current;
+  const finalFlashOpacity = useRef(new Animated.Value(0)).current;
+  const pad = Math.max(10, Math.round(outerSize * 0.14));
+  const fontSize = Math.max(12, Math.round(outerSize * 0.22));
+  const starOffsets = useMemo(
+    () => [
+      { top: -pad, left: outerSize / 2 - fontSize / 2 },
+      { top: outerSize * 0.12, right: -pad },
+      { bottom: outerSize * 0.18, right: -pad - 2 },
+      { bottom: -pad + 2, left: outerSize / 2 - fontSize / 2 },
+      { top: outerSize * 0.22, left: -pad - 2 },
+    ],
+    [outerSize, pad, fontSize]
+  );
+  const finalFlashOffset = useMemo(
+    () => ({ top: -pad, right: -pad - 2 }),
+    [pad]
+  );
+
+  useEffect(() => {
+    if (!active) {
+      opacities.forEach((o) => o.setValue(0));
+      finalFlashOpacity.setValue(0);
+      return;
+    }
+    const buildOrbit = () =>
+      Animated.parallel(
+        opacities.map((opacity, i) =>
+          Animated.sequence([
+            Animated.delay(i * 120),
+            Animated.timing(opacity, { toValue: 1, duration: 280, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0, duration: 520, useNativeDriver: true }),
+          ])
+        )
+      );
+    const anim = Animated.sequence([
+      buildOrbit(),
+      buildOrbit(),
+      Animated.delay(300),
+      Animated.timing(finalFlashOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.delay(400),
+      Animated.timing(finalFlashOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]);
+    anim.start();
+    return () => {
+      anim.stop();
+      opacities.forEach((o) => o.setValue(0));
+      finalFlashOpacity.setValue(0);
+    };
+  }, [active, opacities, finalFlashOpacity]);
+
+  if (!active) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.shinyBurstLayer}>
+      {starOffsets.map((pos, i) => (
+        <Animated.Text
+          key={i}
+          style={[
+            styles.shinyStar,
+            pos,
+            { fontSize, opacity: opacities[i], zIndex: 999 },
+          ]}
+        >
+          ⭐
+        </Animated.Text>
+      ))}
+      <Animated.Text
+        style={[
+          styles.shinyStar,
+          finalFlashOffset,
+          { fontSize, opacity: finalFlashOpacity, zIndex: 999 },
+        ]}
+      >
+        ⭐
+      </Animated.Text>
+    </View>
+  );
 }
 
 /** Punto en el perímetro (t ∈ [0,1)), recorrido en sentido horario desde arriba-izquierda del tramo recto superior. */
@@ -148,6 +233,7 @@ export default function PlayerAvatar({
   borderWidth = 3,
   style,
   outsideEvent = false,
+  showShinyAnimation = false,
 }: Props) {
   const diameter = SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
@@ -169,11 +255,13 @@ export default function PlayerAvatar({
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [borderColors, setBorderColors] = useState<MtgColor[]>([]);
   const [imageFailed, setImageFailed] = useState(false);
+  const [isShiny, setIsShiny] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setImageFailed(false);
+    setIsShiny(false);
 
     void (async () => {
       const userPromise = supabase
@@ -197,12 +285,14 @@ export default function PlayerAvatar({
                 withColorBorder
                   ? `
                 rotated_avatar_id,
-                default_avatars (storage_path),
+                is_shiny,
+                default_avatars (storage_path, storage_path_shiny),
                 participant_colors (color)
               `
                   : `
                 rotated_avatar_id,
-                default_avatars (storage_path)
+                is_shiny,
+                default_avatars (storage_path, storage_path_shiny)
               `
               )
               .eq('id', participantId)
@@ -228,11 +318,22 @@ export default function PlayerAvatar({
 
       if (!pRes.error && pRes.data) {
         const p = pRes.data as {
-          default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+          is_shiny?: boolean;
+          default_avatars?: {
+            storage_path: string;
+            storage_path_shiny?: string | null;
+          } | {
+            storage_path: string;
+            storage_path_shiny?: string | null;
+          }[] | null;
           participant_colors?: { color: string } | { color: string }[] | null;
         };
+        setIsShiny(!!p.is_shiny);
         const rotDa = relationOne(p.default_avatars);
-        rotatedStoragePath = rotDa?.storage_path ?? null;
+        const shinyPath = rotDa?.storage_path_shiny ?? null;
+        const normalPath = rotDa?.storage_path ?? null;
+        rotatedStoragePath =
+          p.is_shiny && shinyPath ? shinyPath : normalPath;
         if (withColorBorder && p.participant_colors != null) {
           const rows = Array.isArray(p.participant_colors)
             ? p.participant_colors
@@ -262,6 +363,8 @@ export default function PlayerAvatar({
     };
   }, [userId, participantId, withColorBorder, outsideEvent]);
 
+  const playShinyBurst = showShinyAnimation && isShiny && !loading && !outsideEvent;
+
   const initial = useMemo(() => {
     const n = (displayName.trim() || username.trim());
     if (n.length > 0) return n.slice(0, 1).toUpperCase();
@@ -271,6 +374,7 @@ export default function PlayerAvatar({
   const outsidePhBg = useMemo(() => hashUserIdToAvatarColor(userId), [userId]);
 
   const showPlaceholder = loading || imageFailed || !imageUri;
+  const spriteIsShiny = isShiny && !showPlaceholder && !outsideEvent && !!participantId;
   const fontSize = Math.max(10, Math.round(diameter * 0.42));
 
   const ring = withColorBorder ? (
@@ -333,7 +437,7 @@ export default function PlayerAvatar({
   ) : null;
 
   return (
-    <View style={[{ width: outer, height: outer }, style]}>
+    <View style={[styles.root, { width: outer, height: outer }, style]}>
       {ring}
       <View
         style={[
@@ -344,6 +448,7 @@ export default function PlayerAvatar({
             width: diameter,
             height: diameter,
             borderRadius: rInner,
+            zIndex: 1,
             ...(bw > 0
               ? {
                   borderWidth: RING_OUTLINE_W,
@@ -368,29 +473,59 @@ export default function PlayerAvatar({
             <Text style={[styles.phText, { fontSize }]}>{loading ? '?' : initial}</Text>
           </View>
         ) : (
-          <Image
-            source={{ uri: imageUri as string }}
-            style={{
-              width: diameter,
-              height: diameter,
-              borderRadius: rInner,
-              backgroundColor: '#f3f4f6',
-              transform: [{ scale: 1.3 }],
-            }}
-            resizeMode="cover"
-            onError={() => setImageFailed(true)}
-          />
+          <View
+            style={[
+              styles.spriteFrame,
+              {
+                width: diameter,
+                height: diameter,
+                borderRadius: rInner,
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: imageUri as string }}
+              style={
+                spriteIsShiny
+                  ? {
+                      width: diameter,
+                      height: diameter,
+                      backgroundColor: '#f3f4f6',
+                      transform: [{ scale: 1.3 }],
+                    }
+                  : {
+                      width: diameter,
+                      height: diameter,
+                      borderRadius: rInner,
+                      backgroundColor: '#f3f4f6',
+                      transform: [{ scale: 1.3 }],
+                    }
+              }
+              resizeMode={spriteIsShiny ? 'contain' : 'cover'}
+              onError={() => setImageFailed(true)}
+            />
+          </View>
         )}
       </View>
+      <ShinyStarBurst active={playShinyBurst} outerSize={outer} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    overflow: 'visible',
+  },
   imageClip: {
     position: 'absolute',
     overflow: 'hidden',
     backgroundColor: 'transparent',
+  },
+  spriteFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#f3f4f6',
   },
   ph: {
     alignItems: 'center',
@@ -399,5 +534,14 @@ const styles = StyleSheet.create({
   phText: {
     fontWeight: '700',
     color: '#fff',
+  },
+  shinyBurstLayer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'visible',
+    zIndex: 999,
+  },
+  shinyStar: {
+    position: 'absolute',
+    textAlign: 'center',
   },
 });

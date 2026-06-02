@@ -736,6 +736,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const insertMyRegistration = async () => {
     if (!event || !myUserId) return;
+    // rotated_avatar_id, is_shiny (1/4096) y has_shiny_participant los asigna assign_rotated_avatar (trigger).
     const { error } = await supabase.from('event_participants').insert({
       event_id: event.id,
       user_id: myUserId,

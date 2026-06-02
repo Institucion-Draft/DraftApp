@@ -173,6 +173,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [isWorkspaceOrganizer, setIsWorkspaceOrganizer] = useState(false);
   const [isCurrentUserOrganizer, setIsCurrentUserOrganizer] = useState(false);
   const [leftEventAt, setLeftEventAt] = useState<string | null>(null);
+  const [participantIsShiny, setParticipantIsShiny] = useState(false);
   const [profileGender, setProfileGender] = useState<Gender | null>(null);
 
   const [tab, setTab] = useState<'official' | 'revenge'>('official');
@@ -210,6 +211,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         user_id,
         left_event_at,
         self_evaluation,
+        is_shiny,
         users!event_participants_user_id_fkey (
           display_name,
           username,
@@ -237,6 +239,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const wsId = evRow?.workspace_id as string | undefined;
     const uid = pRow.user_id as string;
     setLeftEventAt((pRow as { left_event_at?: string | null }).left_event_at ?? null);
+    setParticipantIsShiny(!!(pRow as { is_shiny?: boolean }).is_shiny);
     setWorkspaceStreak([]);
     if (wsId) {
       const orgRes = await supabase
@@ -1174,6 +1177,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           size="xlarge"
           withColorBorder
           borderWidth={5}
+          showShinyAnimation={participantIsShiny}
         />
         <Text style={styles.name}>{displayName}</Text>
         {leftEventAt ? (

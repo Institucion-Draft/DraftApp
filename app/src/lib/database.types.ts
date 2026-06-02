@@ -91,6 +91,7 @@ export type EventParticipant = {
   exile_borrowed_from_user_id: string | null;
   self_evaluation: number | null;
   rotated_avatar_id: string | null;
+  is_shiny?: boolean;
   joined_at: string;
 };
 

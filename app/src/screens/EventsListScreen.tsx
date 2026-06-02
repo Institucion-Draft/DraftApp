@@ -32,6 +32,7 @@ type EventRow = {
   cube_id: string | null;
   venue_id: string | null;
   champion_user_id: string | null;
+  has_shiny_participant: boolean;
 };
 
 function relationOne<T>(rel: T | T[] | null | undefined): T | null {
@@ -82,7 +83,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
         : Promise.resolve({ data: null, error: null }),
       supabase
         .from('draft_events')
-        .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id')
+        .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id, has_shiny_participant')
         .eq('workspace_id', workspaceId)
         .is('deleted_at', null)
         .order('scheduled_for', { ascending: false }),
@@ -131,7 +132,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
       const [partsRes, usersRes] = await Promise.all([
         supabase
           .from('event_participants')
-          .select('event_id, user_id, rotated_avatar_id, default_avatars (storage_path)')
+          .select('event_id, user_id, is_shiny, rotated_avatar_id, default_avatars (storage_path, storage_path_shiny)')
           .in('event_id', eventIds)
           .in('user_id', userIds)
           .eq('role', 'player'),
@@ -144,13 +145,27 @@ export default function EventsListScreen({ navigation, route }: Props) {
       const partByEventUser = new Map<
         string,
         {
-          default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+          is_shiny?: boolean;
+          default_avatars?: {
+            storage_path: string;
+            storage_path_shiny?: string | null;
+          } | {
+            storage_path: string;
+            storage_path_shiny?: string | null;
+          }[] | null;
         }
       >();
       for (const row of (partsRes.data ?? []) as Array<{
         event_id: string;
         user_id: string;
-        default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+        is_shiny?: boolean;
+        default_avatars?: {
+          storage_path: string;
+          storage_path_shiny?: string | null;
+        } | {
+          storage_path: string;
+          storage_path_shiny?: string | null;
+        }[] | null;
       }>) {
         partByEventUser.set(`${row.event_id}:${row.user_id}`, row);
       }
@@ -184,7 +199,9 @@ export default function EventsListScreen({ navigation, route }: Props) {
 
         const rotDa = relationOne(part?.default_avatars);
         let uri: string | null = null;
-        if (rotDa?.storage_path) {
+        if (part?.is_shiny && rotDa?.storage_path_shiny) {
+          uri = defaultAvatarPublicUrl(rotDa.storage_path_shiny);
+        } else if (rotDa?.storage_path) {
           uri = defaultAvatarPublicUrl(rotDa.storage_path);
         } else if (user) {
           const userDa = relationOne(user.default_avatars);
@@ -270,6 +287,8 @@ export default function EventsListScreen({ navigation, route }: Props) {
           const cdown = countdown(item.scheduled_for);
           const champUri = item.champion_user_id ? championAvatars[item.id] : null;
           const champName = item.champion_user_id ? championNames[item.id] : null;
+          const showShinyCup =
+            item.status === 'completed' && item.has_shiny_participant && !!champUri;
           return (
             <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}>
               <View style={styles.row}>
@@ -308,7 +327,15 @@ export default function EventsListScreen({ navigation, route }: Props) {
                   <View style={styles.champCol}>
                     {champUri ? (
                       <View style={styles.champAvatarWrap}>
-                        <Image source={{ uri: champUri }} style={styles.champAvatar} />
+                        <Image
+                          source={{ uri: champUri }}
+                          style={[styles.champAvatar, showShinyCup && styles.champAvatarShinyRing]}
+                        />
+                        {showShinyCup ? (
+                          <View style={styles.shinyCupMark} accessibilityLabel="Copa Shiny">
+                            <Text style={styles.shinyCupMarkTxt}>✨</Text>
+                          </View>
+                        ) : null}
                         <View style={styles.champBadge}>
                           <Text style={styles.champBadgeText}>C</Text>
                         </View>
@@ -387,6 +414,25 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     borderWidth: 2,
     borderColor: '#3B82F6',
+  },
+  champAvatarShinyRing: {
+    borderColor: '#FBBF24',
+    borderWidth: 2.5,
+  },
+  shinyCupMark: {
+    position: 'absolute',
+    top: -10,
+    alignSelf: 'center',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  shinyCupMarkTxt: {
+    fontSize: 14,
+    lineHeight: 16,
+    textShadowColor: 'rgba(251, 191, 36, 0.8)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
   },
   champBadge: {
     position: 'absolute',

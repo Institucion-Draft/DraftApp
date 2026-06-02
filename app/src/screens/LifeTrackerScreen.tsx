@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NativeStackScreenProps, NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -56,8 +57,12 @@ type PairingRow = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  is_shiny?: boolean;
   rotated_avatar_id: string | null;
-  rotated_avatar: { storage_path: string } | { storage_path: string }[] | null;
+  rotated_avatar:
+    | { storage_path: string; storage_path_shiny?: string | null }
+    | { storage_path: string; storage_path_shiny?: string | null }[]
+    | null;
   users:
     | {
         username: string;
@@ -84,8 +89,12 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 function getPokemonNameFromAvatar(participant: ParticipantRow | null): string {
   if (!participant) return 'normal';
   const rotatedDa = relationOne(participant.rotated_avatar);
-  if (rotatedDa?.storage_path) {
-    const filename = rotatedDa.storage_path.split('/').pop() ?? '';
+  const path =
+    participant.is_shiny && rotatedDa?.storage_path_shiny
+      ? rotatedDa.storage_path_shiny
+      : rotatedDa?.storage_path;
+  if (path) {
+    const filename = path.split('/').pop() ?? '';
     const base = filename.replace(/\.[^.]+$/, '').toLowerCase();
     if (base) return base;
   }
@@ -830,6 +839,52 @@ const COLOR_BG: Record<MtgColor, string> = {
   C: '#E5E7EB',
 };
 
+function hashSeedString(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function createSeededRandom(seed: string): () => number {
+  let state = hashSeedString(seed);
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pickCoordinatedBgColors(
+  colorsA: MtgColor[],
+  colorsB: MtgColor[],
+  seed: string
+): { bgA: MtgColor; bgB: MtgColor } {
+  const poolA: MtgColor[] = colorsA.length > 0 ? colorsA : ['C'];
+  const poolB: MtgColor[] = colorsB.length > 0 ? colorsB : ['C'];
+  const rng = createSeededRandom(seed);
+
+  let firstSide: 'a' | 'b';
+  if (poolA.length < poolB.length) firstSide = 'a';
+  else if (poolB.length < poolA.length) firstSide = 'b';
+  else firstSide = rng() < 0.5 ? 'a' : 'b';
+
+  const [firstPool, secondPool] = firstSide === 'a' ? [poolA, poolB] : [poolB, poolA];
+  const firstPick = firstPool[Math.floor(rng() * firstPool.length)]!;
+  const secondCandidates = secondPool.filter((c) => c !== firstPick);
+  const secondPick =
+    secondCandidates.length > 0
+      ? secondCandidates[Math.floor(rng() * secondCandidates.length)]!
+      : firstPick;
+
+  if (firstSide === 'a') return { bgA: firstPick, bgB: secondPick };
+  return { bgA: secondPick, bgB: firstPick };
+}
+
 export default function LifeTrackerScreen({ route, navigation }: Props) {
   useKeepAwake();
   const { matchId } = route.params;
@@ -851,6 +906,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [pairing, setPairing] = useState<PairingRow | null>(null);
   const [pa, setPa] = useState<ParticipantRow | null>(null);
   const [pb, setPb] = useState<ParticipantRow | null>(null);
+  const [showShinyAnimA, setShowShinyAnimA] = useState(false);
+  const [showShinyAnimB, setShowShinyAnimB] = useState(false);
   const [colorsA, setColorsA] = useState<MtgColor[]>([]);
   const [colorsB, setColorsB] = useState<MtgColor[]>([]);
   const [winsA, setWinsA] = useState(0);
@@ -1117,6 +1174,52 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     };
   }, [pairing, loading, blocked, concurrentBlockMessage, reloadTickerContext, enqueueTickerItem]);
 
+  useEffect(() => {
+    if (loading) {
+      setShowShinyAnimA(false);
+      setShowShinyAnimB(false);
+      return;
+    }
+    if (!pa || !pb) {
+      setShowShinyAnimA(false);
+      setShowShinyAnimB(false);
+      return;
+    }
+    if (turnTrackingEnabled && whoStartedParticipantId == null) {
+      setShowShinyAnimA(false);
+      setShowShinyAnimB(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const key = `shiny_lt_anim_${matchId}`;
+      const seen = await AsyncStorage.getItem(key);
+      if (cancelled) return;
+      if (seen) {
+        setShowShinyAnimA(false);
+        setShowShinyAnimB(false);
+        return;
+      }
+      const aShiny = !!pa.is_shiny;
+      const bShiny = !!pb.is_shiny;
+      setShowShinyAnimA(aShiny);
+      setShowShinyAnimB(bShiny);
+      if (aShiny || bShiny) {
+        await AsyncStorage.setItem(key, '1');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    loading,
+    matchId,
+    pa,
+    pb,
+    turnTrackingEnabled,
+    whoStartedParticipantId,
+  ]);
+
   const updateAvatarYInScrollContent = useCallback((slot: 'a' | 'b') => {
     const wrap = slot === 'a' ? avatarWrapMeasureRefA.current : avatarWrapMeasureRefB.current;
     const content = scrollContentLayoutRef.current;
@@ -1178,8 +1281,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          is_shiny,
           rotated_avatar_id,
-          rotated_avatar:default_avatars!rotated_avatar_id(storage_path),
+          rotated_avatar:default_avatars!rotated_avatar_id(storage_path, storage_path_shiny),
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -2101,8 +2205,13 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     if (sessionUserId === pb.user_id) return { top: 'a' as const, bottom: 'b' as const };
     return { top: 'a' as const, bottom: 'b' as const };
   }, [sessionUserId, pa, pb]);
-  const topPlayerColors = layoutAB.top === 'a' ? colorsA : colorsB;
-  const bottomPlayerColors = layoutAB.bottom === 'a' ? colorsA : colorsB;
+  const bgSeed = match?.id ?? pairing?.id ?? matchId;
+  const { bgA: bgColorA, bgB: bgColorB } = useMemo(
+    () => pickCoordinatedBgColors(colorsA, colorsB, bgSeed),
+    [colorsA, colorsB, bgSeed]
+  );
+  const topPlayerColors = layoutAB.top === 'a' ? [bgColorA] : [bgColorB];
+  const bottomPlayerColors = layoutAB.bottom === 'a' ? [bgColorA] : [bgColorB];
   const showTickerTopSeparator = isDarkTickerAdjacentColor(topPlayerColors);
   const showTickerBottomSeparator = isDarkTickerAdjacentColor(bottomPlayerColors);
   const canDecreaseA = aLife > 0;
@@ -2184,7 +2293,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const lifeForHpBar = isA ? lifeDisplayedA : lifeDisplayedB;
     const canDec = isA ? canDecreaseA : canDecreaseB;
     const colors = isA ? colorsA : colorsB;
-    const isDarkBg = colors[0] === 'B';
+    const bgColor = isA ? bgColorA : bgColorB;
+    const isDarkBg = bgColor === 'B';
     const t = isA ? ('a' as const) : ('b' as const);
     const startingLife = isA ? match?.starting_life_a ?? 20 : match?.starting_life_b ?? 20;
     const hpRatio =
@@ -2245,6 +2355,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                       size="xlarge"
                       withColorBorder
                       borderWidth={5}
+                      showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
                     />
                   </View>
                 </Animated.View>
@@ -2257,6 +2368,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                       size="xlarge"
                       withColorBorder
                       borderWidth={5}
+                      showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
                     />
                   </View>
                 </Animated.View>
@@ -2268,6 +2380,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                     size="xlarge"
                     withColorBorder
                     borderWidth={5}
+                    showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
                   />
                 </View>
               )}
@@ -2382,7 +2495,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         style={[
           styles.half,
           turnTrackingEnabled && styles.halfTurnTrack,
-          { backgroundColor: COLOR_BG[colors[0] ?? 'C'] },
+          { backgroundColor: COLOR_BG[bgColor] },
         ]}
       >
         {rotated ? <View style={styles.rotated}>{body}</View> : body}
