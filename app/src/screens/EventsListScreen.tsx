@@ -16,7 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { EventType, EventStatus } from '../lib/database.types';
-import { avatarPublicUrl } from '../lib/avatarUrl';
+import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
@@ -34,6 +34,11 @@ type EventRow = {
   champion_user_id: string | null;
 };
 
+function relationOne<T>(rel: T | T[] | null | undefined): T | null {
+  if (rel == null) return null;
+  return Array.isArray(rel) ? rel[0] ?? null : rel;
+}
+
 export default function EventsListScreen({ navigation, route }: Props) {
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
@@ -49,6 +54,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
   const [venueMap, setVenueMap] = useState<Record<string, string>>({});
   const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
   const [championAvatars, setChampionAvatars] = useState<Record<string, string | null>>({});
+  const [championNames, setChampionNames] = useState<Record<string, string>>({});
   const firstLoadRef = useRef(true);
   const pulse = useRef(new Animated.Value(1)).current;
 
@@ -117,20 +123,82 @@ export default function EventsListScreen({ navigation, route }: Props) {
     );
     setParticipantCounts(Object.fromEntries(countEntries));
 
-    const champIds = Array.from(new Set(events.map((e) => e.champion_user_id).filter(Boolean) as string[]));
-    if (champIds.length > 0) {
-      const { data } = await supabase
-        .from('users')
-        .select('id, custom_avatar_path, default_avatars(storage_path)')
-        .in('id', champIds);
-      const map: Record<string, string | null> = {};
-      for (const row of (data ?? []) as any[]) {
-        const da = Array.isArray(row.default_avatars) ? row.default_avatars[0] : row.default_avatars;
-        map[row.id] = avatarPublicUrl(row.custom_avatar_path) ?? avatarPublicUrl(da?.storage_path ?? null);
+    const championEvents = events.filter((e) => e.champion_user_id);
+    if (championEvents.length > 0) {
+      const eventIds = championEvents.map((e) => e.id);
+      const userIds = Array.from(new Set(championEvents.map((e) => e.champion_user_id!)));
+
+      const [partsRes, usersRes] = await Promise.all([
+        supabase
+          .from('event_participants')
+          .select('event_id, user_id, rotated_avatar_id, default_avatars (storage_path)')
+          .in('event_id', eventIds)
+          .in('user_id', userIds)
+          .eq('role', 'player'),
+        supabase
+          .from('users')
+          .select('id, display_name, username, custom_avatar_path, default_avatars(storage_path)')
+          .in('id', userIds),
+      ]);
+
+      const partByEventUser = new Map<
+        string,
+        {
+          default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+        }
+      >();
+      for (const row of (partsRes.data ?? []) as Array<{
+        event_id: string;
+        user_id: string;
+        default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+      }>) {
+        partByEventUser.set(`${row.event_id}:${row.user_id}`, row);
       }
-      setChampionAvatars(map);
+
+      const userById: Record<
+        string,
+        {
+          display_name?: string | null;
+          username?: string | null;
+          custom_avatar_path?: string | null;
+          default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+        }
+      > = {};
+      for (const row of (usersRes.data ?? []) as Array<{
+        id: string;
+        display_name?: string | null;
+        username?: string | null;
+        custom_avatar_path?: string | null;
+        default_avatars?: { storage_path: string } | { storage_path: string }[] | null;
+      }>) {
+        userById[row.id] = row;
+      }
+
+      const avatarMap: Record<string, string | null> = {};
+      const nameMap: Record<string, string> = {};
+      for (const e of championEvents) {
+        const uid = e.champion_user_id!;
+        const part = partByEventUser.get(`${e.id}:${uid}`);
+        const user = userById[uid];
+        nameMap[e.id] = user?.display_name?.trim() || user?.username?.trim() || 'Campeón';
+
+        const rotDa = relationOne(part?.default_avatars);
+        let uri: string | null = null;
+        if (rotDa?.storage_path) {
+          uri = defaultAvatarPublicUrl(rotDa.storage_path);
+        } else if (user) {
+          const userDa = relationOne(user.default_avatars);
+          uri =
+            avatarPublicUrl(user.custom_avatar_path ?? null) ??
+            avatarPublicUrl(userDa?.storage_path ?? null);
+        }
+        avatarMap[e.id] = uri;
+      }
+      setChampionAvatars(avatarMap);
+      setChampionNames(nameMap);
     } else {
       setChampionAvatars({});
+      setChampionNames({});
     }
   }, [workspaceId]);
 
@@ -200,7 +268,8 @@ export default function EventsListScreen({ navigation, route }: Props) {
           const avatar = avatarPublicUrl(item.avatar_path);
           const when = new Date(item.scheduled_for);
           const cdown = countdown(item.scheduled_for);
-          const champUri = item.champion_user_id ? championAvatars[item.champion_user_id] : null;
+          const champUri = item.champion_user_id ? championAvatars[item.id] : null;
+          const champName = item.champion_user_id ? championNames[item.id] : null;
           return (
             <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}>
               <View style={styles.row}>
@@ -235,7 +304,23 @@ export default function EventsListScreen({ navigation, route }: Props) {
                     <Text style={styles.countdown}>Faltan {cdown}</Text>
                   ) : null}
                 </View>
-                {champUri ? <Image source={{ uri: champUri }} style={styles.champAvatar} /> : null}
+                {item.champion_user_id ? (
+                  <View style={styles.champCol}>
+                    {champUri ? (
+                      <View style={styles.champAvatarWrap}>
+                        <Image source={{ uri: champUri }} style={styles.champAvatar} />
+                        <View style={styles.champBadge}>
+                          <Text style={styles.champBadgeText}>C</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {champName ? (
+                      <Text style={styles.champName} numberOfLines={1}>
+                        {champName}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
               </View>
             </TouchableOpacity>
           );
@@ -285,12 +370,48 @@ const styles = StyleSheet.create({
   },
   todayBadgeTxt: { color: '#fff', fontWeight: '700', fontSize: 11 },
   countdown: { marginTop: 8, fontSize: 12, fontWeight: '600', color: '#3B82F6' },
+  champCol: {
+    marginLeft: 8,
+    alignItems: 'center',
+    maxWidth: 76,
+  },
+  champAvatarWrap: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   champAvatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
     borderWidth: 2,
     borderColor: '#3B82F6',
-    marginLeft: 8,
+  },
+  champBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FBBF24',
+    borderWidth: 1,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  champBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 12,
+  },
+  champName: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 2,
+    textAlign: 'center',
+    maxWidth: 76,
   },
 });
