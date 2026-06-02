@@ -629,6 +629,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
   const [eventChampionUserId, setEventChampionUserId] = useState<string | null>(null);
+  const [eventChampionIsShiny, setEventChampionIsShiny] = useState(false);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -647,6 +648,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          is_shiny,
           left_event_at,
           bye_rounds,
           swiss_points,
@@ -695,6 +697,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
+      setEventChampionIsShiny(false);
       return;
     }
 
@@ -730,6 +733,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
+      setEventChampionIsShiny(false);
       return;
     }
     const colorMap: Record<string, MtgColor[]> = {};
@@ -797,6 +801,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionName(null);
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
+      setEventChampionIsShiny(false);
       return;
     }
 
@@ -832,6 +837,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setEventChampionUserId(
       championUserId != null && String(championUserId).trim() !== '' ? String(championUserId) : null
     );
+    const championPart = championUserId
+      ? (participants as { user_id: string; is_shiny?: boolean }[]).find(
+          (p) => String(p.user_id) === String(championUserId)
+        )
+      : null;
+    setEventChampionIsShiny(!!championPart?.is_shiny);
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
       (pr: any) => pr.official_winner_participant_id != null
@@ -1365,6 +1376,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         rank === 1 &&
         eventChampionUserId != null &&
         String(pl.userId) === String(eventChampionUserId);
+      const showChampionShinyAnim = isEventChampion && eventChampionIsShiny;
 
       return (
         <TouchableOpacity
@@ -1400,6 +1412,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   size="tiny"
                   withColorBorder
                   borderWidth={compactBorder}
+                  showShinyAnimation={showChampionShinyAnim}
                 />
               </View>
             </View>
@@ -1410,6 +1423,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
               size={avatarSize}
               withColorBorder
               borderWidth={avatarBorder}
+              showShinyAnimation={showChampionShinyAnim}
             />
           )}
           {(pl.onStool === true || stoolId === pl.participantId) ? (
