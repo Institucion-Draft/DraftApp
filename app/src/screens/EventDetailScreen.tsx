@@ -38,7 +38,7 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled';
   event_type: 'draft' | 'tournament' | 'pepidraft';
-  competition_format?: 'round_robin' | 'swiss' | null;
+  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
   scheduled_for: string;
   cube_id: string | null;
   venue_id: string | null;
@@ -574,7 +574,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     players.sort((a, b) => a.sortName.localeCompare(b.sortName, 'es', { sensitivity: 'base' }));
 
     const competitionFormat = event.competition_format ?? 'round_robin';
-    if (competitionFormat === 'swiss') {
+    if (competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2') {
+      const isBo2 = competitionFormat === 'swiss_bo2';
+      const roundRpc = isBo2 ? 'generate_swiss_bo2_round' : 'generate_swiss_round';
       const nPlayers = players.length;
       const swiss_rounds_total = Math.max(1, Math.ceil(Math.log2(Math.max(nPlayers, 2))));
       const updSwiss = await supabase.from('draft_events').update({ swiss_rounds_total }).eq('id', event.id);
@@ -605,10 +607,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         return;
       }
 
-      const rpcRes = await supabase.rpc('generate_swiss_round', { p_event_id: event.id, p_round: 1 });
+      const rpcRes = await supabase.rpc(roundRpc, { p_event_id: event.id, p_round: 1 });
       if (rpcRes.error) {
         if (__DEV__) {
-          console.error('[finishDraft] Error generate_swiss_round', rpcRes.error);
+          console.error(`[finishDraft] Error ${roundRpc}`, rpcRes.error);
         }
         await supabase
           .from('draft_events')
@@ -819,6 +821,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
+    event.competition_format !== 'swiss_bo2' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));

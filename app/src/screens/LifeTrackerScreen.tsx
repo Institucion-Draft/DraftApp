@@ -384,10 +384,9 @@ async function fetchEventTickerContext(
 
   if (eventRes.error || pairingsRes.error || participantsRes.error) return null;
 
+  const rawCompetitionFormat = (eventRes.data as { competition_format?: string | null } | null)?.competition_format;
   const competitionFormat =
-    (eventRes.data as { competition_format?: string | null } | null)?.competition_format === 'swiss'
-      ? 'swiss'
-      : 'round_robin';
+    rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
   const pairingRows = (pairingsRes.data ?? []) as {
     id: string;
     participant_a_id: string;

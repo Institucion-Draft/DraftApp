@@ -33,6 +33,7 @@ type PairingRow = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  official_draw: boolean | null;
   super_cup_winner_participant_id: string | null;
   revenge_cup_winner_participant_id: string | null;
 };
@@ -60,6 +61,7 @@ type OfficialH2HRow = {
   profileWins: number;
   opponentWins: number;
   sortTier: 0 | 1 | 2;
+  isDraw: boolean;
 };
 
 type RevengeH2HRow = {
@@ -387,7 +389,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       supabase
         .from('pairings')
         .select(
-          'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
         )
         .eq('event_id', eventId),
     ]);
@@ -475,6 +477,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       let profileWins = 0;
       let opponentWins = 0;
       let sortTier: 0 | 1 | 2 = 2;
+      const isDraw = pairing?.official_draw === true;
       if (pairing) {
         const pm = matches.filter(
           (m) =>
@@ -484,7 +487,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         );
         profileWins = pm.filter((m) => m.winner_participant_id === participantId).length;
         opponentWins = pm.filter((m) => m.winner_participant_id === opp.id).length;
-        if (pairing.official_winner_participant_id != null) sortTier = 0;
+        if (pairing.official_winner_participant_id != null || isDraw) sortTier = 0;
         else if (pm.length > 0) sortTier = 1;
         else sortTier = 2;
       }
@@ -495,21 +498,24 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         profileWins,
         opponentWins,
         sortTier,
+        isDraw,
       };
     });
     officialRows.sort((a, b) => {
       if (a.sortTier !== b.sortTier) return a.sortTier - b.sortTier;
       return a.opponentName.localeCompare(b.opponentName, 'es');
     });
+    const rawCompetitionFormat = (evRow as { competition_format?: string | null } | null)?.competition_format;
+    // swiss_bo2 se muestra igual que swiss en el perfil del jugador.
     const competitionFormat =
-      (evRow as { competition_format?: string | null } | null)?.competition_format === 'swiss'
-        ? 'swiss'
-        : 'round_robin';
+      rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setEventCompetitionFormat(competitionFormat);
     const officialH2hFiltered =
       competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
             if (!row.pairingId) return false;
+            // Mostrar empates resueltos aunque no tengan partidas individuales jugadas.
+            if (row.isDraw) return true;
             return matches.some(
               (m) =>
                 m.pairing_id === row.pairingId &&
@@ -632,6 +638,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                   profileWins: r.profileWins,
                   opponentWins: r.opponentWins,
                   sortTier: 0 as const,
+                  isDraw: false,
                 }))
                 .sort((a, b) => a.opponentName.localeCompare(b.opponentName, 'es'));
             setProfileMataByPhase({
@@ -798,7 +805,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {row.opponentName}
           </Text>
         </View>
-        {bo3Pills(row.profileWins, row.opponentWins, tint)}
+        {row.isDraw ? (
+          <Text style={styles.h2hDrawLabel}>Empate</Text>
+        ) : (
+          bo3Pills(row.profileWins, row.opponentWins, tint)
+        )}
       </TouchableOpacity>
     );
 
@@ -1437,6 +1448,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   tiebreakH2hWinner: { fontSize: 12, fontWeight: '600', color: '#166534', marginTop: 4 },
+  h2hDrawLabel: { fontSize: 13, fontWeight: '700', color: '#6B7280', marginTop: 6, textAlign: 'center' },
   tiebreakProfileRoundTitle: { fontSize: 15, fontWeight: '800', color: '#111827', marginTop: 12, marginBottom: 8 },
   h2hBo3Outer: {
     flexDirection: 'row',

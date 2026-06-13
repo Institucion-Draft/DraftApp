@@ -239,7 +239,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       current_swiss_round?: number | string | null;
     } | null;
     setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
-    const fmt = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    const fmt =
+      eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
+        ? 'swiss'
+        : 'round_robin';
     setCompetitionFormat(fmt);
     const csrRaw = eventFlags?.current_swiss_round;
     const csrNum = csrRaw != null && csrRaw !== '' ? Number(csrRaw) : null;
@@ -338,7 +341,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     (match.match_type === 'draft' || match.match_type === 'final') &&
     pairing.official_winner_participant_id == null &&
     winsA < 2 &&
-    winsB < 2;
+    winsB < 2 &&
+    // En swiss (incluye swiss_bo2) un 1-1 ya es empate resuelto automáticamente; no hay "bueno".
+    !(competitionFormat === 'swiss' && winsA >= 1 && winsB >= 1);
   const bracketTiebreakSeriesStillOpen =
     match.match_type === 'tiebreak' &&
     bracketTiebreakWinsNeeded != null &&
