@@ -373,7 +373,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
     const turnTrackOn = !!evFlags?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
-    setCompetitionFormat(evFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin');
+    // swiss_bo2 se comporta igual que swiss en esta pantalla.
+    setCompetitionFormat(
+      evFlags?.competition_format === 'swiss' || evFlags?.competition_format === 'swiss_bo2'
+        ? 'swiss'
+        : 'round_robin'
+    );
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
       csr == null

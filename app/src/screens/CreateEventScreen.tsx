@@ -23,12 +23,15 @@ import { getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss';
+type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
   { value: 'swiss', label: 'Suizo' },
+  { value: 'swiss_bo2', label: 'Suizo BO2' },
 ];
+
+const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
 
 const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
@@ -59,6 +62,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Solo suizo: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
+  /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
+  const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
@@ -130,6 +135,10 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     };
     if (competitionFormat === 'swiss') {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+    }
+    if (competitionFormat === 'swiss_bo2') {
+      insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+      insertRow.swiss_rounds_manual = swissRoundsManual;
     }
     const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
@@ -233,6 +242,31 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
+      {competitionFormat === 'swiss_bo2' ? (
+        <>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
+            <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />
+          </View>
+
+          <Text style={styles.label}>Rondas suizas</Text>
+          <View style={styles.segmented}>
+            {SWISS_BO2_ROUNDS_OPTIONS.map((n) => {
+              const selected = swissRoundsManual === n;
+              return (
+                <TouchableOpacity
+                  key={n}
+                  style={[styles.segment, selected && styles.segmentSelected]}
+                  onPress={() => setSwissRoundsManual(n)}
+                >
+                  <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{n}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
       <View style={styles.switchRow}>
         <Text style={styles.switchLabel}>Sistema de turnos con animaciones</Text>
         <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
@@ -329,4 +363,16 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   switchLabel: { flex: 1, fontSize: 15, color: '#111', fontWeight: '500', marginRight: 12 },
+  segmented: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#fafafa' },
+  segmentSelected: { backgroundColor: '#3B82F6' },
+  segmentTxt: { fontSize: 16, color: '#111', fontWeight: '600' },
+  segmentTxtSelected: { color: '#fff' },
 });

@@ -24,6 +24,7 @@ type PairingRow = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  official_draw: boolean | null;
   swiss_round: number | null;
 };
 
@@ -62,6 +63,7 @@ type ItemView = PairingRow & {
   winsA: number;
   winsB: number;
   inProgressMatchStartedAt: string | null;
+  isDraw: boolean;
 };
 
 type DbMatchRow = {
@@ -104,6 +106,9 @@ type TiebreakOfficialItem = {
   mine: boolean;
   /** Solo presente para grupos bracket: fase a la que pertenece esta card. */
   bracketPhase: BracketPhase | null;
+  /** Victorias parciales dentro de la llave (BO3): para mostrar "Va A-B" antes de que se decida. */
+  bracketWinsA: number;
+  bracketWinsB: number;
 };
 
 type TiebreakOfficialRoundBlock = {
@@ -296,7 +301,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         .maybeSingle(),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, swiss_round')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round')
         .eq('event_id', eventId),
       supabase
         .from('event_participants')
@@ -335,7 +340,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       competition_format?: string | null;
       current_swiss_round?: number | null;
     } | null;
-    const competitionFormat = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    // swiss_bo2 se comporta igual que swiss para el render de enfrentamientos.
+    const competitionFormat =
+      eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
+        ? 'swiss'
+        : 'round_robin';
     setCompetitionFormat(competitionFormat);
     const csrRaw = eventFlags?.current_swiss_round;
     const currentSwissRound: number | null =
@@ -435,7 +444,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const aUserId = pa?.user_id ?? '';
       const bUserId = pb?.user_id ?? '';
       const inProg = (inProgressByPairing.get(pairing.id) ?? 0) > 0;
-      const completed = !!pairing.official_winner_participant_id;
+      const isDraw = pairing.official_draw === true;
+      const completed = !!pairing.official_winner_participant_id || isDraw;
       const status: ItemView['status'] = inProg
         ? 'in_progress'
         : completed
@@ -489,6 +499,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         winsA,
         winsB,
         inProgressMatchStartedAt,
+        isDraw,
       };
     });
 
@@ -757,6 +768,25 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             const tiebreakWinnerName = tbWonA ? aName : tbWonB ? bName : null;
             const mine =
               !!currentUserId && (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
+            // Victorias parciales dentro de la llave (solo relevante para bracket).
+            const bracketWinsA = bracketPhase != null
+              ? safeMatches.filter(
+                  (m) =>
+                    m.pairing_id === pairing.id &&
+                    m.match_type === 'tiebreak' &&
+                    m.status === 'completed' &&
+                    m.winner_participant_id === pairing.participant_a_id
+                ).length
+              : 0;
+            const bracketWinsB = bracketPhase != null
+              ? safeMatches.filter(
+                  (m) =>
+                    m.pairing_id === pairing.id &&
+                    m.match_type === 'tiebreak' &&
+                    m.status === 'completed' &&
+                    m.winner_participant_id === pairing.participant_b_id
+                ).length
+              : 0;
             return {
               id: pairing.id,
               pairingId: pairing.id,
@@ -779,6 +809,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               inProgressMatchStartedAt: tbInProg?.started_at ?? null,
               mine,
               bracketPhase,
+              bracketWinsA,
+              bracketWinsB,
             };
           };
 
@@ -850,6 +882,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   inProgressMatchStartedAt: null,
                   mine,
                   bracketPhase: bm.bracket_phase,
+                  bracketWinsA: 0,
+                  bracketWinsB: 0,
                 };
               };
               const tbItems: TiebreakOfficialItem[] = [];
@@ -1129,6 +1163,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             <View style={styles.footerLeft}>
               {item.inProgressMatchStartedAt ? (
                 <LiveMatchDuration startedAt={item.inProgressMatchStartedAt} />
+              ) : item.isDraw ? (
+                <Text style={styles.tiebreakGanoLine}>Empate</Text>
               ) : item.winnerName && item.official_winner_participant_id ? (
                 <Text style={styles.tiebreakGanoLine}>Ganó: {item.winnerName}</Text>
               ) : null}
@@ -1322,6 +1358,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                                 <LiveMatchDuration startedAt={it.inProgressMatchStartedAt} />
                               ) : it.tiebreakWinnerName ? (
                                 <Text style={styles.tiebreakGanoLine}>Gano: {it.tiebreakWinnerName}</Text>
+                              ) : isBracket && (it.bracketWinsA + it.bracketWinsB) > 0 ? (
+                                // Marcador parcial dentro de la llave BO3 (ej: "Va 1-0").
+                                <Text style={styles.tiebreakGanoLine}>
+                                  Va {swapSides ? it.bracketWinsB : it.bracketWinsA}-{swapSides ? it.bracketWinsA : it.bracketWinsB}
+                                </Text>
                               ) : null}
                             </View>
                             <View style={styles.footerCenter}>

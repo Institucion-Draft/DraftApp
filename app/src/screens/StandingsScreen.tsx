@@ -60,6 +60,8 @@ type RowView = {
   eg: number;
   /** Enfrentamientos con BO3 cerrado (ganados o perdidos). */
   ec: number;
+  /** swiss_bo2: partidas individuales finalizadas (match_type='draft', status='completed'). */
+  pf: number;
   /** Diferencial medio de vida (sin tracking de turnos); null si no aplica o sin datos. */
   dmv: number | null;
   /** DMV por turnos (evento con turn_tracking_enabled); null si no aplica o sin datos. */
@@ -402,14 +404,18 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
   return Array.isArray(x) ? (x[0] ?? null) : x;
 }
 
-/** Ronda suiza cerrada: todos los pairings de esa ronda tienen ganador oficial. */
+/** Ronda suiza cerrada: todos los pairings de esa ronda tienen ganador oficial o empate (swiss_bo2). */
 function isSwissRoundFullyResolved(
-  pairings: { swiss_round?: number | string | null; official_winner_participant_id?: string | null }[],
+  pairings: {
+    swiss_round?: number | string | null;
+    official_winner_participant_id?: string | null;
+    official_draw?: boolean | null;
+  }[],
   round: number
 ): boolean {
   const inRound = pairings.filter((pr) => Number(pr.swiss_round) === round);
   if (inRound.length === 0) return false;
-  return inRound.every((pr) => pr.official_winner_participant_id != null);
+  return inRound.every((pr) => pr.official_winner_participant_id != null || pr.official_draw === true);
 }
 
 /** Tamaño por cantidad y por si caben con `gap` en el peldaño (misma lógica en 1º, 2º y 3º). */
@@ -625,6 +631,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  /** True cuando el formato real es swiss_bo2 (mapeado a 'swiss' para comportamiento, separado para display). */
+  const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** Suizo completado: nombre + campeón/campeona (sin otras estadísticas en el banner ni en la meta junto al banner). */
   const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
@@ -669,7 +677,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('pairings')
         .select(
-          'id, participant_a_id, participant_b_id, official_winner_participant_id, super_cup_winner_participant_id, revenge_cup_winner_participant_id, swiss_round'
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id, swiss_round'
         )
         .eq('event_id', eventId),
       supabase
@@ -749,11 +757,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
       eventRes.data as { turn_tracking_enabled?: boolean | null } | null
     )?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
-    const fmt =
-      (eventRes.data as { competition_format?: string | null } | null)?.competition_format === 'swiss'
-        ? 'swiss'
-        : 'round_robin';
+    const rawFmt = (eventRes.data as { competition_format?: string | null } | null)?.competition_format;
+    // swiss_bo2 se muestra igual que swiss (Pts / OMW% / GW%, top cut, campeón).
+    // Los puntos ya vienen calculados por swiss_bo2_points_of en la columna swiss_points.
+    const fmt = rawFmt === 'swiss' || rawFmt === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
+    setIsSwissBo2(rawFmt === 'swiss_bo2');
 
     const matchesRes =
       pairingIds.length > 0
@@ -1073,6 +1082,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
       );
       const pg = completedMatches.filter((m: any) => m.winner_participant_id === pid).length;
       const pj = completedMatches.length;
+      // swiss_bo2: partidas finalizadas (sin importar si tienen ganador declarado).
+      const pf = playerMatches.filter(
+        (m: any) => m.match_type === 'draft' && m.status === 'completed'
+      ).length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
       const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
       const inProgress = playerMatches.some(
@@ -1145,6 +1158,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         pj,
         eg,
         ec,
+        pf,
         dmv,
         dmvt,
         tmp,
@@ -1499,6 +1513,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 <Text style={[styles.cell, styles.statCol]}>Pts</Text>
                 <Text style={[styles.cell, styles.swissPctCol]}>OMW%</Text>
                 <Text style={[styles.cell, styles.swissPctCol]}>GW%</Text>
+                {isSwissBo2 ? (
+                  <Text style={[styles.cell, styles.statCol]}>PF</Text>
+                ) : null}
               </>
             ) : (
               <>
@@ -1508,8 +1525,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 <Text style={[styles.cell, styles.statCol]}>EC</Text>
               </>
             )}
-            <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
-            <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
+            {!isSwissBo2 ? (
+              <>
+                <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
+                <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
+              </>
+            ) : null}
           </View>
           {rows.map((r) => (
             <TouchableOpacity
@@ -1557,6 +1578,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   <Text style={[styles.cell, styles.swissPctCol]}>
                     {r.swissGw == null ? '—' : formatSwissPctDisplay(r.swissGw)}
                   </Text>
+                  {isSwissBo2 ? (
+                    <Text style={[styles.cell, styles.statCol]}>{r.pf}</Text>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -1566,18 +1590,22 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
                 </>
               )}
-              <Text
-                style={[
-                  styles.cell,
-                  styles.dmvCol,
-                  { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
-                ]}
-              >
-                {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
-              </Text>
-              <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
-                {formatTmpDisplay(r.tmp)}
-              </Text>
+              {!isSwissBo2 ? (
+                <>
+                  <Text
+                    style={[
+                      styles.cell,
+                      styles.dmvCol,
+                      { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
+                    ]}
+                  >
+                    {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
+                  </Text>
+                  <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
+                    {formatTmpDisplay(r.tmp)}
+                  </Text>
+                </>
+              ) : null}
             </TouchableOpacity>
           ))}
         </>
@@ -1663,11 +1691,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
         const segments: string[] =
           tab === 'official'
             ? competitionFormat === 'swiss'
-              ? (
-                  turnTrackingEnabled
-                    ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
-                    : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
-                ).split(' · ')
+              ? isSwissBo2
+                ? 'Pts: Puntos (victoria=3, empate=1, bye=2) · OMW%: Rendimiento medio de los rivales (mín. 33%) · GW%: Porcentaje de partidas individuales ganadas · PF: Partidas individuales finalizadas'.split(' · ')
+                : (
+                    turnTrackingEnabled
+                      ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
+                      : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
+                  ).split(' · ')
               : [
                   ...(
                     turnTrackingEnabled
