@@ -62,6 +62,8 @@ type OfficialH2HRow = {
   opponentWins: number;
   sortTier: 0 | 1 | 2;
   isDraw: boolean;
+  /** Solo presente en filas de fase mata-mata: identifica el cruce del bracket. */
+  bracketMatchId?: string | null;
 };
 
 type RevengeH2HRow = {
@@ -90,27 +92,15 @@ type TiebreakProfileRow = {
 };
 
 type BracketBmRow = {
+  id: string;
   bracket_phase: string;
   pairing_id: string | null;
   participant_a_id: string;
   participant_b_id: string;
+  winner_participant_id: string | null;
 };
 
 type MataPhaseBuckets = { semi: OfficialH2HRow[]; final: OfficialH2HRow[]; third: OfficialH2HRow[] };
-
-function bracketPhaseForPairing(bmRows: BracketBmRow[], pr: PairingRow): 'semi' | 'final' | 'third_place' | null {
-  const hit =
-    bmRows.find((b) => b.pairing_id === pr.id) ??
-    bmRows.find(
-      (b) =>
-        (b.participant_a_id === pr.participant_a_id && b.participant_b_id === pr.participant_b_id) ||
-        (b.participant_a_id === pr.participant_b_id && b.participant_b_id === pr.participant_a_id)
-    );
-  if (!hit) return null;
-  const ph = hit.bracket_phase;
-  if (ph === 'semi' || ph === 'final' || ph === 'third_place') return ph;
-  return null;
-}
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
@@ -589,63 +579,56 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           if (isSwissBracketMata) {
             const bmRes = await supabase
               .from('event_tiebreak_bracket_matches')
-              .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
+              .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
               .eq('group_id', tgRes.data.id);
             const bmRows = (bmRes.data ?? []) as BracketBmRow[];
-            type Agg = {
-              opponentId: string;
-              opponentName: string;
-              pairingId: string;
-              profileWins: number;
-              opponentWins: number;
-            };
-            const semiM = new Map<string, Agg>();
-            const finalM = new Map<string, Agg>();
-            const thirdM = new Map<string, Agg>();
 
-            for (const m of matches) {
-              if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
-              const pr = pairingById.get(m.pairing_id);
-              if (!pr) continue;
-              if (!gPidSet.has(pr.participant_a_id) || !gPidSet.has(pr.participant_b_id)) continue;
+            // Fuente de verdad de la fase mata-mata: event_tiebreak_bracket_matches.
+            // El rival, la fase y el resultado salen del bracket match, NO del pairing
+            // (que en swiss_bo2 puede estar compartido con la ronda suiza y apuntar a
+            // otro jugador). El pairing solo se usa para contar el marcador parcial.
+            const semiRows: OfficialH2HRow[] = [];
+            const finalRows: OfficialH2HRow[] = [];
+            const thirdRows: OfficialH2HRow[] = [];
+
+            for (const bm of bmRows) {
               let oppId: string | null = null;
-              if (pr.participant_a_id === participantId) oppId = pr.participant_b_id;
-              else if (pr.participant_b_id === participantId) oppId = pr.participant_a_id;
+              if (bm.participant_a_id === participantId) oppId = bm.participant_b_id;
+              else if (bm.participant_b_id === participantId) oppId = bm.participant_a_id;
               else continue;
-              const phase = bracketPhaseForPairing(bmRows, pr);
+              const phase =
+                bm.bracket_phase === 'semi' || bm.bracket_phase === 'final' || bm.bracket_phase === 'third_place'
+                  ? bm.bracket_phase
+                  : null;
               if (!phase) continue;
-              const map = phase === 'semi' ? semiM : phase === 'final' ? finalM : thirdM;
+
+              // Marcador parcial: matches tiebreak del pairing del bracket match,
+              // alineando las victorias a los participantes del bracket match.
+              let profileWins = 0;
+              let opponentWins = 0;
+              if (bm.pairing_id) {
+                for (const m of matches) {
+                  if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
+                  if (m.pairing_id !== bm.pairing_id) continue;
+                  const w = String(m.winner_participant_id);
+                  if (w === participantId) profileWins += 1;
+                  else if (w === oppId) opponentWins += 1;
+                }
+              }
               const oppPlayer = players.find((p) => p.id === oppId);
-              const oppName = oppPlayer?.displayName ?? 'Jugador';
-              const winPid = String(m.winner_participant_id);
-              const cur = map.get(oppId) ?? {
+              const row: OfficialH2HRow = {
                 opponentId: oppId,
-                opponentName: oppName,
-                pairingId: pr.id,
-                profileWins: 0,
-                opponentWins: 0,
+                opponentName: oppPlayer?.displayName ?? 'Jugador',
+                pairingId: bm.pairing_id,
+                profileWins,
+                opponentWins,
+                sortTier: 0,
+                isDraw: false,
+                bracketMatchId: bm.id,
               };
-              if (winPid === participantId) cur.profileWins += 1;
-              else cur.opponentWins += 1;
-              map.set(oppId, cur);
+              (phase === 'semi' ? semiRows : phase === 'final' ? finalRows : thirdRows).push(row);
             }
-            const mapToRows = (mp: Map<string, Agg>): OfficialH2HRow[] =>
-              Array.from(mp.values())
-                .map((r) => ({
-                  opponentId: r.opponentId,
-                  opponentName: r.opponentName,
-                  pairingId: r.pairingId,
-                  profileWins: r.profileWins,
-                  opponentWins: r.opponentWins,
-                  sortTier: 0 as const,
-                  isDraw: false,
-                }))
-                .sort((a, b) => a.opponentName.localeCompare(b.opponentName, 'es'));
-            setProfileMataByPhase({
-              semi: mapToRows(semiM),
-              final: mapToRows(finalM),
-              third: mapToRows(thirdM),
-            });
+            setProfileMataByPhase({ semi: semiRows, final: finalRows, third: thirdRows });
             setProfileTiebreakRows([]);
           } else {
             setProfileMataByPhase(null);
@@ -793,6 +776,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             pairingId: row.pairingId,
             fromTab: 'official',
             fromPlayerProfile: { eventId, participantId, from: profileFrom },
+            ...(row.bracketMatchId ? { bracketMatchId: row.bracketMatchId } : {}),
           });
         }}
       >
@@ -805,11 +789,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {row.opponentName}
           </Text>
         </View>
-        {row.isDraw ? (
-          <Text style={styles.h2hDrawLabel}>Empate</Text>
-        ) : (
-          bo3Pills(row.profileWins, row.opponentWins, tint)
-        )}
+        {bo3Pills(row.profileWins, row.opponentWins, tint)}
       </TouchableOpacity>
     );
 

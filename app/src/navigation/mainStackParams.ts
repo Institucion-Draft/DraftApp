@@ -44,6 +44,12 @@ export type MainStackParamList = {
     fromTab?: 'official' | 'revenge';
     /** Origen perfil: el atrás del header vuelve a PlayerProfileInEvent. */
     fromPlayerProfile?: { eventId: string; participantId: string; from?: 'Standings' | 'EventDetail' };
+    /**
+     * Cruce de fase mata-mata a mostrar (event_tiebreak_bracket_matches.id). En swiss_bo2
+     * el pairing puede estar compartido con la ronda suiza, así que la sección mata-mata
+     * lee la identidad real del cruce desde este bracket match, no desde el pairing.
+     */
+    bracketMatchId?: string;
   };
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */

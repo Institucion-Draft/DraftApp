@@ -833,13 +833,21 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               const sortedBracketRows = [...bracketRows].sort(
                 (x, y) => phaseOrder[x.bracket_phase] - phaseOrder[y.bracket_phase]
               );
-              const itemForBracketRowFallback = (bm: {
-                id: string;
-                bracket_phase: BracketPhase;
-                participant_a_id: string;
-                participant_b_id: string;
-                winner_participant_id: string | null;
-              }): TiebreakOfficialItem => {
+              // Fuente de verdad de la fase mata-mata: event_tiebreak_bracket_matches.
+              // El pairing puede estar COMPARTIDO con la ronda suiza (misma fila por la
+              // constraint única event_id+a+b), así que NO leemos participantes ni ganador
+              // del pairing: los tomamos del bracket match. El pairing solo se usa para el
+              // marcador parcial (matches tiebreak) y para el match en vivo / navegación.
+              const itemForBracketRow = (
+                bm: {
+                  id: string;
+                  bracket_phase: BracketPhase;
+                  participant_a_id: string;
+                  participant_b_id: string;
+                  winner_participant_id: string | null;
+                },
+                pairing: PairingRow | null
+              ): TiebreakOfficialItem => {
                 const pa = pMap.get(bm.participant_a_id);
                 const pb = pMap.get(bm.participant_b_id);
                 const ua = relationOne(pa?.users);
@@ -848,8 +856,57 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 const bName = ub?.display_name || ub?.username || '?';
                 const aUserId = pa?.user_id ?? '';
                 const bUserId = pb?.user_id ?? '';
+
+                // Estado y ganador de la serie: salen de winner_participant_id del bracket
+                // match (igual que swiss bo3). Si no es null, la serie está cerrada.
+                const seriesClosed = bm.winner_participant_id != null;
                 const tbWonA = bm.winner_participant_id === bm.participant_a_id;
                 const tbWonB = bm.winner_participant_id === bm.participant_b_id;
+
+                // Marcador parcial: contar matches tiebreak ganados por cada lado dentro del
+                // pairing compartido, asignados según los participantes del bracket match.
+                const bracketWinsA = pairing
+                  ? safeMatches.filter(
+                      (m) =>
+                        m.pairing_id === pairing.id &&
+                        m.match_type === 'tiebreak' &&
+                        m.status === 'completed' &&
+                        m.winner_participant_id === bm.participant_a_id
+                    ).length
+                  : 0;
+                const bracketWinsB = pairing
+                  ? safeMatches.filter(
+                      (m) =>
+                        m.pairing_id === pairing.id &&
+                        m.match_type === 'tiebreak' &&
+                        m.status === 'completed' &&
+                        m.winner_participant_id === bm.participant_b_id
+                    ).length
+                  : 0;
+
+                // Match tiebreak en curso (solo relevante mientras la serie no esté cerrada).
+                const tbInProg =
+                  pairing && !seriesClosed
+                    ? safeMatches.find(
+                        (m) =>
+                          m.pairing_id === pairing.id &&
+                          m.match_type === 'tiebreak' &&
+                          m.status === 'in_progress'
+                      )
+                    : undefined;
+                const st: TiebreakOfficialItem['status'] = tbInProg
+                  ? 'in_progress'
+                  : seriesClosed
+                    ? 'completed'
+                    : 'scheduled';
+                let liveScoreA: number | null = null;
+                let liveScoreB: number | null = null;
+                if (tbInProg) {
+                  liveScoreA =
+                    lifeByMatchParticipant[tbInProg.id]?.[bm.participant_a_id]?.life ?? 20;
+                  liveScoreB =
+                    lifeByMatchParticipant[tbInProg.id]?.[bm.participant_b_id]?.life ?? 20;
+                }
                 let dimLoserSide: 'a' | 'b' | null = null;
                 if (tbWonA) dimLoserSide = 'b';
                 else if (tbWonB) dimLoserSide = 'a';
@@ -858,7 +915,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   !!currentUserId && (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
                 return {
                   id: bm.id,
-                  pairingId: null,
+                  pairingId: pairing?.id ?? null,
                   participant_a_id: bm.participant_a_id,
                   participant_b_id: bm.participant_b_id,
                   official_winner_participant_id: null,
@@ -876,28 +933,22 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       : null,
                   tiebreakWinnerUserId: tbWonA ? aUserId : tbWonB ? bUserId : null,
                   tiebreakWinnerName: winnerName,
-                  status: bm.winner_participant_id != null ? 'completed' : 'scheduled',
-                  liveScoreA: null,
-                  liveScoreB: null,
-                  inProgressMatchStartedAt: null,
+                  status: st,
+                  liveScoreA,
+                  liveScoreB,
+                  inProgressMatchStartedAt: tbInProg?.started_at ?? null,
                   mine,
                   bracketPhase: bm.bracket_phase,
-                  bracketWinsA: 0,
-                  bracketWinsB: 0,
+                  bracketWinsA,
+                  bracketWinsB,
                 };
               };
               const tbItems: TiebreakOfficialItem[] = [];
               for (const bm of sortedBracketRows) {
-                if (bm.pairing_id) {
-                  const pairing = pairingsAll.find((p) => p.id === bm.pairing_id);
-                  if (pairing) {
-                    tbItems.push(
-                      itemForPairing(pairing, 1, bm.bracket_phase, bm.winner_participant_id)
-                    );
-                    continue;
-                  }
-                }
-                tbItems.push(itemForBracketRowFallback(bm));
+                const pairing = bm.pairing_id
+                  ? pairingsAll.find((p) => p.id === bm.pairing_id) ?? null
+                  : null;
+                tbItems.push(itemForBracketRow(bm, pairing));
               }
               if (tbItems.length > 0) {
                 tiebreakSection = {
@@ -1390,7 +1441,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                           style={cardStyles}
                           activeOpacity={0.7}
                           onPress={() =>
-                            navigation.navigate('PairingDetail', { pairingId: targetPairingId, fromTab: 'official' })
+                            navigation.navigate('PairingDetail', {
+                              pairingId: targetPairingId,
+                              fromTab: 'official',
+                              // En la fase mata-mata, pasar el bracket match para que el detalle
+                              // muestre la identidad real del cruce (no la del pairing compartido).
+                              ...(isBracket ? { bracketMatchId: it.id } : {}),
+                            })
                           }
                         >
                           {inner}

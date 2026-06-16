@@ -138,15 +138,17 @@ function buildSwissTopcutBracketModel(
     seedByPid.set(String(r.participant_id), Number(r.seed));
   }
   const slot = (pid: string): SwissTopcutPlayerSlot | null => {
-    const s = seedByPid.get(pid);
-    if (s == null || !Number.isFinite(s)) return null;
     const info = infoByParticipantId.get(pid);
+    if (!info) return null;
+    const s = seedByPid.get(pid);
     return {
       kind: 'player',
       participantId: pid,
-      userId: info?.userId ?? '',
-      name: info?.name ?? 'Jugador',
-      seed: s,
+      userId: info.userId,
+      name: info.name,
+      // Sin seed válido (datos viejos sin seedear) usamos 0; el render lo trata
+      // como "sin número" en vez de descartar todo el cuadro.
+      seed: s != null && Number.isFinite(s) ? s : 0,
     };
   };
 
@@ -166,17 +168,28 @@ function buildSwissTopcutBracketModel(
     if (set.has(1) && set.has(4)) semi14 = m;
     else if (set.has(2) && set.has(3)) semi23 = m;
   }
+  // Fallback: si los seeds no identifican el cruce 1‑4 / 2‑3 (ej. bracket cuyos
+  // group_participants no quedaron seedeados 1..4), tomar las dos primeras semis
+  // en orden para no perder el render. Con seeds limpios (bo3 y bo2 normal) este
+  // bloque no cambia nada: semi14/semi23 ya quedaron resueltos arriba. Es lo que
+  // hace que el cuadro aparezca igual que en PairingsList (que no depende de seeds).
+  if (!semi14 || !semi23) {
+    semi14 = semi14 ?? semis[0] ?? null;
+    semi23 = semi23 ?? semis.find((m) => m !== semi14) ?? null;
+  }
   if (!semi14 || !semi23) return null;
 
   const s1a = slot(semi14.participant_a_id);
   const s1b = slot(semi14.participant_b_id);
   if (!s1a || !s1b) return null;
+  // Seed 1 arriba, seed 4 abajo; sin seeds limpios, participant_a arriba.
   const topSf1 = s1a.seed === 1 ? s1a : s1b.seed === 1 ? s1b : null;
   const botSf1 = s1a.seed === 4 ? s1a : s1b.seed === 4 ? s1b : null;
-  if (!topSf1 || !botSf1) return null;
+  const semi1Top = topSf1 ?? s1a;
+  const semi1Bottom = botSf1 ?? (semi1Top === s1a ? s1b : s1a);
   const semi1View: SwissTopcutSemiView = {
-    top: topSf1,
-    bottom: botSf1,
+    top: semi1Top,
+    bottom: semi1Bottom,
     winnerParticipantId: semi14.winner_participant_id,
     participantAId: semi14.participant_a_id,
     participantBId: semi14.participant_b_id,
@@ -185,13 +198,14 @@ function buildSwissTopcutBracketModel(
   const pa2 = slot(semi23.participant_a_id);
   const pb2 = slot(semi23.participant_b_id);
   if (!pa2 || !pb2) return null;
+  // Convención de cuadro: seed 3 arriba, seed 2 abajo (cerca de la final).
   const topSf2 = pa2.seed === 3 ? pa2 : pb2.seed === 3 ? pb2 : null;
   const bottomSf2 = pa2.seed === 2 ? pa2 : pb2.seed === 2 ? pb2 : null;
-  if (!topSf2 || !bottomSf2) return null;
-
+  const semi2Top = topSf2 ?? pa2;
+  const semi2Bottom = bottomSf2 ?? (semi2Top === pa2 ? pb2 : pa2);
   const semi2View: SwissTopcutSemiView = {
-    top: topSf2,
-    bottom: bottomSf2,
+    top: semi2Top,
+    bottom: semi2Bottom,
     winnerParticipantId: semi23.winner_participant_id,
     participantAId: semi23.participant_a_id,
     participantBId: semi23.participant_b_id,
@@ -550,8 +564,15 @@ function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
     const done = semi.winnerParticipantId != null;
     const topHi = rowHighlight(semi.top, semi.winnerParticipantId, done);
     const botHi = rowHighlight(semi.bottom, semi.winnerParticipantId, done);
-    const topLabel = semi.top.kind === 'player' ? `${semi.top.seed}°` : semi.top.label;
-    const botLabel = semi.bottom.kind === 'player' ? `${semi.bottom.seed}°` : semi.bottom.label;
+    // Con seed válido mostramos "N°"; sin seed (0) caemos al nombre para no mostrar "0°".
+    const topLabel =
+      semi.top.kind === 'player' ? (semi.top.seed > 0 ? `${semi.top.seed}°` : semi.top.name) : semi.top.label;
+    const botLabel =
+      semi.bottom.kind === 'player'
+        ? semi.bottom.seed > 0
+          ? `${semi.bottom.seed}°`
+          : semi.bottom.name
+        : semi.bottom.label;
     return (
       <View style={[styles.tcMatchCard, { width: semiW }]}>
         {renderMatchRow(semi.top, topHi, topLabel, { isTop: true, showCrown: false })}
@@ -691,7 +712,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .from('event_tiebreak_groups')
         .select('id, champion_user_id, status, group_type, round_number, created_at, group_origin')
         .eq('event_id', eventId)
-        .in('status', ['active', 'resolved'])
+        // Mismos estados que PairingsList/PlayerProfile (que sí muestran el cuadro).
+        .in('status', ['active', 'resolved', 'failed'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -1185,7 +1207,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
         const wa = a.swissOgw ?? -Infinity;
         const wb = b.swissOgw ?? -Infinity;
         if (wb !== wa) return wb - wa;
-        return 0;
+        // Desempate FINAL determinístico: mismo criterio que el seeding del
+        // bracket de top cut en maybe_advance_swiss_bo2_round (ORDER BY ...,
+        // ep.user_id). Debe ser el MISMO campo y dirección en ambos lados para
+        // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
+        return a.userId.localeCompare(b.userId);
       });
     } else {
       const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
@@ -1526,11 +1552,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
               </>
             )}
             {!isSwissBo2 ? (
-              <>
-                <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
-                <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
-              </>
+              <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
             ) : null}
+            <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
           {rows.map((r) => (
             <TouchableOpacity
@@ -1591,21 +1615,19 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 </>
               )}
               {!isSwissBo2 ? (
-                <>
-                  <Text
-                    style={[
-                      styles.cell,
-                      styles.dmvCol,
-                      { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
-                    ]}
-                  >
-                    {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
-                  </Text>
-                  <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
-                    {formatTmpDisplay(r.tmp)}
-                  </Text>
-                </>
+                <Text
+                  style={[
+                    styles.cell,
+                    styles.dmvCol,
+                    { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
+                  ]}
+                >
+                  {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
+                </Text>
               ) : null}
+              <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
+                {formatTmpDisplay(r.tmp)}
+              </Text>
             </TouchableOpacity>
           ))}
         </>
@@ -1692,7 +1714,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           tab === 'official'
             ? competitionFormat === 'swiss'
               ? isSwissBo2
-                ? 'Pts: Puntos (victoria=3, empate=1, bye=2) · OMW%: Rendimiento medio de los rivales (mín. 33%) · GW%: Porcentaje de partidas individuales ganadas · PF: Partidas individuales finalizadas'.split(' · ')
+                ? 'Pts: Puntos (victoria=3, empate=1, bye=2) · OMW%: Rendimiento medio de los rivales (mín. 33%) · GW%: Porcentaje de partidas individuales ganadas · PF: Partidas individuales finalizadas · TMP: Tiempo Medio por Partida'.split(' · ')
                 : (
                     turnTrackingEnabled
                       ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
