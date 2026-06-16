@@ -224,12 +224,19 @@ function computeMatchTurnTimeLines(
 }
 
 export default function PairingDetailScreen({ route, navigation }: Props) {
-  const { pairingId, fromTab: fromPairingsTab = 'official', fromPlayerProfile } = route.params;
+  const { pairingId, fromTab: fromPairingsTab = 'official', fromPlayerProfile, bracketMatchId } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [a, setA] = useState<ParticipantRow | null>(null);
   const [b, setB] = useState<ParticipantRow | null>(null);
+  /**
+   * Participantes reales del cruce de mata-mata (event_tiebreak_bracket_matches).
+   * En swiss_bo2 el pairing puede estar compartido con la ronda suiza, así que la
+   * sección mata-mata se lee del bracket match, no del pairing.
+   */
+  const [mataA, setMataA] = useState<ParticipantRow | null>(null);
+  const [mataB, setMataB] = useState<ParticipantRow | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [status, setStatus] = useState<'scheduled' | 'in_progress' | 'completed'>('scheduled');
@@ -278,6 +285,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       setActiveTiebreakGroup(null);
       setLegacyTwoWayTiebreak(false);
       setBracketMatchRow(null);
+      setMataA(null);
+      setMataB(null);
       setPairingHadSwissTopcutBracket(false);
       return;
     }
@@ -451,12 +460,52 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           winner_participant_id: string | null;
         }[];
         bracketRow =
+          // Si la navegación indicó el cruce de mata-mata, ese manda (identidad real).
+          (bracketMatchId ? rows.find((bm) => bm.id === bracketMatchId) : undefined) ??
           rows.find((bm) => bm.pairing_id === p.id) ??
           rows.find((bm) => bracketRowMatchesPairing(bm, p)) ??
           null;
       }
     }
     setBracketMatchRow(bracketRow);
+
+    // Identidad del cruce mata-mata desde el bracket match (no desde el pairing,
+    // que en swiss_bo2 puede estar compartido con la ronda suiza). Si alguno de los
+    // participantes del bracket no está entre los del pairing, lo traemos aparte.
+    let mA: ParticipantRow | null = null;
+    let mB: ParticipantRow | null = null;
+    if (bracketRow) {
+      mA = map.get(bracketRow.participant_a_id) ?? null;
+      mB = map.get(bracketRow.participant_b_id) ?? null;
+      const missingIds = [bracketRow.participant_a_id, bracketRow.participant_b_id].filter(
+        (id) => !map.has(id)
+      );
+      if (missingIds.length > 0) {
+        const extraRes = await supabase
+          .from('event_participants')
+          .select(
+            `
+            id,
+            user_id,
+            users!event_participants_user_id_fkey (
+              username,
+              display_name,
+              custom_avatar_path,
+              default_avatars (storage_path)
+            )
+          `
+          )
+          .in('id', missingIds);
+        if (!extraRes.error) {
+          for (const row of (extraRes.data ?? []) as ParticipantRow[]) {
+            if (row.id === bracketRow.participant_a_id) mA = row;
+            if (row.id === bracketRow.participant_b_id) mB = row;
+          }
+        }
+      }
+    }
+    setMataA(mA);
+    setMataB(mB);
 
     let hadSwissTopcutBracketPairing = !!bracketRow;
     if (!hadSwissTopcutBracketPairing && evFlags?.competition_format === 'swiss') {
@@ -541,7 +590,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     else if (p.official_winner_participant_id) setStatus('completed');
     else setStatus('scheduled');
 
-  }, [pairingId]);
+  }, [pairingId, bracketMatchId]);
 
   useEffect(() => {
     const id = setInterval(() => setNowTs(Date.now()), 30000);
@@ -811,6 +860,22 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       : pairing.tiebreak_winner_participant_id === pairing.participant_b_id
       ? bName
       : null;
+  // Identidad real del cruce de fase mata-mata: sale del bracket match, no del pairing
+  // (que en swiss_bo2 puede estar compartido con la ronda suiza). Sin bracket match
+  // (ej. desempate round_robin), cae al pairing, así que estos valores son seguros en
+  // ambos casos y se usan para la sección/encabezado de mata-mata.
+  const mataAId = bracketMatchRow?.participant_a_id ?? pairing.participant_a_id;
+  const mataBId = bracketMatchRow?.participant_b_id ?? pairing.participant_b_id;
+  const mauA = relationOne(mataA?.users);
+  const mauB = relationOne(mataB?.users);
+  const mataAName = mauA?.display_name || mauA?.username || aName;
+  const mataBName = mauB?.display_name || mauB?.username || bName;
+  const mataTieWinsA = tiebreakMs.filter(
+    (m) => m.status === 'completed' && m.winner_participant_id === mataAId
+  ).length;
+  const mataTieWinsB = tiebreakMs.filter(
+    (m) => m.status === 'completed' && m.winner_participant_id === mataBId
+  ).length;
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
     activeTiebreakGroup?.group_origin === 'swiss_topcut' ? 'Fase mata-mata' : 'Desempate';
@@ -849,15 +914,32 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const revengeWinsB = revengeCompleted.filter(
     (m) => m.winner_participant_id === pairing.participant_b_id
   ).length;
-  const swapSides = !!myUserId && b?.user_id === myUserId;
-  const leftP = swapSides ? b : a;
-  const rightP = swapSides ? a : b;
-  const dispLeftName = swapSides ? bName : aName;
-  const dispRightName = swapSides ? aName : bName;
-  const dispWinsLeftOfficial = swapSides ? winsB : winsA;
-  const dispWinsRightOfficial = swapSides ? winsA : winsB;
-  const dispTieLeft = swapSides ? tiebreakWinsB : tiebreakWinsA;
-  const dispTieRight = swapSides ? tiebreakWinsA : tiebreakWinsB;
+  // En el layout de bracket suizo el héroe representa el cruce de mata-mata real (del
+  // bracket match); en el resto, el pairing. mata* cae al pairing cuando no hay bracket.
+  const heroUsesBracket = useSwissTopcutBracketDetailLayout;
+  const heroPartA = heroUsesBracket ? mataA ?? a : a;
+  const heroPartB = heroUsesBracket ? mataB ?? b : b;
+  const heroAId = heroUsesBracket ? mataAId : pairing.participant_a_id;
+  const heroBId = heroUsesBracket ? mataBId : pairing.participant_b_id;
+  const heroAName = heroUsesBracket ? mataAName : aName;
+  const heroBName = heroUsesBracket ? mataBName : bName;
+  const heroOffWinsA = heroUsesBracket
+    ? officialMs.filter((m) => m.status === 'completed' && m.winner_participant_id === heroAId).length
+    : winsA;
+  const heroOffWinsB = heroUsesBracket
+    ? officialMs.filter((m) => m.status === 'completed' && m.winner_participant_id === heroBId).length
+    : winsB;
+  const heroTieWinsA = heroUsesBracket ? mataTieWinsA : tiebreakWinsA;
+  const heroTieWinsB = heroUsesBracket ? mataTieWinsB : tiebreakWinsB;
+  const swapSides = !!myUserId && heroPartB?.user_id === myUserId;
+  const leftP = swapSides ? heroPartB : heroPartA;
+  const rightP = swapSides ? heroPartA : heroPartB;
+  const dispLeftName = swapSides ? heroBName : heroAName;
+  const dispRightName = swapSides ? heroAName : heroBName;
+  const dispWinsLeftOfficial = swapSides ? heroOffWinsB : heroOffWinsA;
+  const dispWinsRightOfficial = swapSides ? heroOffWinsA : heroOffWinsB;
+  const dispTieLeft = swapSides ? heroTieWinsB : heroTieWinsA;
+  const dispTieRight = swapSides ? heroTieWinsA : heroTieWinsB;
   const dispRevLeft = swapSides ? revengeWinsB : revengeWinsA;
   const dispRevRight = swapSides ? revengeWinsA : revengeWinsB;
   const dispLiveL = inProgressLives ? (swapSides ? inProgressLives.b : inProgressLives.a) : 0;
@@ -1079,23 +1161,23 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const rowLabel = bracketMatchRow
       ? bracketLegRowLabel(bracketMatchRow.bracket_phase, idx, bracketLegWinsNeeded)
       : `#${displayNum}${roundSuffix}`;
+    // Identidad del cruce mata-mata: del bracket match (mata*), no del pairing.
     const starterName =
       m.status === 'completed' &&
       m.who_started_participant_id &&
-      (m.who_started_participant_id === pairing.participant_a_id ||
-        m.who_started_participant_id === pairing.participant_b_id)
-        ? m.who_started_participant_id === pairing.participant_a_id
-          ? aName
-          : bName
+      (m.who_started_participant_id === mataAId || m.who_started_participant_id === mataBId)
+        ? m.who_started_participant_id === mataAId
+          ? mataAName
+          : mataBName
         : null;
     const turnStats =
       turnTrackingEnabled && m.status === 'completed'
         ? computeMatchTurnTimeLines(
             matchTurnsByMatchId[m.id] ?? [],
-            pairing.participant_a_id,
-            pairing.participant_b_id,
-            aName,
-            bName
+            mataAId,
+            mataBId,
+            mataAName,
+            mataBName
           )
         : null;
     return (
@@ -1116,7 +1198,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           {m.status === 'completed' && m.winner_participant_id ? (
             <View>
               <Text style={styles.matchWinner}>
-                Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                Ganó {m.winner_participant_id === mataAId ? mataAName : mataBName}
               </Text>
               {durationLabel ? (
                 <Text style={styles.matchDuration}>
