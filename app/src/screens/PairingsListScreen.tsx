@@ -512,9 +512,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       if (m.status === 'aborted') continue;
       const pairing = pairingById.get(m.pairing_id);
       if (!pairing) continue;
-      if (competitionFormat === 'swiss') {
-        if (!pairingInSwissRevengeTab(pairing, currentSwissRound)) continue;
-      }
+      // Un match 'revenge' siempre va al tab Venganzas, incluso cuando su pairing
+      // pertenece a la ronda actual. El tab Oficial ya excluye 'revenge' de forma
+      // incondicional, así que no hay riesgo de duplicado.
       const pa = pMap.get(pairing.participant_a_id);
       const pb = pMap.get(pairing.participant_b_id);
       const ua = relationOne(pa?.users);
