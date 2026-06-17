@@ -14,6 +14,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
+import type { MtgColor } from '../lib/database.types';
 import { getPairingStatusLabel } from '../lib/labels';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
@@ -31,8 +32,11 @@ type PairingRow = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  member_b_user_id?: string | null;
+  giant_name?: string | null;
   bye_rounds?: number[] | null;
   left_event_at?: string | null;
+  participant_colors?: { color: string; member?: string | null }[] | { color: string; member?: string | null } | null;
   users:
     | {
         username: string;
@@ -55,6 +59,12 @@ type ItemView = PairingRow & {
   bName: string;
   aUserId: string;
   bUserId: string;
+  aMemberBUserId: string | null;
+  bMemberBUserId: string | null;
+  aMemberBColors: MtgColor[];
+  bMemberBColors: MtgColor[];
+  aGiantName: string | null;
+  bGiantName: string | null;
   winnerName: string | null;
   winnerUserId: string | null;
   mine: boolean;
@@ -182,8 +192,16 @@ function rankOfficialItemStatus(s: ItemView['status']): number {
 function sortOfficialItemsForDisplay(a: ItemView, b: ItemView, currentUserId: string | null): number {
   const s = rankOfficialItemStatus(a.status) - rankOfficialItemStatus(b.status);
   if (s !== 0) return s;
-  const mineA = !!currentUserId && (a.aUserId === currentUserId || a.bUserId === currentUserId);
-  const mineB = !!currentUserId && (b.aUserId === currentUserId || b.bUserId === currentUserId);
+  const mineA = !!currentUserId && (
+    a.aUserId === currentUserId || a.bUserId === currentUserId ||
+    (a.aMemberBUserId != null && a.aMemberBUserId === currentUserId) ||
+    (a.bMemberBUserId != null && a.bMemberBUserId === currentUserId)
+  );
+  const mineB = !!currentUserId && (
+    b.aUserId === currentUserId || b.bUserId === currentUserId ||
+    (b.aMemberBUserId != null && b.aMemberBUserId === currentUserId) ||
+    (b.bMemberBUserId != null && b.bMemberBUserId === currentUserId)
+  );
   if (mineA !== mineB) return mineA ? -1 : 1;
   return `${a.aName} ${a.bName}`.localeCompare(`${b.aName} ${b.bName}`, 'es', { sensitivity: 'base' });
 }
@@ -264,6 +282,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
   const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [eventType, setEventType] = useState<string | null>(null);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
   const [tiebreakOfficialSection, setTiebreakOfficialSection] = useState<TiebreakOfficialSection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -296,7 +315,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('status, competition_format, current_swiss_round')
+        .select('status, competition_format, current_swiss_round, event_type')
         .eq('id', eventId)
         .maybeSingle(),
       supabase
@@ -309,8 +328,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          member_b_user_id,
+          giant_name,
           bye_rounds,
           left_event_at,
+          participant_colors (color, member),
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -339,7 +361,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const eventFlags = eventRes.data as {
       competition_format?: string | null;
       current_swiss_round?: number | null;
+      event_type?: string | null;
     } | null;
+    setEventType(eventFlags?.event_type ?? null);
     // swiss_bo2 se comporta igual que swiss para el render de enfrentamientos.
     const competitionFormat =
       eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
@@ -443,6 +467,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const bName = ub?.display_name || ub?.username || 'Jugador B';
       const aUserId = pa?.user_id ?? '';
       const bUserId = pb?.user_id ?? '';
+      const aMemberBUserId = pa?.member_b_user_id ?? null;
+      const bMemberBUserId = pb?.member_b_user_id ?? null;
+      const extractMemberBColors = (row: ParticipantRow | undefined): MtgColor[] => {
+        if (!row?.participant_colors) return [];
+        const arr = Array.isArray(row.participant_colors) ? row.participant_colors : [row.participant_colors];
+        return arr.filter((c) => c.member === 'b').map((c) => c.color as MtgColor);
+      };
+      const aMemberBColors = extractMemberBColors(pa);
+      const bMemberBColors = extractMemberBColors(pb);
+      const aGiantName = pa?.giant_name ?? null;
+      const bGiantName = pb?.giant_name ?? null;
       const inProg = (inProgressByPairing.get(pairing.id) ?? 0) > 0;
       const isDraw = pairing.official_draw === true;
       const completed = !!pairing.official_winner_participant_id || isDraw;
@@ -457,12 +492,16 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         : null;
       const winnerUser = relationOne(winnerParticipant?.users);
       const winnerName =
-        winnerUser?.display_name || winnerUser?.username || null;
+        winnerParticipant?.giant_name ??
+        winnerUser?.display_name ?? winnerUser?.username ?? null;
       const winnerUserId = winnerParticipant?.user_id ?? null;
 
       const mine =
         !!currentUserId &&
-        (pa?.user_id === currentUserId || pb?.user_id === currentUserId);
+        (pa?.user_id === currentUserId ||
+          pb?.user_id === currentUserId ||
+          aMemberBUserId === currentUserId ||
+          bMemberBUserId === currentUserId);
       const inProgressMatchId = inProgressMatchByPairing.get(pairing.id);
       const inProgressMatchStartedAt = inProgressMatchId
         ? safeMatches.find((m) => m.id === inProgressMatchId)?.started_at ?? null
@@ -491,6 +530,12 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         bName,
         aUserId,
         bUserId,
+        aMemberBUserId,
+        bMemberBUserId,
+        aMemberBColors,
+        bMemberBColors,
+        aGiantName,
+        bGiantName,
         winnerName,
         winnerUserId,
         mine,
@@ -1149,13 +1194,25 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
   const renderOfficialPairingCard = useCallback(
     (item: ItemView) => {
-      const swapSides = !!myUserId && item.bUserId === myUserId;
+      const isGiantEvent = eventType === 'two_headed_giant';
+      const swapSides =
+        !!myUserId &&
+        (item.bUserId === myUserId ||
+          (isGiantEvent && item.bMemberBUserId === myUserId));
       const leftUserId = swapSides ? item.bUserId : item.aUserId;
       const rightUserId = swapSides ? item.aUserId : item.bUserId;
       const leftPid = swapSides ? item.participant_b_id : item.participant_a_id;
       const rightPid = swapSides ? item.participant_a_id : item.participant_b_id;
-      const leftName = swapSides ? item.bName : item.aName;
-      const rightName = swapSides ? item.aName : item.bName;
+      const leftName = swapSides
+        ? (isGiantEvent ? (item.bGiantName ?? item.bName) : item.bName)
+        : (isGiantEvent ? (item.aGiantName ?? item.aName) : item.aName);
+      const rightName = swapSides
+        ? (isGiantEvent ? (item.aGiantName ?? item.aName) : item.aName)
+        : (isGiantEvent ? (item.bGiantName ?? item.bName) : item.bName);
+      const leftMemberBUserId = swapSides ? item.bMemberBUserId : item.aMemberBUserId;
+      const rightMemberBUserId = swapSides ? item.aMemberBUserId : item.bMemberBUserId;
+      const leftMemberBColors = swapSides ? item.bMemberBColors : item.aMemberBColors;
+      const rightMemberBColors = swapSides ? item.aMemberBColors : item.bMemberBColors;
       const winsLeft = swapSides ? item.winsB : item.winsA;
       const winsRight = swapSides ? item.winsA : item.winsB;
       const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
@@ -1169,13 +1226,37 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         >
           <View style={styles.compactRow}>
             <View style={styles.inlinePlayer}>
-              <PlayerAvatar
-                userId={leftUserId}
-                participantId={leftPid}
-                size="small"
-                withColorBorder
-                borderWidth={3}
-              />
+              {isGiantEvent ? (
+                <View style={styles.giantAvatarPairCard}>
+                  <PlayerAvatar
+                    userId={leftUserId}
+                    participantId={leftPid}
+                    size="small"
+                    withColorBorder
+                    borderWidth={3}
+                    giantSide="left"
+                  />
+                  {leftMemberBUserId ? (
+                    <PlayerAvatar
+                      userId={leftMemberBUserId}
+                      size="small"
+                      withColorBorder
+                      borderWidth={3}
+                      giantSide="right"
+                      memberColors={leftMemberBColors}
+                      style={{ marginLeft: -8 }}
+                    />
+                  ) : null}
+                </View>
+              ) : (
+                <PlayerAvatar
+                  userId={leftUserId}
+                  participantId={leftPid}
+                  size="small"
+                  withColorBorder
+                  borderWidth={3}
+                />
+              )}
               <View>
                 <Text style={styles.name}>{leftName}</Text>
                 <View style={styles.bo3Row}>
@@ -1201,13 +1282,37 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
                 </View>
               </View>
-              <PlayerAvatar
-                userId={rightUserId}
-                participantId={rightPid}
-                size="small"
-                withColorBorder
-                borderWidth={3}
-              />
+              {isGiantEvent ? (
+                <View style={styles.giantAvatarPairCard}>
+                  {rightMemberBUserId ? (
+                    <PlayerAvatar
+                      userId={rightMemberBUserId}
+                      size="small"
+                      withColorBorder
+                      borderWidth={3}
+                      giantSide="left"
+                      memberColors={rightMemberBColors}
+                      style={{ marginRight: -8 }}
+                    />
+                  ) : null}
+                  <PlayerAvatar
+                    userId={rightUserId}
+                    participantId={rightPid}
+                    size="small"
+                    withColorBorder
+                    borderWidth={3}
+                    giantSide="right"
+                  />
+                </View>
+              ) : (
+                <PlayerAvatar
+                  userId={rightUserId}
+                  participantId={rightPid}
+                  size="small"
+                  withColorBorder
+                  borderWidth={3}
+                />
+              )}
             </View>
           </View>
           <View style={styles.footer}>
@@ -1232,7 +1337,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       );
     },
-    [navigation, myUserId]
+    [navigation, myUserId, eventType]
   );
 
   if (loading) {
@@ -1911,6 +2016,7 @@ const styles = StyleSheet.create({
   compactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
   inlinePlayerRight: { justifyContent: 'flex-end' },
+  giantAvatarPairCard: { flexDirection: 'row', alignItems: 'center' },
   playerRightText: { alignItems: 'flex-end' },
   winnerAvatarWrap: { marginRight: 6 },
   name: { fontSize: 12, color: '#111', fontWeight: '700' },

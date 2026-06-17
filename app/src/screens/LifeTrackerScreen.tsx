@@ -57,6 +57,8 @@ type PairingRow = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  member_b_user_id?: string | null;
+  giant_name?: string | null;
   is_shiny?: boolean;
   rotated_avatar_id: string | null;
   rotated_avatar:
@@ -909,6 +911,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [showShinyAnimB, setShowShinyAnimB] = useState(false);
   const [colorsA, setColorsA] = useState<MtgColor[]>([]);
   const [colorsB, setColorsB] = useState<MtgColor[]>([]);
+  const [memberBColorsA, setMemberBColorsA] = useState<MtgColor[]>([]);
+  const [memberBColorsB, setMemberBColorsB] = useState<MtgColor[]>([]);
   const [winsA, setWinsA] = useState(0);
   const [winsB, setWinsB] = useState(0);
   const [stableA, setStableA] = useState(20);
@@ -926,6 +930,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const timerBRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myUserIdRef = useRef<string | null>(null);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  const [isGiantEvent, setIsGiantEvent] = useState(false);
   const pairingRef = useRef<PairingRow | null>(null);
   const lifeRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const diffOpacityA = useRef(new Animated.Value(0)).current;
@@ -1271,7 +1276,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const [eventRes, participantsRes, colorsRes, lifeRes, winsRes, latestTgRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('workspace_id, turn_tracking_enabled')
+        .select('workspace_id, turn_tracking_enabled, event_type')
         .eq('id', pairingRow.event_id)
         .maybeSingle(),
       supabase
@@ -1280,6 +1285,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          member_b_user_id,
+          giant_name,
           is_shiny,
           rotated_avatar_id,
           rotated_avatar:default_avatars!rotated_avatar_id(storage_path, storage_path_shiny),
@@ -1294,7 +1301,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         .in('id', [pairingRow.participant_a_id, pairingRow.participant_b_id]),
       supabase
         .from('participant_colors')
-        .select('participant_id, color')
+        .select('participant_id, color, member')
         .in('participant_id', [pairingRow.participant_a_id, pairingRow.participant_b_id]),
       supabase.from('life_events').select('participant_id, resulting_life, occurred_at').eq('match_id', matchId),
       supabase
@@ -1336,7 +1343,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const preNameB = uB?.display_name || uB?.username || 'Jugador B';
 
     const wsId = eventRes.data?.workspace_id as string | undefined;
-    setTurnTrackingEnabled(!!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled);
+    const evFlags = eventRes.data as { turn_tracking_enabled?: boolean | null; event_type?: string | null } | null;
+    setTurnTrackingEnabled(!!evFlags?.turn_tracking_enabled);
+    setIsGiantEvent(evFlags?.event_type === 'two_headed_giant');
     const [roleRes, concurrentDetails] = await Promise.all([
       wsId && uid
         ? supabase
@@ -1384,14 +1393,23 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     setPa(pMap.get(pairingRow.participant_a_id) ?? null);
     setPb(pMap.get(pairingRow.participant_b_id) ?? null);
 
-    const colorMap: Record<string, MtgColor[]> = {};
+    const colorMapA: Record<string, MtgColor[]> = {};
+    const colorMapB: Record<string, MtgColor[]> = {};
     for (const c of colorsRes.data ?? []) {
       const pid = c.participant_id as string;
-      if (!colorMap[pid]) colorMap[pid] = [];
-      colorMap[pid].push(c.color as MtgColor);
+      const mem = (c as { member?: string | null }).member;
+      if (mem == null || mem === 'a') {
+        if (!colorMapA[pid]) colorMapA[pid] = [];
+        colorMapA[pid].push(c.color as MtgColor);
+      } else if (mem === 'b') {
+        if (!colorMapB[pid]) colorMapB[pid] = [];
+        colorMapB[pid].push(c.color as MtgColor);
+      }
     }
-    setColorsA(colorMap[pairingRow.participant_a_id] ?? []);
-    setColorsB(colorMap[pairingRow.participant_b_id] ?? []);
+    setColorsA(colorMapA[pairingRow.participant_a_id] ?? []);
+    setColorsB(colorMapA[pairingRow.participant_b_id] ?? []);
+    setMemberBColorsA(colorMapB[pairingRow.participant_a_id] ?? []);
+    setMemberBColorsB(colorMapB[pairingRow.participant_b_id] ?? []);
 
     const latestByParticipant: Record<string, { life: number; at: string }> = {};
     for (const e of lifeRes.data ?? []) {
@@ -1451,7 +1469,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     let lifeDispA = clampLife(matchRow.starting_life_a);
     let lifeDispB = clampLife(matchRow.starting_life_b);
 
-    const turnTrackOn = !!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)?.turn_tracking_enabled;
+    const turnTrackOn = !!evFlags?.turn_tracking_enabled;
     if (turnTrackOn) {
       const turnsRes = await supabase
         .from('match_turns')
@@ -2191,19 +2209,21 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   ]);
 
   const nameA = useMemo(() => {
+    if (isGiantEvent && pa?.giant_name) return pa.giant_name;
     const u = relationOne(pa?.users);
     return u?.display_name || u?.username || 'Jugador A';
-  }, [pa]);
+  }, [isGiantEvent, pa]);
   const nameB = useMemo(() => {
+    if (isGiantEvent && pb?.giant_name) return pb.giant_name;
     const u = relationOne(pb?.users);
     return u?.display_name || u?.username || 'Jugador B';
-  }, [pb]);
+  }, [isGiantEvent, pb]);
   const layoutAB = useMemo(() => {
     if (!pa || !pb) return { top: 'a' as const, bottom: 'b' as const };
-    if (sessionUserId === pa.user_id) return { top: 'b' as const, bottom: 'a' as const };
-    if (sessionUserId === pb.user_id) return { top: 'a' as const, bottom: 'b' as const };
+    if (sessionUserId === pa.user_id || (isGiantEvent && pa.member_b_user_id != null && sessionUserId === pa.member_b_user_id)) return { top: 'b' as const, bottom: 'a' as const };
+    if (sessionUserId === pb.user_id || (isGiantEvent && pb.member_b_user_id != null && sessionUserId === pb.member_b_user_id)) return { top: 'a' as const, bottom: 'b' as const };
     return { top: 'a' as const, bottom: 'b' as const };
-  }, [sessionUserId, pa, pb]);
+  }, [sessionUserId, isGiantEvent, pa, pb]);
   const bgSeed = match?.id ?? pairing?.id ?? matchId;
   const { bgA: bgColorA, bgB: bgColorB } = useMemo(
     () => pickCoordinatedBgColors(colorsA, colorsB, bgSeed),
@@ -2348,39 +2368,39 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               {isDefenderShake ? (
                 <Animated.View style={{ transform: [{ translateX: defenderShake }] }}>
                   <View style={styles.avatarInner}>
-                    <PlayerAvatar
-                      userId={p.user_id}
-                      participantId={p.id}
-                      size="xlarge"
-                      withColorBorder
-                      borderWidth={5}
-                      showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
-                    />
+                    {isGiantEvent ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                        <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                      </View>
+                    ) : (
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                    )}
                   </View>
                 </Animated.View>
               ) : isAttackerSoftShake ? (
                 <Animated.View style={{ transform: [{ translateX: attackerShake }] }}>
                   <View style={styles.avatarInner}>
-                    <PlayerAvatar
-                      userId={p.user_id}
-                      participantId={p.id}
-                      size="xlarge"
-                      withColorBorder
-                      borderWidth={5}
-                      showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
-                    />
+                    {isGiantEvent ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                        <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                      </View>
+                    ) : (
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                    )}
                   </View>
                 </Animated.View>
               ) : (
                 <View style={styles.avatarInner}>
-                  <PlayerAvatar
-                    userId={p.user_id}
-                    participantId={p.id}
-                    size="xlarge"
-                    withColorBorder
-                    borderWidth={5}
-                    showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB}
-                  />
+                  {isGiantEvent ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                      {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                    </View>
+                  ) : (
+                    <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                  )}
                 </View>
               )}
               {specialEmoji != null && specialType != null && attackingFrom === t ? (
@@ -2664,13 +2684,14 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               disabled={savingStarter}
               onPress={() => void chooseStarter(pa.id)}
             >
-              <PlayerAvatar
-                userId={pa.user_id}
-                participantId={pa.id}
-                size="small"
-                withColorBorder
-                borderWidth={3}
-              />
+              {isGiantEvent ? (
+                <View style={{ flexDirection: 'row' }}>
+                  <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
+                  {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsA} style={{ marginLeft: -8 }} /> : null}
+                </View>
+              ) : (
+                <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} />
+              )}
               <Text style={styles.starterOptionName}>{nameA}</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -2679,13 +2700,14 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               disabled={savingStarter}
               onPress={() => void chooseStarter(pb.id)}
             >
-              <PlayerAvatar
-                userId={pb.user_id}
-                participantId={pb.id}
-                size="small"
-                withColorBorder
-                borderWidth={3}
-              />
+              {isGiantEvent ? (
+                <View style={{ flexDirection: 'row' }}>
+                  <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
+                  {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsB} style={{ marginLeft: -8 }} /> : null}
+                </View>
+              ) : (
+                <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} />
+              )}
               <Text style={styles.starterOptionName}>{nameB}</Text>
             </TouchableOpacity>
           </View>

@@ -132,7 +132,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
       const [partsRes, usersRes] = await Promise.all([
         supabase
           .from('event_participants')
-          .select('event_id, user_id, is_shiny, rotated_avatar_id, default_avatars (storage_path, storage_path_shiny)')
+          .select('event_id, user_id, is_shiny, rotated_avatar_id, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)')
           .in('event_id', eventIds)
           .in('user_id', userIds)
           .eq('role', 'player'),

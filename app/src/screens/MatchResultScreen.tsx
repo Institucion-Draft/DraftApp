@@ -36,6 +36,8 @@ type PairingRow = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  giant_name: string | null;
+  member_b_user_id: string | null;
   users:
     | {
         username: string;
@@ -82,6 +84,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
   const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
+  const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
@@ -129,6 +132,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          giant_name,
+          member_b_user_id,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -143,7 +148,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         .select('winner_participant_id, match_type')
         .eq('pairing_id', p.id)
         .not('winner_participant_id', 'is', null)
-        .in('match_type', ['draft', 'final']),
+        .in('match_type', ['draft', 'final', 'two_headed_giant']),
       supabase
         .from('matches')
         .select('winner_participant_id')
@@ -184,7 +189,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled, topcut_format, competition_format, current_swiss_round')
+        .select('turn_tracking_enabled, topcut_format, competition_format, current_swiss_round, event_type')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -237,8 +242,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       topcut_format?: string | null;
       competition_format?: string | null;
       current_swiss_round?: number | string | null;
+      event_type?: string | null;
     } | null;
     setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
+    setIsGiantEvent(eventFlags?.event_type === 'two_headed_giant');
     const fmt =
       eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
         ? 'swiss'
@@ -257,7 +264,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         group_type: string;
         group_origin: string | null;
       } | null;
-      if (tgd?.group_type === 'bracket' && tgd.group_origin === 'swiss_topcut') {
+      if (tgd?.group_type === 'bracket') {
         const bmRes = await supabase
           .from('event_tiebreak_bracket_matches')
           .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
@@ -315,8 +322,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
 
   const ua = relationOne(pa.users);
   const ub = relationOne(pb.users);
-  const aName = ua?.display_name || ua?.username || 'Jugador A';
-  const bName = ub?.display_name || ub?.username || 'Jugador B';
+  const aName = isGiantEvent && pa.giant_name ? pa.giant_name : (ua?.display_name || ua?.username || 'Jugador A');
+  const bName = isGiantEvent && pb.giant_name ? pb.giant_name : (ub?.display_name || ub?.username || 'Jugador B');
   const winnerIsA = match.winner_participant_id === pairing.participant_a_id;
   const winnerIsB = match.winner_participant_id === pairing.participant_b_id;
   const winnerName = winnerIsA ? aName : winnerIsB ? bName : 'Sin definir';
@@ -327,9 +334,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : 'Jugar la vuelta'
       : match.match_type === 'revenge'
         ? 'Otra venganza'
-        : completedPairingMatchCount >= 2
-          ? 'Jugar el bueno'
-          : 'Jugar la vuelta';
+        : pairing.official_winner_participant_id != null && competitionFormat === 'round_robin'
+          ? 'Iniciar venganza'
+          : completedPairingMatchCount >= 2
+            ? 'Jugar el bueno'
+            : 'Jugar la vuelta';
   const durationMs =
     match.ended_at != null
       ? new Date(match.ended_at).getTime() - new Date(match.started_at).getTime()
@@ -350,10 +359,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     Math.max(tiebreakWinsA, tiebreakWinsB) < bracketTiebreakWinsNeeded;
   const showRematchBtn =
     bracketTiebreakSeriesStillOpen ||
-    (match.match_type !== 'tiebreak' && (match.match_type === 'revenge' || officialBo3StillOpen));
+    (match.match_type !== 'tiebreak' && (
+      match.match_type === 'revenge' ||
+      officialBo3StillOpen ||
+      (competitionFormat === 'round_robin' && pairing.official_winner_participant_id != null)
+    ));
 
   const isOfficialOpen =
-    (match.match_type === 'draft' || match.match_type === 'final') && winsA < 2 && winsB < 2;
+    (match.match_type === 'draft' || match.match_type === 'final' || match.match_type === 'two_headed_giant') && winsA < 2 && winsB < 2;
   const matchEndedAt = match.ended_at ? new Date(match.ended_at).getTime() : 0;
   const superCupTriggeredHere =
     match.match_type === 'revenge' &&
@@ -399,7 +412,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           ? 'revenge'
           : pairing.official_winner_participant_id
             ? 'revenge'
-            : 'draft';
+            : match.match_type === 'two_headed_giant'
+              ? 'two_headed_giant'
+              : 'draft';
     const insRes = await supabase
       .from('matches')
       .insert({ pairing_id: pairing.id, match_number: number, match_type: type, started_at: new Date().toISOString() })
@@ -420,37 +435,47 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         <View style={styles.avatarHeroRow}>
           {winnerIsA ? (
             <>
-              <PlayerAvatar
-                userId={pa.user_id}
-                participantId={pa.id}
-                size="xlarge"
-                withColorBorder={false}
-              />
-              <View style={styles.loserAvatarWrap}>
-                <PlayerAvatar
-                  userId={pb.user_id}
-                  participantId={pb.id}
-                  size="medium"
-                  withColorBorder={false}
-                />
-              </View>
+              {isGiantEvent ? (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                  <View style={{ flexDirection: 'row' }}>
+                    <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="xlarge" withColorBorder={false} giantSide="left" />
+                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
+                  </View>
+                  <View style={{ marginLeft: 8, opacity: 0.5, alignItems: 'center' }}>
+                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="small" withColorBorder={false} /> : null}
+                    <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder={false} />
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="xlarge" withColorBorder={false} />
+                  <View style={styles.loserAvatarWrap}>
+                    <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="medium" withColorBorder={false} />
+                  </View>
+                </>
+              )}
             </>
           ) : (
             <>
-              <PlayerAvatar
-                userId={pb.user_id}
-                participantId={pb.id}
-                size="xlarge"
-                withColorBorder={false}
-              />
-              <View style={styles.loserAvatarWrap}>
-                <PlayerAvatar
-                  userId={pa.user_id}
-                  participantId={pa.id}
-                  size="medium"
-                  withColorBorder={false}
-                />
-              </View>
+              {isGiantEvent ? (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                  <View style={{ flexDirection: 'row' }}>
+                    <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="xlarge" withColorBorder={false} giantSide="left" />
+                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
+                  </View>
+                  <View style={{ marginLeft: 8, opacity: 0.5, alignItems: 'center' }}>
+                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="small" withColorBorder={false} /> : null}
+                    <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder={false} />
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="xlarge" withColorBorder={false} />
+                  <View style={styles.loserAvatarWrap}>
+                    <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="medium" withColorBorder={false} />
+                  </View>
+                </>
+              )}
             </>
           )}
         </View>

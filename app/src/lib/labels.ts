@@ -25,6 +25,8 @@ export function getEventTypeLabel(eventType: EventType): string {
       return 'Torneo';
     case 'pepidraft':
       return 'Pepidraft';
+    case 'two_headed_giant':
+      return 'Gigante de Dos Cabezas';
     default:
       return eventType;
   }

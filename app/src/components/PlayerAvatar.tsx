@@ -54,6 +54,13 @@ type Props = {
   outsideEvent?: boolean;
   /** Si true y el participante es shiny, animación de estrellas ~1.5s. */
   showShinyAnimation?: boolean;
+  /**
+   * En pares 2HG: 'left' suprime el borde derecho; 'right' suprime el borde izquierdo.
+   * Los colores se distribuyen sobre los 3 lados visibles.
+   */
+  giantSide?: 'left' | 'right';
+  /** Colores pre-cargados por el llamador (evita consulta a participant_colors). */
+  memberColors?: MtgColor[];
 };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -234,6 +241,8 @@ export default function PlayerAvatar({
   style,
   outsideEvent = false,
   showShinyAnimation = false,
+  giantSide,
+  memberColors,
 }: Props) {
   const diameter = SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
@@ -286,13 +295,13 @@ export default function PlayerAvatar({
                   ? `
                 rotated_avatar_id,
                 is_shiny,
-                default_avatars (storage_path, storage_path_shiny),
-                participant_colors (color)
+                default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
+                participant_colors (color, member)
               `
                   : `
                 rotated_avatar_id,
                 is_shiny,
-                default_avatars (storage_path, storage_path_shiny)
+                default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
               `
               )
               .eq('id', participantId)
@@ -316,6 +325,7 @@ export default function PlayerAvatar({
       let rotatedStoragePath: string | null = null;
       let colors: MtgColor[] = [];
 
+      console.log('DEBUG pRes', participantId, JSON.stringify(pRes?.data), pRes?.error);
       if (!pRes.error && pRes.data) {
         const p = pRes.data as {
           is_shiny?: boolean;
@@ -326,7 +336,7 @@ export default function PlayerAvatar({
             storage_path: string;
             storage_path_shiny?: string | null;
           }[] | null;
-          participant_colors?: { color: string } | { color: string }[] | null;
+          participant_colors?: { color: string; member?: string | null } | { color: string; member?: string | null }[] | null;
         };
         setIsShiny(!!p.is_shiny);
         const rotDa = relationOne(p.default_avatars);
@@ -334,12 +344,19 @@ export default function PlayerAvatar({
         const normalPath = rotDa?.storage_path ?? null;
         rotatedStoragePath =
           p.is_shiny && shinyPath ? shinyPath : normalPath;
-        if (withColorBorder && p.participant_colors != null) {
+        console.log('DEBUG colors', participantId, (pRes?.data as any)?.participant_colors, memberColors);
+        if (memberColors !== undefined) {
+          colors = [...memberColors];
+        } else if (withColorBorder && p.participant_colors != null) {
           const rows = Array.isArray(p.participant_colors)
             ? p.participant_colors
             : [p.participant_colors];
-          colors = rows.map((r) => r.color as MtgColor);
+          colors = rows
+            .filter((r) => r.member == null || r.member === 'a')
+            .map((r) => r.color as MtgColor);
         }
+      } else if (memberColors !== undefined) {
+        colors = [...memberColors];
       }
 
       let uri: string | null = null;
@@ -361,7 +378,7 @@ export default function PlayerAvatar({
     return () => {
       cancelled = true;
     };
-  }, [userId, participantId, withColorBorder, outsideEvent]);
+  }, [userId, participantId, withColorBorder, outsideEvent, memberColors]);
 
   const playShinyBurst = showShinyAnimation && isShiny && !loading && !outsideEvent;
 
@@ -377,9 +394,41 @@ export default function PlayerAvatar({
   const spriteIsShiny = isShiny && !showPlaceholder && !outsideEvent && !!participantId;
   const fontSize = Math.max(10, Math.round(diameter * 0.42));
 
+  const T_p = strokeW - 2 * rStroke;
+  const Rgt_p = strokeH - 2 * rStroke;
+  const A_p = (Math.PI / 2) * rStroke;
+  const L_p = 2 * T_p + 2 * Rgt_p + 4 * A_p;
+  const tRightStart = L_p > 0 ? T_p / L_p : 0.18;
+  const tRightEnd = L_p > 0 ? (T_p + 2 * A_p + Rgt_p) / L_p : 0.5;
+  const tLeftStart = L_p > 0 ? (2 * T_p + 2 * A_p + Rgt_p) / L_p : 0.68;
+  const giantVisStart = giantSide === 'left' ? tRightEnd : 0;
+  const giantVisLen = giantSide === 'left' ? 1 - tRightEnd + tRightStart : tLeftStart;
+
   const ring = withColorBorder ? (
     <Svg width={outer} height={outer} style={StyleSheet.absoluteFill}>
-      {borderColors.length === 0 || borderColors.length === 1 ? (
+      {giantSide != null ? (
+        // Modo gigante: dibuja los 3 lados visibles como arcos; sin contorno exterior.
+        (() => {
+          const n = Math.max(borderColors.length, 1);
+          return Array.from({ length: n }).map((_, i) => {
+            const c = borderColors[i];
+            const t0 = giantVisStart + (i / n) * giantVisLen;
+            const t1 = giantVisStart + ((i + 1) / n) * giantVisLen;
+            const d = perimeterSegmentPath(strokeX, strokeY, strokeW, strokeH, rStroke, t0, t1, 28);
+            return (
+              <Path
+                key={`seg-${i}`}
+                d={d}
+                stroke={c != null ? MTG_COLOR_HEX[c] : NEUTRAL_BORDER}
+                strokeWidth={bw}
+                fill="none"
+                strokeLinecap="butt"
+                strokeLinejoin="miter"
+              />
+            );
+          });
+        })()
+      ) : borderColors.length === 0 || borderColors.length === 1 ? (
         <Rect
           x={strokeX}
           y={strokeY}
@@ -422,17 +471,19 @@ export default function PlayerAvatar({
         })
       )}
       {/* Contorno exterior: mismo perímetro que el borde externo del anillo de color. */}
-      <Rect
-        x={RING_OUTLINE_W / 2}
-        y={RING_OUTLINE_W / 2}
-        width={outer - RING_OUTLINE_W}
-        height={outer - RING_OUTLINE_W}
-        rx={outerRingOutlineRx}
-        ry={outerRingOutlineRx}
-        fill="none"
-        stroke={RING_OUTLINE}
-        strokeWidth={RING_OUTLINE_W}
-      />
+      {giantSide == null ? (
+        <Rect
+          x={RING_OUTLINE_W / 2}
+          y={RING_OUTLINE_W / 2}
+          width={outer - RING_OUTLINE_W}
+          height={outer - RING_OUTLINE_W}
+          rx={outerRingOutlineRx}
+          ry={outerRingOutlineRx}
+          fill="none"
+          stroke={RING_OUTLINE}
+          strokeWidth={RING_OUTLINE_W}
+        />
+      ) : null}
     </Svg>
   ) : null;
 

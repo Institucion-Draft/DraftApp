@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import {
@@ -82,6 +83,9 @@ type ActiveTiebreakGroupState = {
 type ParticipantRow = {
   id: string;
   user_id: string;
+  member_b_user_id?: string | null;
+  giant_name?: string | null;
+  participant_colors?: { color: string; member?: string | null }[] | { color: string; member?: string | null } | null;
   users:
     | {
         username: string;
@@ -260,6 +264,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
+  const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [matchTurnsByMatchId, setMatchTurnsByMatchId] = useState<Record<string, MatchTurnTimeRow[]>>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -298,7 +303,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, current_swiss_round, topcut_format'
+          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, current_swiss_round, topcut_format, event_type'
         )
         .eq('id', p.event_id)
         .maybeSingle(),
@@ -308,6 +313,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          member_b_user_id,
+          giant_name,
+          participant_colors (color, member),
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -377,7 +385,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       competition_format?: string | null;
       current_swiss_round?: number | null;
       topcut_format?: string | null;
+      event_type?: string | null;
     } | null;
+    setIsGiantEvent(evFlags?.event_type === 'two_headed_giant');
     const tf = evFlags?.topcut_format;
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
     const turnTrackOn = !!evFlags?.turn_tracking_enabled;
@@ -789,9 +799,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
   const au = relationOne(a?.users);
   const bu = relationOne(b?.users);
-  const aName = au?.display_name || au?.username || 'Jugador A';
-  const bName = bu?.display_name || bu?.username || 'Jugador B';
-  const isParticipant = !!myUserId && (a?.user_id === myUserId || b?.user_id === myUserId);
+  const aName = (isGiantEvent && a?.giant_name) ? a.giant_name : (au?.display_name || au?.username || 'Jugador A');
+  const bName = (isGiantEvent && b?.giant_name) ? b.giant_name : (bu?.display_name || bu?.username || 'Jugador B');
+  const isParticipant = !!myUserId && (
+    a?.user_id === myUserId || b?.user_id === myUserId ||
+    (isGiantEvent && (a?.member_b_user_id === myUserId || b?.member_b_user_id === myUserId))
+  );
   const inProgressMatch = matches.find((m) => m.status === 'in_progress') ?? null;
 
   const isBracketGroup = activeTiebreakGroup?.group_type === 'bracket';
@@ -931,9 +944,20 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     : winsB;
   const heroTieWinsA = heroUsesBracket ? mataTieWinsA : tiebreakWinsA;
   const heroTieWinsB = heroUsesBracket ? mataTieWinsB : tiebreakWinsB;
-  const swapSides = !!myUserId && heroPartB?.user_id === myUserId;
+  const swapSides = !!myUserId && (
+    heroPartB?.user_id === myUserId ||
+    (isGiantEvent && heroPartB?.member_b_user_id === myUserId)
+  );
   const leftP = swapSides ? heroPartB : heroPartA;
   const rightP = swapSides ? heroPartA : heroPartB;
+
+  function getMemberBColors(p: typeof leftP): MtgColor[] {
+    if (!p?.participant_colors) return [];
+    const rows = Array.isArray(p.participant_colors) ? p.participant_colors : [p.participant_colors];
+    return rows.filter((r) => r.member === 'b').map((r) => r.color as MtgColor);
+  }
+  const leftMemberBColors = getMemberBColors(leftP);
+  const rightMemberBColors = getMemberBColors(rightP);
   const dispLeftName = swapSides ? heroBName : heroAName;
   const dispRightName = swapSides ? heroAName : heroBName;
   const dispWinsLeftOfficial = swapSides ? heroOffWinsB : heroOffWinsA;
@@ -1237,13 +1261,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         <View style={styles.heroThreeCol}>
           <View style={[styles.heroSide, styles.heroSideLeft]}>
             {leftP ? (
-              <PlayerAvatar
-                userId={leftP.user_id}
-                participantId={leftP.id}
-                size="large"
-                withColorBorder
-                borderWidth={4}
-              />
+              isGiantEvent ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                  <PlayerAvatar userId={leftP.user_id} participantId={leftP.id} size="large" withColorBorder borderWidth={4} giantSide="left" />
+                  {leftP.member_b_user_id ? (
+                    <PlayerAvatar userId={leftP.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={leftMemberBColors} style={{ marginLeft: -12 }} />
+                  ) : null}
+                </View>
+              ) : (
+                <PlayerAvatar userId={leftP.user_id} participantId={leftP.id} size="large" withColorBorder borderWidth={4} />
+              )
             ) : null}
             <Text style={styles.heroPlayerName}>{dispLeftName}</Text>
             {showHeroGreenRow ? (
@@ -1264,13 +1291,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           </View>
           <View style={[styles.heroSide, styles.heroSideRight]}>
             {rightP ? (
-              <PlayerAvatar
-                userId={rightP.user_id}
-                participantId={rightP.id}
-                size="large"
-                withColorBorder
-                borderWidth={4}
-              />
+              isGiantEvent ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                  <PlayerAvatar userId={rightP.user_id} participantId={rightP.id} size="large" withColorBorder borderWidth={4} giantSide="left" />
+                  {rightP.member_b_user_id ? (
+                    <PlayerAvatar userId={rightP.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={rightMemberBColors} style={{ marginLeft: -12 }} />
+                  ) : null}
+                </View>
+              ) : (
+                <PlayerAvatar userId={rightP.user_id} participantId={rightP.id} size="large" withColorBorder borderWidth={4} />
+              )
             ) : null}
             <Text style={styles.heroPlayerName}>{dispRightName}</Text>
             {showHeroGreenRow ? (

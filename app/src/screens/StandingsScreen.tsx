@@ -55,6 +55,7 @@ type RowView = {
   userId: string;
   name: string;
   colors: MtgColor[];
+  memberBColors: MtgColor[];
   pg: number;
   pj: number;
   eg: number;
@@ -77,6 +78,8 @@ type RowView = {
   inProgress: boolean;
   leftEventAt: string | null;
   gender: Gender | null;
+  giantName: string | null;
+  memberBUserId: string | null;
 };
 
 type RevengeRowView = {
@@ -659,6 +662,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
   const [eventChampionUserId, setEventChampionUserId] = useState<string | null>(null);
   const [eventChampionIsShiny, setEventChampionIsShiny] = useState(false);
+  const [eventTypeStored, setEventTypeStored] = useState<string | null>(null);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -684,6 +688,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
           swiss_omw,
           swiss_gw,
           swiss_ogw,
+          member_b_user_id,
+          giant_name,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -704,7 +710,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, event_type'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -728,6 +734,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
       setEventChampionIsShiny(false);
+      setEventTypeStored(null);
       return;
     }
 
@@ -751,7 +758,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       participantIds.length > 0
         ? await supabase
             .from('participant_colors')
-            .select('participant_id, color')
+            .select('participant_id, color, member')
             .in('participant_id', participantIds)
         : { data: [], error: null };
     if (colorsRes.error) {
@@ -764,13 +771,17 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
       setEventChampionIsShiny(false);
+      setEventTypeStored(null);
       return;
     }
-    const colorMap: Record<string, MtgColor[]> = {};
+    const colorMapA: Record<string, MtgColor[]> = {};
+    const colorMapB: Record<string, MtgColor[]> = {};
     for (const row of colorsRes.data ?? []) {
       const pid = row.participant_id as string;
-      if (!colorMap[pid]) colorMap[pid] = [];
-      colorMap[pid].push(row.color as MtgColor);
+      const mem = (row as { member?: string | null }).member;
+      const map = mem === 'b' ? colorMapB : colorMapA;
+      if (!map[pid]) map[pid] = [];
+      map[pid].push(row.color as MtgColor);
     }
     const pairings = pairingsRes.data ?? [];
     const pairingIds = pairings.map((p) => p.id as string);
@@ -833,6 +844,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setSwissChampionHonorific(null);
       setEventChampionUserId(null);
       setEventChampionIsShiny(false);
+      setEventTypeStored(null);
       return;
     }
 
@@ -867,6 +879,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setSwissChampionHonorific(swissChampHonorific);
     setEventChampionUserId(
       championUserId != null && String(championUserId).trim() !== '' ? String(championUserId) : null
+    );
+    setEventTypeStored(
+      (eventRes.data as { event_type?: string | null } | null)?.event_type ?? null
     );
     const championPart = championUserId
       ? (participants as { user_id: string; is_shiny?: boolean }[]).find(
@@ -943,6 +958,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         userId,
         name,
         avatarUserId: userId,
+        memberBUserId: (p.member_b_user_id as string | null) ?? null,
         bo3Won: eg,
         bo3Completed: ec,
         bo3WinRate: ec > 0 ? eg / ec : 0,
@@ -1091,7 +1107,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const u = relationOne(p.users);
       const name = u?.display_name || u?.username || 'Jugador';
       const userId = p.user_id as string;
-      const colors = colorMap[pid] ?? [];
+      const colors = colorMapA[pid] ?? [];
+      const memberBColors = colorMapB[pid] ?? [];
       const gender = (u?.gender as Gender | null | undefined) ?? null;
 
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
@@ -1176,6 +1193,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         userId,
         name,
         colors,
+        memberBColors,
         pg,
         pj,
         eg,
@@ -1192,6 +1210,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         inProgress,
         leftEventAt,
         gender,
+        giantName: (p as { giant_name?: string | null }).giant_name ?? null,
+        memberBUserId: (p as { member_b_user_id?: string | null }).member_b_user_id ?? null,
       };
     });
 
@@ -1236,7 +1256,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const u = relationOne(p.users);
       const name = u?.display_name || u?.username || 'Jugador';
       const userId = p.user_id as string;
-      const colors = colorMap[pid] ?? [];
+      const colors = colorMapA[pid] ?? [];
       const gender = (u?.gender as Gender | null | undefined) ?? null;
 
       const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
@@ -1456,6 +1476,26 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
+          ) : eventTypeStored === 'two_headed_giant' && pl.memberBUserId ? (
+            <View style={{ flexDirection: 'row' }}>
+              <PlayerAvatar
+                userId={pl.avatarUserId}
+                participantId={pl.participantId}
+                size="small"
+                withColorBorder
+                borderWidth={avatarBorder}
+                showShinyAnimation={showChampionShinyAnim}
+                giantSide="left"
+              />
+              <PlayerAvatar
+                userId={pl.memberBUserId}
+                size="small"
+                withColorBorder
+                borderWidth={avatarBorder}
+                giantSide="right"
+                style={{ marginLeft: -8 }}
+              />
+            </View>
           ) : (
             <PlayerAvatar
               userId={pl.avatarUserId}
@@ -1551,7 +1591,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 <Text style={[styles.cell, styles.statCol]}>EC</Text>
               </>
             )}
-            {!isSwissBo2 ? (
+            {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
               <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
             ) : null}
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
@@ -1570,19 +1610,45 @@ export default function StandingsScreen({ route, navigation }: Props) {
               }
             >
               <View style={[styles.playerCell, styles.playerCol]}>
-                <PlayerAvatar
-                  userId={r.userId}
-                  participantId={r.participantId}
-                  size="tiny"
-                  withColorBorder={false}
-                  style={styles.standingsAvatar}
-                />
+                {eventTypeStored === 'two_headed_giant' ? (
+                  <View style={styles.giantAvatarPairStandings}>
+                    <View style={{ alignItems: 'center' }}>
+                      <PlayerAvatar
+                        userId={r.userId}
+                        participantId={r.participantId}
+                        size="tiny"
+                        withColorBorder={false}
+                      />
+                      <ColorFlag colors={r.colors} />
+                    </View>
+                    {r.memberBUserId ? (
+                      <View style={{ alignItems: 'center' }}>
+                        <PlayerAvatar
+                          userId={r.memberBUserId}
+                          size="tiny"
+                          withColorBorder={false}
+                        />
+                        <ColorFlag colors={r.memberBColors} />
+                      </View>
+                    ) : null}
+                  </View>
+                ) : (
+                  <PlayerAvatar
+                    userId={r.userId}
+                    participantId={r.participantId}
+                    size="tiny"
+                    withColorBorder={false}
+                    style={styles.standingsAvatar}
+                  />
+                )}
                 <View style={styles.playerNameRow}>
                   <View style={styles.playerNameInner}>
                     {r.inProgress ? <PulsingLiveDot /> : null}
                     <View style={styles.playerNameWithByeRow}>
                       <Text style={styles.playerNameSwiss} numberOfLines={1}>
-                        {r.name}
+                        {eventTypeStored === 'two_headed_giant'
+                          ? (r.giantName ?? r.name)
+                          : r.name}
                         {r.leftEventAt ? ' *' : ''}
                       </Text>
                       {competitionFormat === 'swiss' && r.showCompletedByeL ? (
@@ -1590,7 +1656,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                       ) : null}
                     </View>
                   </View>
-                  <ColorFlag colors={r.colors} />
+                  {eventTypeStored !== 'two_headed_giant' ? <ColorFlag colors={r.colors} /> : null}
                 </View>
               </View>
               {competitionFormat === 'swiss' ? (
@@ -1614,7 +1680,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
                 </>
               )}
-              {!isSwissBo2 ? (
+              {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
                 <Text
                   style={[
                     styles.cell,
@@ -1857,6 +1923,7 @@ const styles = StyleSheet.create({
   dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
   playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
   standingsAvatar: { marginRight: 6 },
+  giantAvatarPairStandings: { flexDirection: 'row', alignItems: 'center', marginRight: 6 },
   playerNameRow: {
     flex: 1,
     minWidth: 0,
