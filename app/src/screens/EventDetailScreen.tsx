@@ -861,9 +861,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const showStandingsBtn =
     isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId);
   const championParticipant = event.champion_user_id
-    ? participants.find((p) => p.user_id === event.champion_user_id) ?? null
+    ? (participants.find((p) => p.user_id === event.champion_user_id) ??
+       participants.find((p) => p.member_b_user_id === event.champion_user_id) ??
+       null)
     : null;
-  const championDisplayName = championName?.trim() || 'Campeón';
+  const championDisplayName =
+    (event.event_type === 'two_headed_giant' && championParticipant?.giant_name?.trim())
+      ? championParticipant.giant_name.trim()
+      : (championName?.trim() || 'Campeón');
   const championHonorific = resolveGenderedText(championGender, 'campeón', 'campeona');
 
   const multiTiebreakBannerVisible =
@@ -1028,12 +1033,31 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             }
           >
             <View style={styles.championAvatarWrap}>
-              <PlayerAvatar
-                userId={event.champion_user_id}
-                participantId={championParticipant?.id}
-                size="large"
-                withColorBorder={true}
-              />
+              {event.event_type === 'two_headed_giant' && championParticipant?.member_b_user_id ? (
+                <View style={{ flexDirection: 'row' }}>
+                  <PlayerAvatar
+                    userId={championParticipant.user_id}
+                    participantId={championParticipant.id}
+                    size="small"
+                    withColorBorder={true}
+                    giantSide="left"
+                  />
+                  <PlayerAvatar
+                    userId={championParticipant.member_b_user_id}
+                    size="small"
+                    withColorBorder={true}
+                    giantSide="right"
+                    style={{ marginLeft: -8 }}
+                  />
+                </View>
+              ) : (
+                <PlayerAvatar
+                  userId={event.champion_user_id}
+                  participantId={championParticipant?.id}
+                  size="large"
+                  withColorBorder={true}
+                />
+              )}
             </View>
             <View style={styles.championBody}>
               <View style={styles.championRightContent}>
