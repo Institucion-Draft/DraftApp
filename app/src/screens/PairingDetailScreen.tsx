@@ -999,7 +999,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const showResumeStyle = startButtonLabel.startsWith('Retomar');
   const movePrimaryBtnAboveRevenge =
     (!inProgressMatch && (placementButtonPending || isTiebreakPending)) ||
-    inProgressMatch?.match_type === 'tiebreak';
+    inProgressMatch?.match_type === 'tiebreak' ||
+    startButtonLabel === 'Iniciar partida';
 
   const startMatch = async () => {
     if (!pairing) return;
@@ -1358,7 +1359,26 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             </>
           )
         ) : officialMs.length === 0 && revengeMs.length === 0 && tiebreakMs.length === 0 && !isTiebreakPending ? (
-          <Text style={styles.muted}>Todavía no hay partidas.</Text>
+          <>
+            <Text style={styles.muted}>Todavía no hay partidas.</Text>
+            {showPrimaryInOfficialsLegacy ? (
+              <View style={styles.primaryAboveRevengeWrap}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    showResumeStyle ? styles.resumeBtn : null,
+                    eventIsCancelled ? styles.primaryBtnDisabled : null,
+                  ]}
+                  disabled={eventIsCancelled}
+                  onPress={() => void startMatch()}
+                >
+                  <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>
+                    {startButtonLabel}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </>
         ) : (
           <>
             <Text style={styles.sectionSubtitle}>Partidas oficiales</Text>
