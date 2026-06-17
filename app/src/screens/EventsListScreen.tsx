@@ -384,7 +384,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
                   <Text style={styles.meta}>Tipo: {getEventTypeLabel(item.event_type)}</Text>
                   <Text style={styles.meta}>Cubo: {item.cube_id ? cubeMap[item.cube_id] ?? '—' : 'Sin definir'}</Text>
                   <Text style={styles.meta}>Sede: {item.venue_id ? venueMap[item.venue_id] ?? '—' : 'Sin definir'}</Text>
-                  <Text style={styles.meta}>Participantes: {participantCounts[item.id] ?? 0}</Text>
+                  <Text style={styles.meta}>Participantes: {(participantCounts[item.id] ?? 0) * (item.event_type === 'two_headed_giant' ? 2 : 1)}</Text>
                   {isToday(item.scheduled_for) ? (
                     <Animated.View style={[styles.todayBadge, { opacity: pulse }]}>
                       <Text style={styles.todayBadgeTxt}>ES HOY!</Text>
