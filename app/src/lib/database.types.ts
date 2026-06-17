@@ -3,7 +3,7 @@
  */
 
 export type MtgColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C';
-export type EventType = 'draft' | 'tournament' | 'pepidraft';
+export type EventType = 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
 export type EventStatus =
   | 'scheduled'
   | 'drafting'

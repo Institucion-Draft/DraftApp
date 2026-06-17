@@ -37,8 +37,9 @@ type EventRow = {
   name: string;
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled';
-  event_type: 'draft' | 'tournament' | 'pepidraft';
+  event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
   competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
+  giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
   venue_id: string | null;
@@ -60,6 +61,8 @@ type ParticipantView = {
   id: string;
   user_id: string;
   left_event_at: string | null;
+  member_b_user_id?: string | null;
+  giant_name?: string | null;
   users:
     | {
         username: string;
@@ -171,7 +174,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -226,6 +229,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           id,
           user_id,
           left_event_at,
+          member_b_user_id,
+          giant_name,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -262,7 +267,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
 
     const p = (partsRes.data ?? []) as ParticipantView[];
-    setParticipants(p);
+    // Deduplicate by id — the nested default_avatars join can return duplicate rows when
+    // a user has multiple default_avatars entries.
+    const seen = new Set<string>();
+    setParticipants(p.filter((ep) => (seen.has(ep.id) ? false : (seen.add(ep.id), true))));
 
     let multiTiebreakGroup: ActiveTiebreakGroupState | null = null;
     const activeGroupRes = await supabase
@@ -725,12 +733,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const missingCube = !event?.cube_id;
   const missingVenue = !event?.venue_id;
   const missingParticipants = participantCount < 1;
-  const startDraftDisabled = missingCube || missingVenue || missingParticipants;
+  const missingGiantRandomization =
+    event?.event_type === 'two_headed_giant' && !event?.giant_randomization_done;
+  const startDraftDisabled =
+    missingCube || missingVenue || missingParticipants || missingGiantRandomization;
   const missingStartRequirements: string[] = [];
   if (missingCube) missingStartRequirements.push('seleccionar el cubo');
   if (missingVenue) missingStartRequirements.push('seleccionar la sede');
   if (missingParticipants) {
     missingStartRequirements.push('que se inscriba al menos un jugador');
+  }
+  if (missingGiantRandomization) {
+    missingStartRequirements.push('sortear los equipos primero');
   }
   const startDraftDisabledHint = missingStartRequirements.length
     ? `Falta ${missingStartRequirements.join(', ')}`
@@ -786,6 +800,43 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  };
+
+  const randomizeGiants = async () => {
+    if (!event) return;
+    const { error } = await supabase.rpc('randomize_giant_pairs', { p_event_id: event.id });
+    if (error) {
+      const msg = error.message ?? '';
+      if (msg.includes('INVALID_COUNT')) {
+        Alert.alert('No se puede sortear', 'Se necesitan al menos 4 jugadores y un número par de inscriptos.');
+      } else {
+        Alert.alert('Error', msg || 'No se pudo sortear los gigantes.');
+      }
+      return;
+    }
+    await load();
+  };
+
+  const reRandomizeGiants = () => {
+    if (!event) return;
+    Alert.alert(
+      'Re-sortear equipos',
+      '¿Querés re-sortear los equipos? Se van a deshacer los equipos actuales.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Re-sortear',
+          onPress: () => void (async () => {
+            const { error } = await supabase.rpc('re_randomize_giant_pairs', { p_event_id: event.id });
+            if (error) {
+              Alert.alert('Error', error.message ?? 'No se pudo re-sortear los gigantes.');
+              return;
+            }
+            await load();
+          })(),
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -1045,6 +1096,28 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
                 <Text style={styles.primaryBtnTxt}>Editar evento</Text>
               </TouchableOpacity>
+              {event.status === 'scheduled' &&
+               !event.draft_started_at &&
+               event.event_type === 'two_headed_giant' &&
+               !event.giant_randomization_done ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => void randomizeGiants()}
+                >
+                  <Text style={styles.secondaryBtnTxt}>Randomizar gigantes</Text>
+                </TouchableOpacity>
+              ) : null}
+              {event.status === 'scheduled' &&
+               !event.draft_started_at &&
+               event.event_type === 'two_headed_giant' &&
+               !!event.giant_randomization_done ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={reRandomizeGiants}
+                >
+                  <Text style={styles.secondaryBtnTxt}>Re-randomizar gigantes</Text>
+                </TouchableOpacity>
+              ) : null}
               {event.status === 'scheduled' && !event.draft_started_at ? (
                 <TouchableOpacity
                   style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
@@ -1131,7 +1204,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {event.status === 'scheduled' ? (
         <View style={styles.block}>
-          {!myParticipantId && isWorkspaceMember ? (
+          {!myParticipantId &&
+           isWorkspaceMember &&
+           !(event.event_type === 'two_headed_giant' && !!event.giant_randomization_done) ? (
             <TouchableOpacity style={styles.primaryBtn} onPress={() => void insertMyRegistration()}>
               <Text style={styles.primaryBtnTxt}>Inscribirme al evento</Text>
             </TouchableOpacity>
@@ -1179,66 +1254,111 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Participantes</Text>
         {participants.length === 0 ? <Text style={styles.muted}>Todavía no hay participantes.</Text> : null}
-        {participants.map((p) => {
-          const u = relationOne(p.users);
-          const uname = u?.display_name || u?.username || 'sin nombre';
-          const participantChampionLabel = resolveGenderedText(u?.gender, 'Campeón', 'Campeona');
-          const polemicaSet = new Set((event?.polemica_winners ?? []).filter(Boolean).map(String));
-          const recognitionSet = new Set((event?.recognition_winners ?? []).filter(Boolean).map(String));
-          const isFragmentadaEvent = event?.champion_decided_by === 'fragmentada';
-          return (
-            <TouchableOpacity
-              key={p.id}
-              style={styles.participantRow}
-              onPress={() =>
-                navigation.navigate('PlayerProfileInEvent', {
-                  eventId: event.id,
-                  participantId: p.id,
-                  from: 'EventDetail',
-                })
-              }
-            >
-              <PlayerAvatar
-                userId={p.user_id}
-                participantId={p.id}
-                size="small"
-                withColorBorder={false}
-                style={{ marginRight: 10 }}
-              />
-              <View style={styles.participantBody}>
-                <View style={styles.participantNameRow}>
-                  <Text style={styles.participantName}>{uname}</Text>
-                  {event.champion_user_id && p.user_id === event.champion_user_id ? (
-                    <View style={styles.championBadge}>
-                      <Text style={styles.championBadgeText}>{participantChampionLabel}</Text>
+        {event.event_type === 'two_headed_giant' && !!event.giant_randomization_done
+          ? participants.map((p) => {
+              const u = relationOne(p.users);
+              const giantLabel = p.giant_name ?? (u?.display_name || u?.username || 'Gigante');
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={styles.participantRow}
+                  onPress={() =>
+                    navigation.navigate('PlayerProfileInEvent', {
+                      eventId: event.id,
+                      participantId: p.id,
+                      from: 'EventDetail',
+                    })
+                  }
+                >
+                  <View style={styles.giantAvatarPair}>
+                    <PlayerAvatar
+                      userId={p.user_id}
+                      participantId={p.id}
+                      size="small"
+                      withColorBorder={false}
+                    />
+                    {p.member_b_user_id ? (
+                      <PlayerAvatar
+                        userId={p.member_b_user_id}
+                        size="small"
+                        withColorBorder={false}
+                        style={{ marginLeft: -8 }}
+                      />
+                    ) : null}
+                  </View>
+                  <View style={styles.participantBody}>
+                    <View style={styles.participantNameRow}>
+                      <Text style={styles.participantName}>{giantLabel}</Text>
+                      {p.left_event_at ? (
+                        <View style={styles.leftEventChip}>
+                          <Text style={styles.leftEventChipText}>Se fue</Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ) : null}
-                  {polemicaSet.has(p.user_id) ? (
-                    isFragmentadaEvent ? (
-                      <View style={styles.fragmentadaBadge}>
-                        <Text style={styles.fragmentadaBadgeText}>🏆 Copa Fragmentada</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.polemicaBadge}>
-                        <Text style={styles.polemicaBadgeText}>🏆 Copa Polémica</Text>
-                      </View>
-                    )
-                  ) : null}
-                  {recognitionSet.has(p.user_id) ? (
-                    <View style={styles.recognitionBadge}>
-                      <Text style={styles.recognitionBadgeText}>🏅 Copa Reconocimiento</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          : participants.map((p) => {
+              const u = relationOne(p.users);
+              const uname = u?.display_name || u?.username || 'sin nombre';
+              const participantChampionLabel = resolveGenderedText(u?.gender, 'Campeón', 'Campeona');
+              const polemicaSet = new Set((event?.polemica_winners ?? []).filter(Boolean).map(String));
+              const recognitionSet = new Set((event?.recognition_winners ?? []).filter(Boolean).map(String));
+              const isFragmentadaEvent = event?.champion_decided_by === 'fragmentada';
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={styles.participantRow}
+                  onPress={() =>
+                    navigation.navigate('PlayerProfileInEvent', {
+                      eventId: event.id,
+                      participantId: p.id,
+                      from: 'EventDetail',
+                    })
+                  }
+                >
+                  <PlayerAvatar
+                    userId={p.user_id}
+                    participantId={p.id}
+                    size="small"
+                    withColorBorder={false}
+                    style={{ marginRight: 10 }}
+                  />
+                  <View style={styles.participantBody}>
+                    <View style={styles.participantNameRow}>
+                      <Text style={styles.participantName}>{uname}</Text>
+                      {event.champion_user_id && p.user_id === event.champion_user_id ? (
+                        <View style={styles.championBadge}>
+                          <Text style={styles.championBadgeText}>{participantChampionLabel}</Text>
+                        </View>
+                      ) : null}
+                      {polemicaSet.has(p.user_id) ? (
+                        isFragmentadaEvent ? (
+                          <View style={styles.fragmentadaBadge}>
+                            <Text style={styles.fragmentadaBadgeText}>🏆 Copa Fragmentada</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.polemicaBadge}>
+                            <Text style={styles.polemicaBadgeText}>🏆 Copa Polémica</Text>
+                          </View>
+                        )
+                      ) : null}
+                      {recognitionSet.has(p.user_id) ? (
+                        <View style={styles.recognitionBadge}>
+                          <Text style={styles.recognitionBadgeText}>🏅 Copa Reconocimiento</Text>
+                        </View>
+                      ) : null}
+                      {p.left_event_at ? (
+                        <View style={styles.leftEventChip}>
+                          <Text style={styles.leftEventChipText}>{p.user_id === myUserId ? 'Te fuiste' : 'Se fue'}</Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ) : null}
-                  {p.left_event_at ? (
-                    <View style={styles.leftEventChip}>
-                      <Text style={styles.leftEventChipText}>{p.user_id === myUserId ? 'Te fuiste' : 'Se fue'}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
       </View>
 
       {showProDeCEntry ? (
@@ -1396,6 +1516,11 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
     backgroundColor: '#fafafa',
+  },
+  giantAvatarPair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
   },
   participantBody: { flex: 1, minWidth: 0 },
   participantName: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 2 },

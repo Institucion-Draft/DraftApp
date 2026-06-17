@@ -29,6 +29,7 @@ const DECK_COLOR_OPTIONS: { key: MtgColor; bg: string; text: string }[] = [
 const PRODEC_COLOR_OPTIONS = DECK_COLOR_OPTIONS;
 
 type ParticipantRow = { id: string; self_evaluation: number | null };
+type MemberRole = 'a' | 'b';
 
 function sameColorSet(a: MtgColor[], b: MtgColor[]): boolean {
   if (a.length !== b.length) return false;
@@ -63,6 +64,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [participantId, setParticipantId] = useState<string | null>(null);
+  const [memberRole, setMemberRole] = useState<MemberRole>('a');
   const [selectedColors, setSelectedColors] = useState<MtgColor[]>([]);
   const [baselineColors, setBaselineColors] = useState<MtgColor[] | null>(null);
   const [selfEval, setSelfEval] = useState<number | null>(null);
@@ -82,24 +84,59 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         setLoading(false);
         return;
       }
-      const { data, error } = await supabase
+
+      // Detectar si el usuario es miembro A (tiene fila propia) o miembro B
+      // (absorbido en la fila del gigante vía member_b_user_id).
+      let pid: string | null = null;
+      let role: MemberRole = 'a';
+      let selfEvalRaw: number | null = null;
+
+      const memberARes = await supabase
         .from('event_participants')
         .select('id, self_evaluation')
         .eq('event_id', eventId)
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (error) {
+      if (memberARes.error) {
         Alert.alert('Error', 'No se pudo cargar Mi mazo.');
         setLoading(false);
         return;
       }
 
-      if (data) {
-        const p = data as ParticipantRow;
-        setParticipantId(p.id);
-        setSelfEval(p.self_evaluation);
-        const colorsRes = await supabase.from('participant_colors').select('color').eq('participant_id', p.id);
+      if (memberARes.data) {
+        const p = memberARes.data as ParticipantRow;
+        pid = p.id;
+        role = 'a';
+        selfEvalRaw = p.self_evaluation;
+      } else {
+        // Intentar como miembro B de un gigante.
+        const memberBRes = await supabase
+          .from('event_participants')
+          .select('id, self_evaluation')
+          .eq('event_id', eventId)
+          .eq('member_b_user_id', user.id)
+          .maybeSingle();
+
+        if (!memberBRes.error && memberBRes.data) {
+          const p = memberBRes.data as ParticipantRow;
+          pid = p.id; // ID del gigante (fila del miembro A)
+          role = 'b';
+          selfEvalRaw = p.self_evaluation;
+        }
+      }
+
+      setParticipantId(pid);
+      setMemberRole(role);
+      setSelfEval(selfEvalRaw);
+
+      if (pid) {
+        const colorsRes = await supabase
+          .from('participant_colors')
+          .select('color')
+          .eq('participant_id', pid)
+          .eq('member', role);
+
         if (colorsRes.error) {
           setSelectedColors([]);
           setBaselineColors([]);
@@ -187,7 +224,11 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       return;
     }
 
-    const delRes = await supabase.from('participant_colors').delete().eq('participant_id', pid);
+    const delRes = await supabase
+      .from('participant_colors')
+      .delete()
+      .eq('participant_id', pid)
+      .eq('member', memberRole);
     if (delRes.error) {
       setSaving(false);
       Alert.alert('Error', 'No se pudieron actualizar tus colores.');
@@ -196,7 +237,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     if (sortedColors.length > 0) {
       const ins = await supabase
         .from('participant_colors')
-        .insert(sortedColors.map((c) => ({ participant_id: pid, color: c })));
+        .insert(sortedColors.map((c) => ({ participant_id: pid, color: c, member: memberRole })));
       if (ins.error) {
         setSaving(false);
         Alert.alert('Error', 'No se pudieron guardar tus colores.');
@@ -236,7 +277,11 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       return;
     }
 
-    const delRes = await supabase.from('participant_colors').delete().eq('participant_id', pid);
+    const delRes = await supabase
+      .from('participant_colors')
+      .delete()
+      .eq('participant_id', pid)
+      .eq('member', memberRole);
     if (delRes.error) {
       setSaving(false);
       Alert.alert('Error', 'No se pudieron actualizar tus colores.');
@@ -245,7 +290,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     if (sortedColors.length > 0) {
       const ins = await supabase
         .from('participant_colors')
-        .insert(sortedColors.map((c) => ({ participant_id: pid, color: c })));
+        .insert(sortedColors.map((c) => ({ participant_id: pid, color: c, member: memberRole })));
       if (ins.error) {
         setSaving(false);
         Alert.alert('Error', 'No se pudieron guardar tus colores.');

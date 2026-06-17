@@ -52,6 +52,7 @@ type EventPlayer = {
   id: string;
   userId: string;
   displayName: string;
+  giantName?: string | null;
 };
 
 type OfficialH2HRow = {
@@ -167,6 +168,10 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [leftEventAt, setLeftEventAt] = useState<string | null>(null);
   const [participantIsShiny, setParticipantIsShiny] = useState(false);
   const [profileGender, setProfileGender] = useState<Gender | null>(null);
+  const [memberBUserId, setMemberBUserId] = useState<string | null>(null);
+  const [memberBColors, setMemberBColors] = useState<MtgColor[]>([]);
+  const [giantName, setGiantName] = useState<string | null>(null);
+  const [isGiantEvent, setIsGiantEvent] = useState(false);
 
   const [tab, setTab] = useState<'official' | 'revenge'>('official');
   const [showRevengeTabs, setShowRevengeTabs] = useState(false);
@@ -204,6 +209,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         left_event_at,
         self_evaluation,
         is_shiny,
+        member_b_user_id,
+        giant_name,
         users!event_participants_user_id_fkey (
           display_name,
           username,
@@ -225,13 +232,18 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const { data: evRow } = await supabase
       .from('draft_events')
-      .select('workspace_id, competition_format')
+      .select('workspace_id, competition_format, event_type')
       .eq('id', eventId)
       .maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
     const uid = pRow.user_id as string;
     setLeftEventAt((pRow as { left_event_at?: string | null }).left_event_at ?? null);
     setParticipantIsShiny(!!(pRow as { is_shiny?: boolean }).is_shiny);
+    setMemberBUserId((pRow as { member_b_user_id?: string | null }).member_b_user_id ?? null);
+    setGiantName((pRow as { giant_name?: string | null }).giant_name ?? null);
+    setIsGiantEvent(
+      ((evRow as { event_type?: string | null } | null)?.event_type ?? null) === 'two_headed_giant'
+    );
     setWorkspaceStreak([]);
     if (wsId) {
       const orgRes = await supabase
@@ -361,13 +373,14 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     }
 
     const [colorsRes, playersRes, pairingsRes] = await Promise.all([
-      supabase.from('participant_colors').select('color').eq('participant_id', participantId),
+      supabase.from('participant_colors').select('color, member').eq('participant_id', participantId),
       supabase
         .from('event_participants')
         .select(
           `
           id,
           user_id,
+          giant_name,
           users!event_participants_user_id_fkey (
             display_name,
             username
@@ -385,7 +398,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     ]);
 
     if (!colorsRes.error) {
-      setColors((colorsRes.data ?? []).map((c) => c.color as MtgColor));
+      const colorRows = (colorsRes.data ?? []) as { color: string; member?: string | null }[];
+      setColors(colorRows.filter((c) => c.member == null || c.member === 'a').map((c) => c.color as MtgColor));
+      setMemberBColors(colorRows.filter((c) => c.member === 'b').map((c) => c.color as MtgColor));
     }
 
     if (playersRes.error || pairingsRes.error) {
@@ -450,12 +465,16 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     );
     setSuperCupsWon(profilePairings.filter((p) => p.super_cup_winner_participant_id === participantId).length);
 
+    const isGiant = evRow?.event_type === 'two_headed_giant';
     const players: EventPlayer[] = (playersRes.data ?? []).map((row: any) => {
       const uu = relationOne(row.users);
+      const individualName = uu?.display_name || uu?.username || 'Jugador';
+      const giantName: string | null = (row.giant_name as string | null) ?? null;
       return {
         id: row.id as string,
         userId: row.user_id as string,
-        displayName: uu?.display_name || uu?.username || 'Jugador',
+        displayName: isGiant && giantName ? giantName : individualName,
+        giantName,
       };
     });
 
@@ -692,7 +711,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     }, [load])
   );
 
-  const isSelf = !!myUserId && myUserId === userId;
+  const isSelf =
+    !!myUserId &&
+    (myUserId === userId || (isGiantEvent && myUserId === memberBUserId));
   const leftWord = resolveGenderedText(profileGender, 'ido', 'ida');
   const markAsLeftLabel = `Marcar como ${leftWord}`;
 
@@ -782,7 +803,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       >
         <View style={styles.h2hNamesRow}>
           <Text style={styles.h2hNameSide} numberOfLines={1}>
-            {displayName}
+            {isGiantEvent ? (giantName ?? displayName) : displayName}
           </Text>
           <Text style={styles.h2hVs}>vs</Text>
           <Text style={[styles.h2hNameSide, styles.h2hNameSideRight]} numberOfLines={1}>
@@ -831,7 +852,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                             ) : null}
                             <View style={styles.tiebreakVsLeftText}>
                               <Text style={styles.tiebreakH2hOpponentName} numberOfLines={1}>
-                                {displayName}
+                                {isGiantEvent ? (giantName ?? displayName) : displayName}
                               </Text>
                             </View>
                           </View>
@@ -1089,7 +1110,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           <View style={styles.revengeH2hRow}>
             <View style={styles.revengeH2hLeft}>
               <Text style={styles.revengeH2hNameLeft} numberOfLines={1}>
-                {displayName}
+                {isGiantEvent ? (giantName ?? displayName) : displayName}
               </Text>
               {row.profileHasRevengeCup || row.profileHasSuperCup ? (
                 <View style={styles.cupsColumn}>
@@ -1137,40 +1158,69 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <View style={styles.hero}>
-        <View style={styles.profileStreakAbsolute}>
-          {workspaceStreak.length > 0 ? (
-            <View style={styles.profileStreakDots}>
-              {workspaceStreak.map((result, idx) => (
-                (() => {
-                  const size = getStreakCircleSize(idx, workspaceStreak.length);
-                  return (
-                <View
-                  key={`${result}-${idx}`}
-                  style={[
-                    styles.profileStreakDot,
-                    { width: size, height: size, borderRadius: size / 2 },
-                    result === 'V' ? styles.profileStreakWin : styles.profileStreakLoss,
-                  ]}
-                >
-                  <Text style={styles.profileStreakDotTxt}>{result}</Text>
-                </View>
-                  );
-                })()
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.profileStreakEmpty}>Racha: -</Text>
-          )}
-        </View>
-        <PlayerAvatar
-          userId={userId ?? ''}
-          participantId={participantId}
-          size="xlarge"
-          withColorBorder
-          borderWidth={5}
-          showShinyAnimation={participantIsShiny}
-        />
-        <Text style={styles.name}>{displayName}</Text>
+        {!isGiantEvent ? (
+          <View style={styles.profileStreakAbsolute}>
+            {workspaceStreak.length > 0 ? (
+              <View style={styles.profileStreakDots}>
+                {workspaceStreak.map((result, idx) => (
+                  (() => {
+                    const size = getStreakCircleSize(idx, workspaceStreak.length);
+                    return (
+                  <View
+                    key={`${result}-${idx}`}
+                    style={[
+                      styles.profileStreakDot,
+                      { width: size, height: size, borderRadius: size / 2 },
+                      result === 'V' ? styles.profileStreakWin : styles.profileStreakLoss,
+                    ]}
+                  >
+                    <Text style={styles.profileStreakDotTxt}>{result}</Text>
+                  </View>
+                    );
+                  })()
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.profileStreakEmpty}>Racha: -</Text>
+            )}
+          </View>
+        ) : null}
+        {isGiantEvent ? (
+          <View style={styles.giantAvatarPairProfile}>
+            <PlayerAvatar
+              userId={userId ?? ''}
+              participantId={participantId}
+              size="xlarge"
+              withColorBorder
+              borderWidth={5}
+              giantSide="left"
+              showShinyAnimation={participantIsShiny}
+            />
+            {memberBUserId ? (
+              <PlayerAvatar
+                userId={memberBUserId}
+                size="xlarge"
+                withColorBorder
+                borderWidth={5}
+                giantSide="right"
+                memberColors={memberBColors}
+                style={{ marginLeft: -20 }}
+              />
+            ) : null}
+          </View>
+        ) : (
+          <PlayerAvatar
+            userId={userId ?? ''}
+            participantId={participantId}
+            size="xlarge"
+            withColorBorder
+            borderWidth={5}
+            showShinyAnimation={participantIsShiny}
+          />
+        )}
+        <Text style={styles.name}>
+          {isGiantEvent ? (giantName ?? displayName) : displayName}
+        </Text>
         {leftEventAt ? (
           <View style={styles.leftEventChip}>
             <Text style={styles.leftEventChipText}>{isSelf ? 'Te fuiste' : 'Se fue'}</Text>
@@ -1182,7 +1232,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.orgChipTxt}>Organizador</Text>
             </View>
           ) : null}
-          {isSelf ? (
+          {isSelf && !isGiantEvent ? (
             <TouchableOpacity
               style={styles.editColorsBtn}
               onPress={() =>
@@ -1201,17 +1251,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         </View>
       </View>
 
-      <View style={styles.flagRow}>
-        {colors.length === 0 ? (
-          <Text style={styles.muted}>Sin declarar</Text>
-        ) : (
-          colors.map((c) => (
-            <View key={c} style={[styles.flagSeg, { backgroundColor: COLOR_BG[c] }]}>
-              <Text style={[styles.flagLetter, c === 'B' && styles.flagLetterOnDark]}>{c}</Text>
-            </View>
-          ))
-        )}
-      </View>
+      {!isGiantEvent ? (
+        <View style={styles.flagRow}>
+          {colors.length === 0 ? (
+            <Text style={styles.muted}>Sin declarar</Text>
+          ) : (
+            colors.map((c) => (
+              <View key={c} style={[styles.flagSeg, { backgroundColor: COLOR_BG[c] }]}>
+                <Text style={[styles.flagLetter, c === 'B' && styles.flagLetterOnDark]}>{c}</Text>
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
 
       {showRevengeTabs ? (
         <View style={styles.tabsRow}>
@@ -1271,6 +1323,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 24, paddingBottom: 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
   hero: { alignItems: 'center', marginBottom: 7, position: 'relative', width: '100%' },
+  giantAvatarPairProfile: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   name: { marginTop: 14, fontSize: 22, fontWeight: '800', color: '#111', textAlign: 'center' },
   profileStreakAbsolute: { position: 'absolute', left: 0, top: 78 },
   profileStreakDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },

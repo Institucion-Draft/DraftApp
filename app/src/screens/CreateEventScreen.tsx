@@ -37,6 +37,7 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
   { value: 'tournament', label: getEventTypeLabel('tournament') },
   { value: 'pepidraft', label: getEventTypeLabel('pepidraft') },
+  { value: 'two_headed_giant', label: getEventTypeLabel('two_headed_giant') },
 ];
 
 function pickFromOptions(
@@ -74,6 +75,13 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [venues, setVenues] = useState<SimpleOption[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(true);
+
+  // two_headed_giant fuerza round_robin (sin opción de cambiar).
+  useEffect(() => {
+    if (eventType === 'two_headed_giant') {
+      setCompetitionFormat('round_robin');
+    }
+  }, [eventType]);
 
   useEffect(() => {
     void (async () => {
@@ -139,6 +147,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     if (competitionFormat === 'swiss_bo2') {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
       insertRow.swiss_rounds_manual = swissRoundsManual;
+    }
+    if (eventType === 'two_headed_giant') {
+      insertRow.giant_randomization_done = false;
     }
     const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
@@ -231,9 +242,15 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       </TouchableOpacity>
 
       <Text style={styles.label}>Formato de competición</Text>
-      <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
-        <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
-      </TouchableOpacity>
+      {eventType === 'two_headed_giant' ? (
+        <View style={[styles.pickerBtn, { opacity: 0.5 }]}>
+          <Text style={styles.pickerTxt}>Todos contra todos (forzado)</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
+          <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
+        </TouchableOpacity>
+      )}
 
       {competitionFormat === 'swiss' ? (
         <View style={styles.switchRow}>

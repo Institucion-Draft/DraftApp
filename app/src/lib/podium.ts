@@ -8,6 +8,7 @@ export type PodiumPlayer = {
   userId: string;
   name: string;
   avatarUserId: string;
+  memberBUserId?: string | null;
   bo3Won: number;
   bo3Completed: number;
   bo3WinRate: number;
