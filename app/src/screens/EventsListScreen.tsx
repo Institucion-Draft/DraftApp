@@ -56,6 +56,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
   const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
   const [championAvatars, setChampionAvatars] = useState<Record<string, string | null>>({});
   const [championNames, setChampionNames] = useState<Record<string, string>>({});
+  const [championMemberBAvatars, setChampionMemberBAvatars] = useState<Record<string, string | null>>({});
   const firstLoadRef = useRef(true);
   const pulse = useRef(new Animated.Value(1)).current;
 
@@ -132,7 +133,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
       const [partsRes, usersRes] = await Promise.all([
         supabase
           .from('event_participants')
-          .select('event_id, user_id, is_shiny, rotated_avatar_id, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)')
+          .select('event_id, user_id, is_shiny, rotated_avatar_id, member_b_user_id, member_b_rotated_avatar_id, member_b_is_shiny, giant_name, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)')
           .in('event_id', eventIds)
           .in('user_id', userIds)
           .eq('role', 'player'),
@@ -142,23 +143,14 @@ export default function EventsListScreen({ navigation, route }: Props) {
           .in('id', userIds),
       ]);
 
-      const partByEventUser = new Map<
-        string,
-        {
-          is_shiny?: boolean;
-          default_avatars?: {
-            storage_path: string;
-            storage_path_shiny?: string | null;
-          } | {
-            storage_path: string;
-            storage_path_shiny?: string | null;
-          }[] | null;
-        }
-      >();
-      for (const row of (partsRes.data ?? []) as Array<{
+      type PartRow = {
         event_id: string;
         user_id: string;
         is_shiny?: boolean;
+        member_b_user_id?: string | null;
+        member_b_rotated_avatar_id?: string | null;
+        member_b_is_shiny?: boolean | null;
+        giant_name?: string | null;
         default_avatars?: {
           storage_path: string;
           storage_path_shiny?: string | null;
@@ -166,7 +158,9 @@ export default function EventsListScreen({ navigation, route }: Props) {
           storage_path: string;
           storage_path_shiny?: string | null;
         }[] | null;
-      }>) {
+      };
+      const partByEventUser = new Map<string, PartRow>();
+      for (const row of (partsRes.data ?? []) as PartRow[]) {
         partByEventUser.set(`${row.event_id}:${row.user_id}`, row);
       }
 
@@ -195,7 +189,10 @@ export default function EventsListScreen({ navigation, route }: Props) {
         const uid = e.champion_user_id!;
         const part = partByEventUser.get(`${e.id}:${uid}`);
         const user = userById[uid];
-        nameMap[e.id] = user?.display_name?.trim() || user?.username?.trim() || 'Campeón';
+        nameMap[e.id] =
+          (e.event_type === 'two_headed_giant' && part?.giant_name?.trim())
+            ? part.giant_name.trim()
+            : (user?.display_name?.trim() || user?.username?.trim() || 'Campeón');
 
         const rotDa = relationOne(part?.default_avatars);
         let uri: string | null = null;
@@ -213,9 +210,81 @@ export default function EventsListScreen({ navigation, route }: Props) {
       }
       setChampionAvatars(avatarMap);
       setChampionNames(nameMap);
+
+      type MbDefaultAvatarRow = { id: string; storage_path: string; storage_path_shiny?: string | null };
+      const memberBUidByEventId: Record<string, string> = {};
+      const allMemberBUids: string[] = [];
+      const mbRotatedAvatarIds: string[] = [];
+      for (const e of championEvents) {
+        if (e.event_type === 'two_headed_giant') {
+          const part = partByEventUser.get(`${e.id}:${e.champion_user_id!}`);
+          const mbUid = part?.member_b_user_id;
+          const mbRavId = part?.member_b_rotated_avatar_id;
+          if (mbUid) {
+            memberBUidByEventId[e.id] = mbUid;
+            allMemberBUids.push(mbUid);
+          }
+          if (mbRavId) mbRotatedAvatarIds.push(mbRavId);
+        }
+      }
+      const memberBAvatarMap: Record<string, string | null> = {};
+      if (allMemberBUids.length > 0) {
+        const mbDefaultAvatarsById: Record<string, MbDefaultAvatarRow> = {};
+        if (mbRotatedAvatarIds.length > 0) {
+          const mbDaRes = await supabase
+            .from('default_avatars')
+            .select('id, storage_path, storage_path_shiny')
+            .in('id', mbRotatedAvatarIds);
+          for (const row of (mbDaRes.data ?? []) as MbDefaultAvatarRow[]) {
+            mbDefaultAvatarsById[row.id] = row;
+          }
+        }
+        const mbUsersRes = await supabase
+          .from('users')
+          .select('id, custom_avatar_path, default_avatars(storage_path)')
+          .in('id', allMemberBUids);
+        const mbUserById: Record<string, { custom_avatar_path?: string | null; default_avatars?: { storage_path: string } | { storage_path: string }[] | null }> = {};
+        for (const row of (mbUsersRes.data ?? []) as Array<{ id: string; custom_avatar_path?: string | null; default_avatars?: { storage_path: string } | { storage_path: string }[] | null }>) {
+          mbUserById[row.id] = row;
+        }
+        for (const [eid, mbUid] of Object.entries(memberBUidByEventId)) {
+          const champUid = championEvents.find((e) => e.id === eid)?.champion_user_id;
+          const part = champUid ? partByEventUser.get(`${eid}:${champUid}`) : undefined;
+          const mbRavId = part?.member_b_rotated_avatar_id;
+          const mbIsShiny = part?.member_b_is_shiny;
+          const mbDa = mbRavId ? mbDefaultAvatarsById[mbRavId] : null;
+          const mbUser = mbUserById[mbUid];
+          let mbUri: string | null = null;
+          if (mbIsShiny && mbDa?.storage_path_shiny) {
+            mbUri = defaultAvatarPublicUrl(mbDa.storage_path_shiny);
+          } else if (mbDa?.storage_path) {
+            mbUri = defaultAvatarPublicUrl(mbDa.storage_path);
+          } else if (mbUser) {
+            const mbUserDa = relationOne(mbUser.default_avatars);
+            mbUri =
+              avatarPublicUrl(mbUser.custom_avatar_path ?? null) ??
+              avatarPublicUrl(mbUserDa?.storage_path ?? null) ??
+              null;
+          }
+          if (__DEV__) {
+            console.log('DEBUG champB', {
+              eid,
+              mbUid,
+              mbRavId,
+              mbIsShiny,
+              mbDaFound: !!mbDa,
+              mbUserFound: !!mbUser,
+              mbUri,
+            });
+          }
+          memberBAvatarMap[eid] = mbUri;
+        }
+      }
+      setChampionMemberBAvatars(memberBAvatarMap);
     } else {
       setChampionAvatars({});
       setChampionNames({});
+      setChampionMemberBAvatars({});
     }
   }, [workspaceId]);
 
@@ -287,6 +356,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
           const cdown = countdown(item.scheduled_for);
           const champUri = item.champion_user_id ? championAvatars[item.id] : null;
           const champName = item.champion_user_id ? championNames[item.id] : null;
+          const champMemberBUri = item.event_type === 'two_headed_giant' ? (championMemberBAvatars[item.id] ?? null) : null;
           const showShinyCup =
             item.status === 'completed' && item.has_shiny_participant && !!champUri;
           return (
@@ -326,20 +396,45 @@ export default function EventsListScreen({ navigation, route }: Props) {
                 {item.champion_user_id ? (
                   <View style={styles.champCol}>
                     {champUri ? (
-                      <View style={styles.champAvatarWrap}>
-                        <Image
-                          source={{ uri: champUri }}
-                          style={[styles.champAvatar, showShinyCup && styles.champAvatarShinyRing]}
-                        />
-                        {showShinyCup ? (
-                          <View style={styles.shinyCupMark} accessibilityLabel="Copa Shiny">
-                            <Text style={styles.shinyCupMarkTxt}>✨</Text>
+                      champMemberBUri ? (
+                        <View style={styles.champAvatarWrap2HG}>
+                          {showShinyCup ? (
+                            <View style={styles.shinyCupMark} accessibilityLabel="Copa Shiny">
+                              <Text style={styles.shinyCupMarkTxt}>✨</Text>
+                            </View>
+                          ) : null}
+                          <View>
+                            <Image
+                              source={{ uri: champUri }}
+                              style={[styles.champAvatarSmall, showShinyCup && styles.champAvatarShinyRing]}
+                            />
+                            <View style={styles.champBadgeSmall}>
+                              <Text style={styles.champBadgeSmallText}>C</Text>
+                            </View>
                           </View>
-                        ) : null}
-                        <View style={styles.champBadge}>
-                          <Text style={styles.champBadgeText}>C</Text>
+                          <View style={{ marginLeft: 2 }}>
+                            <Image source={{ uri: champMemberBUri }} style={styles.champAvatarSmall} />
+                            <View style={styles.champBadgeSmall}>
+                              <Text style={styles.champBadgeSmallText}>C</Text>
+                            </View>
+                          </View>
                         </View>
-                      </View>
+                      ) : (
+                        <View style={styles.champAvatarWrap}>
+                          <Image
+                            source={{ uri: champUri }}
+                            style={[styles.champAvatar, showShinyCup && styles.champAvatarShinyRing]}
+                          />
+                          {showShinyCup ? (
+                            <View style={styles.shinyCupMark} accessibilityLabel="Copa Shiny">
+                              <Text style={styles.shinyCupMarkTxt}>✨</Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.champBadge}>
+                            <Text style={styles.champBadgeText}>C</Text>
+                          </View>
+                        </View>
+                      )
                     ) : null}
                     {champName ? (
                       <Text style={styles.champName} numberOfLines={1}>
@@ -408,10 +503,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  champAvatarWrap2HG: {
+    width: 64,
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   champAvatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
+    borderWidth: 2,
+    borderColor: '#3B82F6',
+  },
+  champAvatarSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     borderWidth: 2,
     borderColor: '#3B82F6',
   },
@@ -446,6 +554,25 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  champBadgeSmall: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 15,
+    height: 15,
+    borderRadius: 7,
+    backgroundColor: '#FBBF24',
+    borderWidth: 1,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  champBadgeSmallText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: '800',
+    lineHeight: 10,
   },
   champBadgeText: {
     color: '#fff',
