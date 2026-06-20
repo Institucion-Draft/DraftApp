@@ -35,6 +35,9 @@ const OUTSIDE_EVENT_PALETTE = [
   '#BE185D',
 ];
 
+type AvatarImageCacheEntry = { imageUri: string | null; isShiny: boolean };
+const avatarImageCache = new Map<string, AvatarImageCacheEntry>();
+
 function hashUserIdToAvatarColor(userId: string): string {
   let h = 0;
   for (let i = 0; i < userId.length; i += 1) {
@@ -61,6 +64,8 @@ type Props = {
   giantSide?: 'left' | 'right';
   /** Colores pre-cargados por el llamador (evita consulta a participant_colors). */
   memberColors?: MtgColor[];
+  /** Cuando true, usa member_b_rotated_avatar_id / member_b_is_shiny del participante. */
+  isMemberB?: boolean;
 };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -243,6 +248,7 @@ export default function PlayerAvatar({
   showShinyAnimation = false,
   giantSide,
   memberColors,
+  isMemberB = false,
 }: Props) {
   const diameter = SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
@@ -258,19 +264,30 @@ export default function PlayerAvatar({
   /** Borde exterior del anillo de color (borde del SVG / fondo). */
   const outerRingOutlineRx = Math.min(rStroke + bw / 2, (outer - RING_OUTLINE_W) / 2);
 
-  const [loading, setLoading] = useState(true);
+  const _initCacheKey = !outsideEvent && participantId != null && participantId !== ''
+    ? `${participantId}|${isMemberB ? 'b' : 'a'}`
+    : null;
+  const _initCached = _initCacheKey != null ? avatarImageCache.get(_initCacheKey) : undefined;
+
+  const [loading, setLoading] = useState(_initCached === undefined);
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(_initCached?.imageUri ?? null);
   const [borderColors, setBorderColors] = useState<MtgColor[]>([]);
   const [imageFailed, setImageFailed] = useState(false);
-  const [isShiny, setIsShiny] = useState(false);
+  const [isShiny, setIsShiny] = useState(_initCached?.isShiny ?? false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const key = !outsideEvent && participantId != null && participantId !== ''
+      ? `${participantId}|${isMemberB ? 'b' : 'a'}`
+      : null;
+    const hasCached = key != null && avatarImageCache.has(key);
+    if (!hasCached) {
+      setLoading(true);
+      setIsShiny(false);
+    }
     setImageFailed(false);
-    setIsShiny(false);
 
     void (async () => {
       const userPromise = supabase
@@ -288,24 +305,43 @@ export default function PlayerAvatar({
 
       const partPromise =
         !outsideEvent && participantId != null && participantId !== ''
-          ? supabase
-              .from('event_participants')
-              .select(
-                withColorBorder
-                  ? `
+          ? isMemberB
+            ? supabase
+                .from('event_participants')
+                .select(
+                  withColorBorder
+                    ? `
+                  member_b_rotated_avatar_id,
+                  member_b_is_shiny,
+                  default_avatars!event_participants_member_b_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
+                  participant_colors (color, member)
+                `
+                    : `
+                  member_b_rotated_avatar_id,
+                  member_b_is_shiny,
+                  default_avatars!event_participants_member_b_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
+                `
+                )
+                .eq('id', participantId)
+                .maybeSingle()
+            : supabase
+                .from('event_participants')
+                .select(
+                  withColorBorder
+                    ? `
                 rotated_avatar_id,
                 is_shiny,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
                 participant_colors (color, member)
               `
-                  : `
+                    : `
                 rotated_avatar_id,
                 is_shiny,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
               `
-              )
-              .eq('id', participantId)
-              .maybeSingle()
+                )
+                .eq('id', participantId)
+                .maybeSingle()
           : Promise.resolve({ data: null, error: null });
 
       const [uRes, pRes] = await Promise.all([userPromise, partPromise]);
@@ -322,13 +358,14 @@ export default function PlayerAvatar({
       );
       const userDefaultPath = userDefaultDa?.storage_path ?? null;
 
+      let shinyFlag = false;
       let rotatedStoragePath: string | null = null;
       let colors: MtgColor[] = [];
 
-      console.log('DEBUG pRes', participantId, JSON.stringify(pRes?.data), pRes?.error);
       if (!pRes.error && pRes.data) {
         const p = pRes.data as {
           is_shiny?: boolean;
+          member_b_is_shiny?: boolean | null;
           default_avatars?: {
             storage_path: string;
             storage_path_shiny?: string | null;
@@ -338,13 +375,12 @@ export default function PlayerAvatar({
           }[] | null;
           participant_colors?: { color: string; member?: string | null } | { color: string; member?: string | null }[] | null;
         };
-        setIsShiny(!!p.is_shiny);
+        shinyFlag = isMemberB ? !!p.member_b_is_shiny : !!p.is_shiny;
+        setIsShiny(shinyFlag);
         const rotDa = relationOne(p.default_avatars);
         const shinyPath = rotDa?.storage_path_shiny ?? null;
         const normalPath = rotDa?.storage_path ?? null;
-        rotatedStoragePath =
-          p.is_shiny && shinyPath ? shinyPath : normalPath;
-        console.log('DEBUG colors', participantId, (pRes?.data as any)?.participant_colors, memberColors);
+        rotatedStoragePath = shinyFlag && shinyPath ? shinyPath : normalPath;
         if (memberColors !== undefined) {
           colors = [...memberColors];
         } else if (withColorBorder && p.participant_colors != null) {
@@ -352,7 +388,7 @@ export default function PlayerAvatar({
             ? p.participant_colors
             : [p.participant_colors];
           colors = rows
-            .filter((r) => r.member == null || r.member === 'a')
+            .filter((r) => isMemberB ? r.member === 'b' : (r.member == null || r.member === 'a'))
             .map((r) => r.color as MtgColor);
         }
       } else if (memberColors !== undefined) {
@@ -370,6 +406,9 @@ export default function PlayerAvatar({
         }
       }
 
+      if (key) {
+        avatarImageCache.set(key, { imageUri: uri, isShiny: shinyFlag });
+      }
       setImageUri(uri);
       setBorderColors(colors);
       setLoading(false);
@@ -378,7 +417,7 @@ export default function PlayerAvatar({
     return () => {
       cancelled = true;
     };
-  }, [userId, participantId, withColorBorder, outsideEvent, memberColors]);
+  }, [userId, participantId, withColorBorder, outsideEvent, memberColors, isMemberB]);
 
   const playShinyBurst = showShinyAnimation && isShiny && !loading && !outsideEvent;
 

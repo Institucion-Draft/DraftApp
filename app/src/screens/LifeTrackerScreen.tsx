@@ -1677,8 +1677,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           target === 'a' ? pairing.participant_b_id : pairing.participant_a_id;
         const uA = relationOne(pa?.users);
         const uB = relationOne(pb?.users);
-        const nmA = uA?.display_name || uA?.username || 'Jugador A';
-        const nmB = uB?.display_name || uB?.username || 'Jugador B';
+        const nmA = (isGiantEvent && pa?.giant_name) ? pa.giant_name : (uA?.display_name || uA?.username || 'Jugador A');
+        const nmB = (isGiantEvent && pb?.giant_name) ? pb.giant_name : (uB?.display_name || uB?.username || 'Jugador B');
         const winnerName = target === 'a' ? nmB : nmA;
         const stableBeforeZero = stable;
         const participantIdForZero = participantId;
@@ -2371,7 +2371,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                     {isGiantEvent ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                         <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
-                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
                       </View>
                     ) : (
                       <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
@@ -2384,7 +2384,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                     {isGiantEvent ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                         <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
-                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
                       </View>
                     ) : (
                       <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
@@ -2687,7 +2687,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               {isGiantEvent ? (
                 <View style={{ flexDirection: 'row' }}>
                   <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
-                  {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsA} style={{ marginLeft: -8 }} /> : null}
+                  {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} participantId={pa.id} isMemberB size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsA} style={{ marginLeft: -8 }} /> : null}
                 </View>
               ) : (
                 <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} />
@@ -2703,7 +2703,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               {isGiantEvent ? (
                 <View style={{ flexDirection: 'row' }}>
                   <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
-                  {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsB} style={{ marginLeft: -8 }} /> : null}
+                  {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} participantId={pb.id} isMemberB size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsB} style={{ marginLeft: -8 }} /> : null}
                 </View>
               ) : (
                 <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} />

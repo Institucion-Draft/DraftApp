@@ -32,6 +32,7 @@ const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] 
 ];
 
 const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
+const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
@@ -65,6 +66,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
   /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
+  const [startingLife, setStartingLife] = useState<number>(20);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
@@ -76,10 +78,13 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(true);
 
-  // two_headed_giant fuerza round_robin (sin opción de cambiar).
+  // two_headed_giant fuerza round_robin y vida inicial 30.
   useEffect(() => {
     if (eventType === 'two_headed_giant') {
       setCompetitionFormat('round_robin');
+      setStartingLife(30);
+    } else {
+      setStartingLife(20);
     }
   }, [eventType]);
 
@@ -151,6 +156,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     if (eventType === 'two_headed_giant') {
       insertRow.giant_randomization_done = false;
     }
+    insertRow.starting_life = startingLife;
     const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
       .maybeSingle();
@@ -287,6 +293,22 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       <View style={styles.switchRow}>
         <Text style={styles.switchLabel}>Sistema de turnos con animaciones</Text>
         <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
+      </View>
+
+      <Text style={styles.label}>Vida inicial</Text>
+      <View style={styles.segmented}>
+        {STARTING_LIFE_OPTIONS.map((n) => {
+          const selected = startingLife === n;
+          return (
+            <TouchableOpacity
+              key={n}
+              style={[styles.segment, selected && styles.segmentSelected]}
+              onPress={() => setStartingLife(n)}
+            >
+              <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{n}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <Text style={styles.label}>Fecha y hora</Text>

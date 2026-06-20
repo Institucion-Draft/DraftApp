@@ -1239,6 +1239,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   {leftMemberBUserId ? (
                     <PlayerAvatar
                       userId={leftMemberBUserId}
+                      participantId={leftPid}
+                      isMemberB
                       size="small"
                       withColorBorder
                       borderWidth={3}
@@ -1284,25 +1286,27 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               </View>
               {isGiantEvent ? (
                 <View style={styles.giantAvatarPairCard}>
-                  {rightMemberBUserId ? (
-                    <PlayerAvatar
-                      userId={rightMemberBUserId}
-                      size="small"
-                      withColorBorder
-                      borderWidth={3}
-                      giantSide="left"
-                      memberColors={rightMemberBColors}
-                      style={{ marginRight: -8 }}
-                    />
-                  ) : null}
                   <PlayerAvatar
                     userId={rightUserId}
                     participantId={rightPid}
                     size="small"
                     withColorBorder
                     borderWidth={3}
-                    giantSide="right"
+                    giantSide="left"
                   />
+                  {rightMemberBUserId ? (
+                    <PlayerAvatar
+                      userId={rightMemberBUserId}
+                      participantId={rightPid}
+                      isMemberB
+                      size="small"
+                      withColorBorder
+                      borderWidth={3}
+                      giantSide="right"
+                      memberColors={rightMemberBColors}
+                      style={{ marginLeft: -8 }}
+                    />
+                  ) : null}
                 </View>
               ) : (
                 <PlayerAvatar
