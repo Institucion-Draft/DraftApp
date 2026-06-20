@@ -265,6 +265,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
+  const [eventStartingLife, setEventStartingLife] = useState(20);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [matchTurnsByMatchId, setMatchTurnsByMatchId] = useState<Record<string, MatchTurnTimeRow[]>>({});
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -303,7 +304,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, current_swiss_round, topcut_format, event_type'
+          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, current_swiss_round, topcut_format, event_type, starting_life'
         )
         .eq('id', p.event_id)
         .maybeSingle(),
@@ -386,8 +387,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       current_swiss_round?: number | null;
       topcut_format?: string | null;
       event_type?: string | null;
+      starting_life?: number | null;
     } | null;
     setIsGiantEvent(evFlags?.event_type === 'two_headed_giant');
+    setEventStartingLife(typeof evFlags?.starting_life === 'number' ? evFlags.starting_life : 20);
     const tf = evFlags?.topcut_format;
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
     const turnTrackOn = !!evFlags?.turn_tracking_enabled;
@@ -1080,6 +1083,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         match_number: nextNumber,
         match_type: matchType,
         started_at: new Date().toISOString(),
+        starting_life_a: eventStartingLife,
+        starting_life_b: eventStartingLife,
         ...(matchType === 'tiebreak' && tiebreakRound != null ? { tiebreak_round: tiebreakRound } : {}),
       })
       .select('id')
@@ -1266,7 +1271,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                   <PlayerAvatar userId={leftP.user_id} participantId={leftP.id} size="large" withColorBorder borderWidth={4} giantSide="left" />
                   {leftP.member_b_user_id ? (
-                    <PlayerAvatar userId={leftP.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={leftMemberBColors} style={{ marginLeft: -12 }} />
+                    <PlayerAvatar userId={leftP.member_b_user_id} participantId={leftP.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={leftMemberBColors} style={{ marginLeft: -12 }} />
                   ) : null}
                 </View>
               ) : (
@@ -1296,7 +1301,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                   <PlayerAvatar userId={rightP.user_id} participantId={rightP.id} size="large" withColorBorder borderWidth={4} giantSide="left" />
                   {rightP.member_b_user_id ? (
-                    <PlayerAvatar userId={rightP.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={rightMemberBColors} style={{ marginLeft: -12 }} />
+                    <PlayerAvatar userId={rightP.member_b_user_id} participantId={rightP.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={rightMemberBColors} style={{ marginLeft: -12 }} />
                   ) : null}
                 </View>
               ) : (

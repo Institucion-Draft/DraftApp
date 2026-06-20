@@ -240,6 +240,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         .insert(sortedColors.map((c) => ({ participant_id: pid, color: c, member: memberRole })));
       if (ins.error) {
         setSaving(false);
+        console.error('[persistWizard] INSERT participant_colors error:', ins.error);
         Alert.alert('Error', 'No se pudieron guardar tus colores.');
         return;
       }

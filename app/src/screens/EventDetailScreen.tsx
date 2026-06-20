@@ -152,6 +152,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
+  const [myMemberDeclared, setMyMemberDeclared] = useState(false);
   const [prodeCVoteCount, setProdeCVoteCount] = useState<number | null>(null);
   const [prodeCCompact, setProdeCCompact] = useState(false);
   const [cubeName, setCubeName] = useState<string | null>(null);
@@ -413,14 +414,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       }
     }
 
-    const mine = p.find((x) => x.user_id === (currentUserId ?? ''));
+    const mine = p.find((x) => x.user_id === currentUserId || x.member_b_user_id === currentUserId);
     setMyParticipantId(mine?.id ?? null);
     setCubeName((cubeRes.data as any)?.name ?? null);
     setVenueName((venueRes.data as any)?.name ?? null);
 
     if (p.length > 0) {
       const ids = p.map((x) => x.id);
-      const cRes = await supabase.from('participant_colors').select('participant_id, color').in('participant_id', ids);
+      const cRes = await supabase.from('participant_colors').select('participant_id, color, member').in('participant_id', ids);
       if (!cRes.error) {
         const map: Record<string, MtgColor[]> = {};
         for (const row of cRes.data ?? []) {
@@ -429,6 +430,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           map[pid].push(row.color as MtgColor);
         }
         setParticipantColors(map);
+        if (mine) {
+          const isMemberBOfPair = mine.member_b_user_id != null && mine.member_b_user_id === currentUserId;
+          const myRows = (cRes.data ?? []).filter((r: any) =>
+            r.participant_id === mine.id &&
+            (isMemberBOfPair ? r.member === 'b' : (r.member === 'a' || r.member == null))
+          );
+          setMyMemberDeclared(myRows.length > 0);
+        } else {
+          setMyMemberDeclared(false);
+        }
       }
     } else {
       setParticipantColors({});
@@ -728,8 +739,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   };
 
   const participantCount = participants.length;
-  const myColors = myParticipantId ? participantColors[myParticipantId] ?? [] : [];
-  const hasDeclaredColors = myColors.length > 0;
+  const hasDeclaredColors = myMemberDeclared;
   const missingCube = !event?.cube_id;
   const missingVenue = !event?.venue_id;
   const missingParticipants = participantCount < 1;
@@ -901,11 +911,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
   }
 
+  const proDeCThreshold =
+    event.event_type === 'two_headed_giant' ? participantCount * 2 : participantCount;
   const showProDeCEntry =
     isWorkspaceMember &&
     participantCount > 0 &&
     prodeCVoteCount != null &&
-    prodeCVoteCount >= participantCount;
+    prodeCVoteCount >= proDeCThreshold;
 
   const showDiaryBlock =
     event.status !== 'cancelled' && (myParticipantId != null || isOrganizer);
@@ -1044,6 +1056,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   />
                   <PlayerAvatar
                     userId={championParticipant.member_b_user_id}
+                    participantId={championParticipant.id}
+                    isMemberB
                     size="small"
                     withColorBorder={true}
                     giantSide="right"
@@ -1304,6 +1318,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                     {p.member_b_user_id ? (
                       <PlayerAvatar
                         userId={p.member_b_user_id}
+                        participantId={p.id}
+                        isMemberB
                         size="small"
                         withColorBorder={false}
                         style={{ marginLeft: -8 }}

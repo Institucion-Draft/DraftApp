@@ -266,17 +266,6 @@ export default function EventsListScreen({ navigation, route }: Props) {
               avatarPublicUrl(mbUserDa?.storage_path ?? null) ??
               null;
           }
-          if (__DEV__) {
-            console.log('DEBUG champB', {
-              eid,
-              mbUid,
-              mbRavId,
-              mbIsShiny,
-              mbDaFound: !!mbDa,
-              mbUserFound: !!mbUser,
-              mbUri,
-            });
-          }
           memberBAvatarMap[eid] = mbUri;
         }
       }

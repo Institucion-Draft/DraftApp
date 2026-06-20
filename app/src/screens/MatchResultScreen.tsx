@@ -439,10 +439,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
                   <View style={{ flexDirection: 'row' }}>
                     <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="xlarge" withColorBorder={false} giantSide="left" />
-                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
+                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} participantId={pa.id} isMemberB size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
                   </View>
                   <View style={{ marginLeft: 8, opacity: 0.5, alignItems: 'center' }}>
-                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="small" withColorBorder={false} /> : null}
+                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} participantId={pb.id} isMemberB size="small" withColorBorder={false} /> : null}
                     <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder={false} />
                   </View>
                 </View>
@@ -461,10 +461,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
                   <View style={{ flexDirection: 'row' }}>
                     <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="xlarge" withColorBorder={false} giantSide="left" />
-                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
+                    {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} participantId={pb.id} isMemberB size="xlarge" withColorBorder={false} giantSide="right" style={{ marginLeft: -14 }} /> : null}
                   </View>
                   <View style={{ marginLeft: 8, opacity: 0.5, alignItems: 'center' }}>
-                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} size="small" withColorBorder={false} /> : null}
+                    {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} participantId={pa.id} isMemberB size="small" withColorBorder={false} /> : null}
                     <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder={false} />
                   </View>
                 </View>

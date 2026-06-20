@@ -25,6 +25,7 @@ type SimpleOption = { id: string; name: string };
 type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
 
 const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
+const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 function getCompetitionFormatLabel(f: CompetitionFormat): string {
   if (f === 'swiss') return 'Suizo';
@@ -44,6 +45,7 @@ type FormBaseline = {
   turnTrackingEnabled: boolean;
   eliminatoriasBo3: boolean;
   swissRoundsManual: number;
+  startingLife: number;
 };
 
 const EVENT_TYPES: { value: EventType; label: string }[] = [
@@ -84,6 +86,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [topcutFormatLocked, setTopcutFormatLocked] = useState(false);
   /** swiss_bo2: selector de rondas bloqueado cuando ya hay al menos 1 partida en el evento. */
   const [swissRoundsLocked, setSwissRoundsLocked] = useState(false);
+  const [startingLife, setStartingLife] = useState<number>(20);
   const [cubes, setCubes] = useState<SimpleOption[]>([]);
   const [venues, setVenues] = useState<SimpleOption[]>([]);
   /** Solo aplica si status es playing/completed: permite editar cubo, sede, tipo, fecha (no estado). */
@@ -101,7 +104,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const { data, error } = await supabase
         .from('draft_events')
         .select(
-          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, competition_format, topcut_format, swiss_rounds_manual'
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, competition_format, topcut_format, swiss_rounds_manual, starting_life'
         )
         .eq('id', eventId)
         .maybeSingle();
@@ -139,6 +142,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const rawTf = (row.topcut_format as string | null | undefined) ?? 'bo3';
       const elimBo3 = rawTf !== 'bo1';
       setEliminatoriasBo3(elimBo3);
+      const sl = typeof row.starting_life === 'number' && [20, 25, 30].includes(row.starting_life) ? row.starting_life : 20;
+      setStartingLife(sl);
 
       let swissTopcutBracketLocked = false;
       if (cf === 'swiss' || cf === 'swiss_bo2') {
@@ -204,6 +209,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         turnTrackingEnabled: tt,
         eliminatoriasBo3: elimBo3,
         swissRoundsManual: roundsManual,
+        startingLife: sl,
       });
 
       const [cubesRes, venuesRes] = await Promise.all([
@@ -233,7 +239,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       forceEditOverride !== baseline.forceEditOverride ||
       turnTrackingEnabled !== baseline.turnTrackingEnabled ||
       eliminatoriasBo3 !== baseline.eliminatoriasBo3 ||
-      swissRoundsManual !== baseline.swissRoundsManual
+      swissRoundsManual !== baseline.swissRoundsManual ||
+      startingLife !== baseline.startingLife
     );
   }, [
     baseline,
@@ -248,6 +255,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
     turnTrackingEnabled,
     eliminatoriasBo3,
     swissRoundsManual,
+    startingLife,
   ]);
 
   const openStatusPicker = () => {
@@ -329,6 +337,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         patch.status = status;
       }
     }
+    patch.starting_life = startingLife;
     const { error } = await supabase.from('draft_events').update(patch).eq('id', eventId);
     setSubmitting(false);
     if (error) return Alert.alert('Error', error.message ?? 'No se pudo guardar el evento.');
@@ -509,6 +518,23 @@ export default function EditEventScreen({ route, navigation }: Props) {
       >
         <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>{venueLabel}</Text>
       </TouchableOpacity>
+
+      <Text style={[styles.label, restricted && styles.labelMuted]}>Vida inicial</Text>
+      <View style={styles.segmented}>
+        {STARTING_LIFE_OPTIONS.map((n) => {
+          const selected = startingLife === n;
+          return (
+            <TouchableOpacity
+              key={n}
+              style={[styles.segment, selected && styles.segmentSelected]}
+              disabled={restricted}
+              onPress={() => setStartingLife(n)}
+            >
+              <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{n}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
       <Text style={styles.label}>Notas (opcional)</Text>
       <TextInput style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={2000} />
