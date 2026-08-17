@@ -1,7 +1,7 @@
 export type MainStackParamList = {
   WorkspacesList: undefined;
-  MyProfile: { from?: 'WorkspacesList' | 'WorkspaceDetail'; workspaceId?: string };
-  MemberProfile: { userId: string; workspaceId: string };
+  MyProfile: { from?: 'WorkspacesList' | 'WorkspaceDetail' | 'Playground'; workspaceId?: string };
+  MemberProfile: { userId: string; workspaceId: string; from?: 'Playground' };
   CreateWorkspace: undefined;
   WorkspaceDetail: { workspaceId: string };
   SearchWorkspaces: undefined;
@@ -57,4 +57,9 @@ export type MainStackParamList = {
   LifeChart: { matchId: string };
   MatchResult: { matchId: string };
   Standings: { eventId: string; showPodiumIntro?: boolean };
+  Playground: { workspaceId: string };
+  ContextFreeMatches: { workspaceId: string };
+  ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };
+  ContextFreeColorPick: { workspaceId: string; userAId: string; userBId: string; encounterType: 'bo1' | 'bo3' };
+  ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string; starterUserId?: string };
 };

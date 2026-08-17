@@ -11,7 +11,7 @@ import CrossEventStats from '../components/CrossEventStats';
 type Props = NativeStackScreenProps<MainStackParamList, 'MemberProfile'>;
 
 export default function MemberProfileScreen({ navigation, route }: Props) {
-  const { userId, workspaceId } = route.params;
+  const { userId, workspaceId, from } = route.params;
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [isOrganizer, setIsOrganizer] = useState(false);
@@ -50,10 +50,16 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
   );
 
   useLayoutEffect(() => {
-    navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
-    });
-  }, [navigation, workspaceId]);
+    if (from === 'Playground') {
+      navigation.setOptions({
+        headerLeft: hierarchicalHeaderBack(navigation, 'Playground', { workspaceId }),
+      });
+    } else {
+      navigation.setOptions({
+        headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+      });
+    }
+  }, [navigation, workspaceId, from]);
 
   if (loading) {
     return (

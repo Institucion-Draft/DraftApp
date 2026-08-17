@@ -21,7 +21,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import CrossEventStats from '../components/CrossEventStats';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MyProfile'>;
-type MyProfileParams = { from?: 'WorkspacesList' | 'WorkspaceDetail'; workspaceId?: string };
+type MyProfileParams = { from?: 'WorkspacesList' | 'WorkspaceDetail' | 'Playground'; workspaceId?: string };
 
 const COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -96,6 +96,12 @@ export default function MyProfileScreen({ navigation, route }: Props) {
     if (backFrom === 'WorkspaceDetail' && backWorkspaceId) {
       navigation.setOptions({
         headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', {
+          workspaceId: backWorkspaceId,
+        }),
+      });
+    } else if (backFrom === 'Playground' && backWorkspaceId) {
+      navigation.setOptions({
+        headerLeft: hierarchicalHeaderBack(navigation, 'Playground', {
           workspaceId: backWorkspaceId,
         }),
       });
