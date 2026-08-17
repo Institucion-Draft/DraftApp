@@ -33,6 +33,11 @@ import LifeTrackerScreen from '../screens/LifeTrackerScreen';
 import LifeChartScreen from '../screens/LifeChartScreen';
 import MatchResultScreen from '../screens/MatchResultScreen';
 import StandingsScreen from '../screens/StandingsScreen';
+import PlaygroundScreen from '../screens/PlaygroundScreen';
+import ContextFreeMatchesScreen from '../screens/ContextFreeMatchesScreen';
+import ContextFreeEncounterScreen from '../screens/ContextFreeEncounterScreen';
+import ContextFreeColorPickScreen from '../screens/ContextFreeColorPickScreen';
+import ContextFreeLifeTrackerScreen from '../screens/ContextFreeLifeTrackerScreen';
 import type { MainStackParamList } from './mainStackParams';
 
 export type { MainStackParamList } from './mainStackParams';
@@ -153,6 +158,11 @@ export default function MainStackNavigator() {
         <Stack.Screen name="LifeChart" component={LifeChartScreen} options={{ title: 'Evolución de vida', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="MatchResult" component={MatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Standings" component={StandingsScreen} options={{ title: 'Tabla de posiciones', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="Playground" component={PlaygroundScreen} options={{ title: 'Partidas sin contexto', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ContextFreeMatches" component={ContextFreeMatchesScreen} options={{ title: 'Historial de partidas', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ContextFreeEncounter" component={ContextFreeEncounterScreen} options={{ title: 'Encuentro', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ContextFreeColorPick" component={ContextFreeColorPickScreen} options={{ title: 'Elegir colores', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ContextFreeLifeTracker" component={ContextFreeLifeTrackerScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

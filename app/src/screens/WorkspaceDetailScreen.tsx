@@ -255,6 +255,12 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         >
           <Text style={styles.memberBtnText}>Ver sedes</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.memberBtn}
+          onPress={() => navigation.navigate('Playground', { workspaceId })}
+        >
+          <Text style={styles.memberBtnText}>Partidas sin contexto</Text>
+        </TouchableOpacity>
       </View>
 
       {isOrganizer ? (
