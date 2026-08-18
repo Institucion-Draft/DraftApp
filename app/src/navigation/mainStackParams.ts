@@ -62,4 +62,14 @@ export type MainStackParamList = {
   ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };
   ContextFreeColorPick: { workspaceId: string; userAId: string; userBId: string; encounterType: 'bo1' | 'bo3' };
   ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string; starterUserId?: string };
+  ContextFreeMatchResult: {
+    winnerId: string;
+    encounterType: 'bo1' | 'bo3';
+    winsA: number;
+    winsB: number;
+    userAId: string;
+    userBId: string;
+    workspaceId: string;
+    encounterId: string;
+  };
 };

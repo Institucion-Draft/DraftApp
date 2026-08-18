@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeMatches'>;
@@ -59,6 +60,12 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const initialFocusRef = useRef(true);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'Playground', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase

@@ -38,6 +38,7 @@ import ContextFreeMatchesScreen from '../screens/ContextFreeMatchesScreen';
 import ContextFreeEncounterScreen from '../screens/ContextFreeEncounterScreen';
 import ContextFreeColorPickScreen from '../screens/ContextFreeColorPickScreen';
 import ContextFreeLifeTrackerScreen from '../screens/ContextFreeLifeTrackerScreen';
+import ContextFreeMatchResultScreen from '../screens/ContextFreeMatchResultScreen';
 import type { MainStackParamList } from './mainStackParams';
 
 export type { MainStackParamList } from './mainStackParams';
@@ -163,6 +164,7 @@ export default function MainStackNavigator() {
         <Stack.Screen name="ContextFreeEncounter" component={ContextFreeEncounterScreen} options={{ title: 'Encuentro', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeColorPick" component={ContextFreeColorPickScreen} options={{ title: 'Elegir colores', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeLifeTracker" component={ContextFreeLifeTrackerScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="ContextFreeMatchResult" component={ContextFreeMatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
     </Stack.Navigator>
   );
 }

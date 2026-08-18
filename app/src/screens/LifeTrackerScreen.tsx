@@ -32,6 +32,7 @@ import {
   pickRandomMoveFromAll,
   type MoveTarget,
 } from '../lib/pokemonMovepool';
+import { useLifeTracker } from '../hooks/useLifeTracker';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'LifeTracker'>;
 
@@ -915,26 +916,43 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [memberBColorsB, setMemberBColorsB] = useState<MtgColor[]>([]);
   const [winsA, setWinsA] = useState(0);
   const [winsB, setWinsB] = useState(0);
-  const [stableA, setStableA] = useState(20);
-  const [stableB, setStableB] = useState(20);
-  const [pendingA, setPendingA] = useState<number | null>(null);
-  const [pendingB, setPendingB] = useState<number | null>(null);
-  const stableARef = useRef(20);
-  const stableBRef = useRef(20);
-  const pendingARef = useRef<number | null>(null);
-  const pendingBRef = useRef<number | null>(null);
   const [persistingA, setPersistingA] = useState(false);
   const [persistingB, setPersistingB] = useState(false);
   const historyRef = useRef<LifeSnapshot[]>([]);
-  const timerARef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const timerBRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistLifeRef = useRef<(side: 'a' | 'b') => Promise<void>>(async () => {});
+  const {
+    lifeA: aLife,
+    lifeB: bLife,
+    stableA,
+    setStableA,
+    stableB,
+    setStableB,
+    pendingA,
+    setPendingA,
+    pendingB,
+    setPendingB,
+    stableARef,
+    stableBRef,
+    pendingARef,
+    pendingBRef,
+    deltaA,
+    deltaB,
+    diffOpacityA,
+    diffOpacityB,
+    increment,
+    clearTimers,
+    clearPendingAdjustments,
+  } = useLifeTracker({
+    initialLifeA: 20,
+    initialLifeB: 20,
+    onFlush: (side) => persistLifeRef.current(side),
+    delayMs: turnTrackingEnabled ? 1000 : 3500,
+  });
   const myUserIdRef = useRef<string | null>(null);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
   const pairingRef = useRef<PairingRow | null>(null);
   const lifeRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const diffOpacityA = useRef(new Animated.Value(0)).current;
-  const diffOpacityB = useRef(new Animated.Value(0)).current;
   const attackTravel = useRef(new Animated.Value(0)).current;
   const defenderShake = useRef(new Animated.Value(0)).current;
   const attackerShake = useRef(new Animated.Value(0)).current;
@@ -991,38 +1009,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const lastTickerEventIdRef = useRef<string | null>(null);
   const processBannerIdleRef = useRef<() => void>(() => {});
 
-  const aLife = pendingA ?? stableA;
-  const bLife = pendingB ?? stableB;
-  const deltaA = clampLife((pendingA ?? stableA)) - stableA;
-  const deltaB = clampLife((pendingB ?? stableB)) - stableB;
   const canUndo = historyRef.current.length > 1;
-
-  const clearPendingAdjustments = useCallback(() => {
-    if (timerARef.current) clearTimeout(timerARef.current);
-    if (timerBRef.current) clearTimeout(timerBRef.current);
-    timerARef.current = null;
-    timerBRef.current = null;
-    pendingARef.current = null;
-    pendingBRef.current = null;
-    setPendingA(null);
-    setPendingB(null);
-  }, []);
-
-  useEffect(() => {
-    Animated.timing(diffOpacityA, {
-      toValue: deltaA !== 0 ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [deltaA, diffOpacityA]);
-
-  useEffect(() => {
-    Animated.timing(diffOpacityB, {
-      toValue: deltaB !== 0 ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [deltaB, diffOpacityB]);
 
   const enqueueTickerItem = useCallback((item: TickerQueueItem) => {
     if (tickerDedupeRef.current.has(item.key)) return;
@@ -1554,8 +1541,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     useCallback(() => {
       void load();
       return () => {
-        if (timerARef.current) clearTimeout(timerARef.current);
-        if (timerBRef.current) clearTimeout(timerBRef.current);
+        clearTimers();
       };
     }, [load])
   );
@@ -1772,37 +1758,16 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     [clearPendingAdjustments, matchId, navigation, pairing, pa, pb]
   );
 
-  const queuePersist = useCallback(
-    (target: 'a' | 'b') => {
-      const ref = target === 'a' ? timerARef : timerBRef;
-      if (ref.current) clearTimeout(ref.current);
-      const delayMs = turnTrackingEnabled ? 1000 : 3500;
-      ref.current = setTimeout(() => {
-        void persistLife(target);
-      }, delayMs);
-    },
-    [persistLife, turnTrackingEnabled]
-  );
+  useEffect(() => {
+    persistLifeRef.current = persistLife;
+  }, [persistLife]);
 
   const adjustLife = useCallback(
     (target: 'a' | 'b', delta: number) => {
       if (blocked) return;
-      if (target === 'a') {
-        const current = clampLife(pendingARef.current ?? stableARef.current);
-        if (delta < 0 && current <= 0) return;
-        const next = clampLife(current + delta);
-        pendingARef.current = next;
-        setPendingA(next);
-      } else {
-        const current = clampLife(pendingBRef.current ?? stableBRef.current);
-        if (delta < 0 && current <= 0) return;
-        const next = clampLife(current + delta);
-        pendingBRef.current = next;
-        setPendingB(next);
-      }
-      queuePersist(target);
+      increment(target, delta);
     },
-    [blocked, queuePersist]
+    [blocked, increment]
   );
 
   const onUndo = async () => {
