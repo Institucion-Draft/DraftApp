@@ -12,6 +12,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
@@ -44,11 +45,17 @@ function avatarUrl(row: PresenceRow): string | null {
   return defaultAvatarPublicUrl(path);
 }
 
-function buildPairs(rows: PresenceRow[]): Pair[] {
+function buildPairs(rows: PresenceRow[], currentUserId: string | undefined): Pair[] {
   const pairs: Pair[] = [];
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
-      pairs.push({ a: rows[i]!, b: rows[j]! });
+      const rowI = rows[i]!;
+      const rowJ = rows[j]!;
+      if (currentUserId && rowJ.user_id === currentUserId) {
+        pairs.push({ a: rowJ, b: rowI });
+      } else {
+        pairs.push({ a: rowI, b: rowJ });
+      }
     }
   }
   return pairs;
@@ -56,6 +63,7 @@ function buildPairs(rows: PresenceRow[]): Pair[] {
 
 export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
   const { workspaceId } = route.params;
+  const { user } = useAuth();
   const [pairs, setPairs] = useState<Pair[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -86,8 +94,8 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
     }
 
     const rows = (data ?? []) as unknown as PresenceRow[];
-    setPairs(buildPairs(rows));
-  }, [workspaceId]);
+    setPairs(buildPairs(rows, user?.id));
+  }, [workspaceId, user?.id]);
 
   useFocusEffect(
     useCallback(() => {

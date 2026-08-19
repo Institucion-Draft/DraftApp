@@ -16,8 +16,10 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import Svg, { Path, Rect } from 'react-native-svg';
 import type { MtgColor } from '../lib/database.types';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
+import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import { useLifeTracker } from '../hooks/useLifeTracker';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeLifeTracker'>;
@@ -82,6 +84,46 @@ function createSeededRandom(seed: string): () => number {
   };
 }
 
+const AVATAR_RING_BW = 4;
+const AVATAR_CORNER_RATIO = 0.15;
+const AVATAR_RING_OUTLINE = '#1F2937';
+
+function pointOnRoundRectPerimeter(t: number, bx: number, by: number, bw: number, bh: number, br: number): { x: number; y: number } {
+  const rr = Math.min(br, bw / 2, bh / 2);
+  const T = bw - 2 * rr;
+  const Rgt = bh - 2 * rr;
+  const A = (Math.PI / 2) * rr;
+  const L = 2 * T + 2 * Rgt + 4 * A;
+  if (L <= 0) return { x: bx + bw / 2, y: by + bh / 2 };
+  let s = (((t % 1) + 1) % 1) * L;
+  if (s < T) return { x: bx + rr + s, y: by };
+  s -= T;
+  if (s < A) { const ang = -Math.PI / 2 + (s / A) * (Math.PI / 2); return { x: bx + bw - rr + rr * Math.cos(ang), y: by + rr + rr * Math.sin(ang) }; }
+  s -= A;
+  if (s < Rgt) return { x: bx + bw, y: by + rr + s };
+  s -= Rgt;
+  if (s < A) { const ang = (s / A) * (Math.PI / 2); return { x: bx + bw - rr + rr * Math.cos(ang), y: by + bh - rr + rr * Math.sin(ang) }; }
+  s -= A;
+  if (s < T) return { x: bx + bw - rr - s, y: by + bh };
+  s -= T;
+  if (s < A) { const ang = Math.PI / 2 + (s / A) * (Math.PI / 2); return { x: bx + rr + rr * Math.cos(ang), y: by + bh - rr + rr * Math.sin(ang) }; }
+  s -= A;
+  if (s < Rgt) return { x: bx, y: by + bh - rr - s };
+  s -= Rgt;
+  const ang = Math.PI + (s / A) * (Math.PI / 2);
+  return { x: bx + rr + rr * Math.cos(ang), y: by + rr + rr * Math.sin(ang) };
+}
+
+function cfRingSegmentPath(bx: number, by: number, bw: number, bh: number, br: number, t0: number, t1: number): string {
+  const steps = 24;
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const p = pointOnRoundRectPerimeter(t0 + (i / steps) * (t1 - t0), bx, by, bw, bh, br);
+    pts.push(`${p.x.toFixed(2)} ${p.y.toFixed(2)}`);
+  }
+  return `M ${pts[0]} L ${pts.slice(1).join(' L ')}`;
+}
+
 function pickCoordinatedBgColors(
   colorsA: MtgColor[],
   colorsB: MtgColor[],
@@ -124,6 +166,8 @@ export default function ContextFreeLifeTrackerScreen({ route, navigation }: Prop
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [avatarUriA, setAvatarUriA] = useState<string | null>(null);
   const [avatarUriB, setAvatarUriB] = useState<string | null>(null);
+  const [avatarSizeA, setAvatarSizeA] = useState(0);
+  const [avatarSizeB, setAvatarSizeB] = useState(0);
 
   const historyRef = useRef<LifeSnapshot[]>([]);
   const persistLifeRef = useRef<(side: 'a' | 'b') => Promise<void>>(async () => {});
@@ -702,18 +746,68 @@ export default function ContextFreeLifeTrackerScreen({ route, navigation }: Prop
         </View>
         <View style={styles.lifeRow}>
           <View style={styles.playerBlock}>
-            <View
-              style={styles.avatarWrap}
-            >
-              <View style={styles.avatarInner}>
-                {avatarUri ? (
-                  <Image
-                    source={{ uri: avatarUri }}
-                    style={styles.avatarImage}
-                    resizeMode="contain"
-                  />
-                ) : null}
-              </View>
+            <View style={styles.avatarWrap}>
+              {(() => {
+                const avatarSize = isA ? avatarSizeA : avatarSizeB;
+                const colors = isA ? colorsA : colorsB;
+                const rOuter = avatarSize * AVATAR_CORNER_RATIO;
+                const bw = AVATAR_RING_BW;
+                const sx = bw / 2, sy = bw / 2;
+                const sw = Math.max(0, avatarSize - bw);
+                const sh = Math.max(0, avatarSize - bw);
+                const rStroke = Math.max(0, rOuter - bw / 2);
+                return (
+                  <View
+                    style={styles.avatarInner}
+                    onLayout={(e) => {
+                      const w = Math.round(e.nativeEvent.layout.width);
+                      if (isA) setAvatarSizeA(w);
+                      else setAvatarSizeB(w);
+                    }}
+                  >
+                    {avatarSize > 0 ? (
+                      <Svg width={avatarSize} height={avatarSize} style={StyleSheet.absoluteFill}>
+                        {colors.length <= 1 ? (
+                          <Rect
+                            x={sx} y={sy} width={sw} height={sh} rx={rStroke} ry={rStroke}
+                            fill="none"
+                            stroke={colors.length === 1 ? (MTG_COLOR_HEX[colors[0]] ?? '#9CA3AF') : '#9CA3AF'}
+                            strokeWidth={bw}
+                          />
+                        ) : (
+                          colors.map((c, i) => (
+                            <Path
+                              key={i}
+                              d={cfRingSegmentPath(sx, sy, sw, sh, rStroke, i / colors.length, (i + 1) / colors.length)}
+                              stroke={MTG_COLOR_HEX[c] ?? '#9CA3AF'}
+                              strokeWidth={bw}
+                              fill="none"
+                              strokeLinecap="butt"
+                            />
+                          ))
+                        )}
+                        <Rect
+                          x={0.5} y={0.5}
+                          width={avatarSize - 1} height={avatarSize - 1}
+                          rx={rOuter} ry={rOuter}
+                          fill="none"
+                          stroke={AVATAR_RING_OUTLINE}
+                          strokeWidth={1}
+                        />
+                      </Svg>
+                    ) : null}
+                    <View style={styles.avatarImageFrame}>
+                      {avatarUri ? (
+                        <Image
+                          source={{ uri: avatarUri }}
+                          style={styles.avatarImage}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })()}
             </View>
             <Text style={[styles.playerName, isDarkBg && { color: '#fff' }]}>{name}</Text>
           </View>
@@ -857,8 +951,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
-  avatarInner: { alignItems: 'center', justifyContent: 'center' },
-  avatarImage: { width: '96%', maxWidth: 180, aspectRatio: 1, borderRadius: 90 },
+  avatarInner: {
+    width: '90%',
+    maxWidth: 180,
+    aspectRatio: 1,
+    alignSelf: 'center',
+  },
+  avatarImageFrame: {
+    position: 'absolute',
+    top: AVATAR_RING_BW,
+    left: AVATAR_RING_BW,
+    right: AVATAR_RING_BW,
+    bottom: AVATAR_RING_BW,
+    borderRadius: 16,
+    backgroundColor: '#f3f4f6',
+    overflow: 'hidden',
+  },
+  avatarImage: { width: '100%', height: '100%', transform: [{ scale: 1.15 }] },
   flagBtn: {
     position: 'absolute',
     backgroundColor: '#00000030',

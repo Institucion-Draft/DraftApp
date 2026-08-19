@@ -81,9 +81,22 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
   const [leaving, setLeaving] = useState(false);
   const initialFocusRef = useRef(true);
 
-  const autoJoin = useCallback(async (existingRow: PresenceRow | null) => {
+  const autoJoin = useCallback(async () => {
     if (!user?.id) return;
     const now = new Date().toISOString();
+
+    const { data: ownData } = await supabase
+      .from('playground_presence')
+      .select('avatar_id, is_shiny, avatar_assigned_at')
+      .eq('user_id', user.id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+
+    const existingRow = ownData as {
+      avatar_id: string | null;
+      is_shiny: boolean;
+      avatar_assigned_at: string | null;
+    } | null;
 
     const reuseAvatar =
       existingRow?.avatar_id != null &&
@@ -113,6 +126,8 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
         avatar_id: avatarId,
         is_shiny: isShiny,
         avatar_assigned_at: avatarAssignedAt,
+        is_active: true,
+        left_at: null,
       },
       { onConflict: 'user_id,workspace_id' }
     );
@@ -131,6 +146,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
       `
       )
       .eq('workspace_id', workspaceId)
+      .eq('is_active', true)
       .order('joined_at', { ascending: true });
 
     if (error) {
@@ -139,8 +155,16 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
     }
 
     const rows = (data ?? []) as unknown as PresenceRow[];
-    setPresence(rows);
-    return rows;
+    const cutoffMs = COOLDOWN_HOURS * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const activeRows = rows.filter((r) => {
+      const ref = r.last_match_ended_at ?? r.joined_at;
+      return now - new Date(ref).getTime() < cutoffMs;
+    });
+
+    setPresence(activeRows);
+    return activeRows;
   }, [workspaceId, user?.id]);
 
   useFocusEffect(
@@ -152,10 +176,9 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
           setLoading(true);
           initialFocusRef.current = false;
         }
-        const rows = await load();
+        await load();
         if (!cancelled) {
-          const myRow = rows?.find((r) => r.user_id === user?.id) ?? null;
-          await autoJoin(myRow);
+          await autoJoin();
           await load();
         }
         if (!cancelled && first) setLoading(false);
@@ -194,11 +217,11 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
           setLeaving(true);
           const { error } = await supabase
             .from('playground_presence')
-            .delete()
+            .update({ is_active: false, left_at: new Date().toISOString() })
             .eq('user_id', user.id)
             .eq('workspace_id', workspaceId);
-          setLeaving(false);
           if (error) {
+            setLeaving(false);
             Alert.alert('Error', 'No se pudo salir de la sala.');
             return;
           }
