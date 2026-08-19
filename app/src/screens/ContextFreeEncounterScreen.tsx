@@ -29,11 +29,20 @@ type UserInfo = {
 };
 
 type H2HStats = {
-  oficialesBO1: { winsA: number; winsB: number };
+  oficiales: { winsA: number; winsB: number };
   oficialesBO3: { winsA: number; winsB: number };
   venganzas: { winsA: number; winsB: number };
   sinContextoBO1: { winsA: number; winsB: number };
   sinContextoBO3: { winsA: number; winsB: number };
+};
+
+type ExtraStats = {
+  eventsA: number;
+  eventsB: number;
+  personalMatchesA: { oficiales: number; venganzas: number; sinContexto: number };
+  personalMatchesB: { oficiales: number; venganzas: number; sinContexto: number };
+  topTypeA: Array<{ type: string; count: number; total: number }>;
+  topTypeB: Array<{ type: string; count: number; total: number }>;
 };
 
 function displayName(u: UserInfo): string {
@@ -46,12 +55,13 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
   const [userA, setUserA] = useState<UserInfo | null>(null);
   const [userB, setUserB] = useState<UserInfo | null>(null);
   const [stats, setStats] = useState<H2HStats>({
-    oficialesBO1: { winsA: 0, winsB: 0 },
+    oficiales: { winsA: 0, winsB: 0 },
     oficialesBO3: { winsA: 0, winsB: 0 },
     venganzas: { winsA: 0, winsB: 0 },
     sinContextoBO1: { winsA: 0, winsB: 0 },
     sinContextoBO3: { winsA: 0, winsB: 0 },
   });
+  const [extraStats, setExtraStats] = useState<ExtraStats | null>(null);
   const [activeEncounterId, setActiveEncounterId] = useState<string | null>(null);
   const [activeEncounterType, setActiveEncounterType] = useState<'bo1' | 'bo3' | null>(null);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
@@ -81,7 +91,7 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
         .maybeSingle(),
       supabase
         .from('context_free_encounters')
-        .select('winner_user_id, encounter_type')
+        .select('id, winner_user_id, encounter_type')
         .eq('workspace_id', workspaceId)
         .or(
           `and(user_a_id.eq.${userAId},user_b_id.eq.${userBId}),and(user_a_id.eq.${userBId},user_b_id.eq.${userAId})`
@@ -130,7 +140,7 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
 
     const h2h = h2hRes.data as { revenge_matches_won: number; revenge_matches_lost: number } | null;
 
-    const cfEncs = (cfEncRes.data ?? []) as Array<{ winner_user_id: string | null; encounter_type: string }>;
+    const cfEncs = (cfEncRes.data ?? []) as Array<{ id: string; winner_user_id: string | null; encounter_type: string }>;
     const cfBO1 = cfEncs.filter((e) => e.encounter_type === 'bo1');
     const cfBO3 = cfEncs.filter((e) => e.encounter_type === 'bo3');
 
@@ -152,23 +162,30 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
     }
     setActiveMatchId(currentActiveMatchId);
 
-    // Phase 3: oficiales breakdown by competition_format
-    let bo1WinsA = 0, bo1WinsB = 0, bo3WinsA = 0, bo3WinsB = 0;
+    // Phase 3: oficiales — individual match wins + BO3 encounter wins
+    let bo3WinsA = 0, bo3WinsB = 0;
+    let individualWinsA = 0, individualWinsB = 0;
 
     const epARes = await supabase
       .from('event_participants')
-      .select('id, event_id, draft_events!inner(competition_format)')
+      .select('id, event_id, role, draft_events!inner(competition_format, event_type)')
       .eq('user_id', userAId)
       .eq('draft_events.workspace_id', workspaceId);
 
     const epAData = (epARes.data ?? []) as unknown as Array<{
       id: string;
       event_id: string;
-      draft_events: { competition_format: string };
+      role: string;
+      draft_events: { competition_format: string; event_type: string };
     }>;
 
-    if (epAData.length > 0) {
-      const epAIds = epAData.map((ep) => ep.id);
+    const eventsA = epAData.filter(
+      (ep) => ep.role === 'player' && ep.draft_events.event_type !== 'two_headed_giant'
+    ).length;
+
+    const epAIds = epAData.map((ep) => ep.id);
+
+    if (epAIds.length > 0) {
       const epAIdSet = new Set(epAIds);
       const formatByEventId = new Map(epAData.map((ep) => [ep.event_id, ep.draft_events.competition_format]));
 
@@ -191,11 +208,15 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
           .in('participant_b_id', allIds);
 
         const rawPairings = (pairingsData ?? []) as Array<{
+          id: string;
           participant_a_id: string;
           participant_b_id: string;
           event_id: string;
           official_winner_participant_id: string | null;
         }>;
+
+        const h2hPairingIds: string[] = [];
+        const pairingUserAPartMap = new Map<string, string>();
 
         for (const p of rawPairings) {
           const aIsEpA = epAIdSet.has(p.participant_a_id);
@@ -203,26 +224,39 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
           const aIsEpB = epBIdSet.has(p.participant_a_id);
           const bIsEpA = epAIdSet.has(p.participant_b_id);
           if (!((aIsEpA && bIsEpB) || (aIsEpB && bIsEpA))) continue;
-          if (!p.official_winner_participant_id) continue;
 
-          const format = formatByEventId.get(p.event_id) ?? 'swiss';
-          const isBO3 = format === 'round_robin';
           const partAIsUserA = epAIdSet.has(p.participant_a_id);
           const userAPartId = partAIsUserA ? p.participant_a_id : p.participant_b_id;
+          h2hPairingIds.push(p.id);
+          pairingUserAPartMap.set(p.id, userAPartId);
 
-          if (isBO3) {
+          if (p.official_winner_participant_id && formatByEventId.get(p.event_id) === 'round_robin') {
             if (p.official_winner_participant_id === userAPartId) bo3WinsA++;
             else bo3WinsB++;
-          } else {
-            if (p.official_winner_participant_id === userAPartId) bo1WinsA++;
-            else bo1WinsB++;
+          }
+        }
+
+        if (h2hPairingIds.length > 0) {
+          const { data: matchesData } = await supabase
+            .from('matches')
+            .select('pairing_id, winner_participant_id')
+            .in('pairing_id', h2hPairingIds)
+            .eq('status', 'completed')
+            .not('winner_participant_id', 'is', null);
+
+          for (const m of (matchesData ?? []) as Array<{ pairing_id: string; winner_participant_id: string | null }>) {
+            if (!m.winner_participant_id) continue;
+            const uAPartId = pairingUserAPartMap.get(m.pairing_id);
+            if (!uAPartId) continue;
+            if (m.winner_participant_id === uAPartId) individualWinsA++;
+            else individualWinsB++;
           }
         }
       }
     }
 
     setStats({
-      oficialesBO1: { winsA: bo1WinsA, winsB: bo1WinsB },
+      oficiales: { winsA: individualWinsA, winsB: individualWinsB },
       oficialesBO3: { winsA: bo3WinsA, winsB: bo3WinsB },
       venganzas: {
         winsA: h2h?.revenge_matches_won ?? 0,
@@ -236,6 +270,141 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
         winsA: cfBO3.filter((e) => e.winner_user_id === userAId).length,
         winsB: cfBO3.filter((e) => e.winner_user_id === userBId).length,
       },
+    });
+
+    // Phase 4: extra stats — batch 1 (parallel)
+    const [epBAllRes, typeARes, cfEncARes, cfEncBRes] = await Promise.all([
+      supabase
+        .from('event_participants')
+        .select('id, event_id, role, draft_events!inner(event_type)')
+        .eq('user_id', userBId)
+        .eq('draft_events.workspace_id', workspaceId),
+      (epAData.length > 0
+        ? supabase
+            .from('event_participant_avatar_history')
+            .select('default_avatars!inner(pokemon_type)')
+            .eq('user_id', userAId)
+            .in('event_id', epAData.map((ep) => ep.event_id))
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+      supabase
+        .from('context_free_encounters')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .or(`user_a_id.eq.${userAId},user_b_id.eq.${userAId}`),
+      supabase
+        .from('context_free_encounters')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .or(`user_a_id.eq.${userBId},user_b_id.eq.${userBId}`),
+    ]);
+
+    const epBAllData = (epBAllRes.data ?? []) as unknown as Array<{
+      id: string;
+      event_id: string;
+      role: string;
+      draft_events: { event_type: string };
+    }>;
+    const eventsB = epBAllData.filter(
+      (ep) => ep.role === 'player' && ep.draft_events.event_type !== 'two_headed_giant'
+    ).length;
+    const workspaceEventIdsB = epBAllData.map((ep) => ep.event_id);
+    const epBParticipantIds = epBAllData.map((ep) => ep.id);
+    const cfEncIdsA = ((cfEncARes.data ?? []) as Array<{ id: string }>).map((e) => e.id);
+    const cfEncIdsB = ((cfEncBRes.data ?? []) as Array<{ id: string }>).map((e) => e.id);
+
+    // Phase 4: batch 2 (parallel, needs epBAllData + cfEncIds)
+    const [typeBRes, cfMatchesARes, cfMatchesBRes, aPairingMatchRes, bPairingMatchRes] = await Promise.all([
+      (workspaceEventIdsB.length > 0
+        ? supabase
+            .from('event_participant_avatar_history')
+            .select('default_avatars!inner(pokemon_type)')
+            .eq('user_id', userBId)
+            .in('event_id', workspaceEventIdsB)
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+      (cfEncIdsA.length > 0
+        ? supabase
+            .from('context_free_matches')
+            .select('id')
+            .in('encounter_id', cfEncIdsA)
+            .not('winner_user_id', 'is', null)
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+      (cfEncIdsB.length > 0
+        ? supabase
+            .from('context_free_matches')
+            .select('id')
+            .in('encounter_id', cfEncIdsB)
+            .not('winner_user_id', 'is', null)
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+      (epAIds.length > 0
+        ? supabase
+            .from('pairings')
+            .select('matches!inner(match_type)')
+            .or(`participant_a_id.in.(${epAIds.join(',')}),participant_b_id.in.(${epAIds.join(',')})`)
+            .eq('matches.status', 'completed')
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+      (epBParticipantIds.length > 0
+        ? supabase
+            .from('pairings')
+            .select('matches!inner(match_type)')
+            .or(`participant_a_id.in.(${epBParticipantIds.join(',')}),participant_b_id.in.(${epBParticipantIds.join(',')})`)
+            .eq('matches.status', 'completed')
+        : Promise.resolve({ data: null, error: null })
+      ) as unknown as Promise<{ data: unknown[] | null; error: unknown }>,
+    ]);
+
+    const countMatchTypes = (data: unknown[] | null) => {
+      let oficiales = 0;
+      let venganzas = 0;
+      for (const p of (data ?? []) as Array<{ matches: Array<{ match_type: string }> }>) {
+        for (const m of (p.matches ?? [])) {
+          if (['draft', 'tiebreak', 'final'].includes(m.match_type)) oficiales++;
+          else if (m.match_type === 'revenge') venganzas++;
+        }
+      }
+      return { oficiales, venganzas };
+    };
+    const { oficiales: aOficiales, venganzas: aVenganzas } = countMatchTypes(aPairingMatchRes.data);
+    const { oficiales: bOficiales, venganzas: bVenganzas } = countMatchTypes(bPairingMatchRes.data);
+
+    const computeTopType = (rows: unknown[]): Array<{ type: string; count: number; total: number }> => {
+      const counts = new Map<string, number>();
+      for (const row of rows) {
+        const r = row as Record<string, unknown>;
+        const da = r.default_avatars;
+        const resolved = Array.isArray(da)
+          ? ((da[0] as Record<string, unknown> | undefined) ?? null)
+          : (da as Record<string, unknown> | null);
+        const type = resolved?.pokemon_type as string | null | undefined;
+        if (type) counts.set(type, (counts.get(type) ?? 0) + 1);
+      }
+      if (counts.size === 0) return [];
+      const max = Math.max(...counts.values());
+      const total = [...counts.values()].reduce((a, b) => a + b, 0);
+      return [...counts.entries()]
+        .filter(([, c]) => c === max)
+        .map(([type, count]) => ({ type, count, total }));
+    };
+
+    setExtraStats({
+      eventsA,
+      eventsB,
+      personalMatchesA: {
+        oficiales: aOficiales,
+        venganzas: aVenganzas,
+        sinContexto: (cfMatchesARes.data ?? []).length,
+      },
+      personalMatchesB: {
+        oficiales: bOficiales,
+        venganzas: bVenganzas,
+        sinContexto: (cfMatchesBRes.data ?? []).length,
+      },
+      topTypeA: computeTopType(typeARes.data ?? []),
+      topTypeB: computeTopType(typeBRes.data ?? []),
     });
   }, [workspaceId, userAId, userBId]);
 
@@ -370,14 +539,14 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
     user?.id != null && (user.id === userAId || user.id === userBId);
 
   const hasAnyHistory =
-    stats.oficialesBO1.winsA + stats.oficialesBO1.winsB +
+    stats.oficiales.winsA + stats.oficiales.winsB +
     stats.oficialesBO3.winsA + stats.oficialesBO3.winsB +
     stats.venganzas.winsA + stats.venganzas.winsB +
     stats.sinContextoBO1.winsA + stats.sinContextoBO1.winsB +
     stats.sinContextoBO3.winsA + stats.sinContextoBO3.winsB > 0;
 
   const hasOficiales =
-    stats.oficialesBO1.winsA + stats.oficialesBO1.winsB +
+    stats.oficiales.winsA + stats.oficiales.winsB +
     stats.oficialesBO3.winsA + stats.oficialesBO3.winsB > 0;
   const hasSinContexto =
     stats.sinContextoBO1.winsA + stats.sinContextoBO1.winsB +
@@ -492,8 +661,8 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
           {hasOficiales ? (
             <View style={styles.h2hGroup}>
               <Text style={styles.h2hGroupTitle}>Oficiales</Text>
-              {stats.oficialesBO1.winsA + stats.oficialesBO1.winsB > 0
-                ? renderH2HSection('BO1', stats.oficialesBO1.winsA, stats.oficialesBO1.winsB)
+              {stats.oficiales.winsA + stats.oficiales.winsB > 0
+                ? renderH2HSection('Partidas', stats.oficiales.winsA, stats.oficiales.winsB)
                 : null}
               {stats.oficialesBO3.winsA + stats.oficialesBO3.winsB > 0
                 ? renderH2HSection('BO3', stats.oficialesBO3.winsA, stats.oficialesBO3.winsB)
@@ -523,6 +692,92 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
       ) : (
         <Text style={styles.noHistory}>Sin historial previo entre estos jugadores.</Text>
       )}
+
+      {extraStats ? (
+        <View style={styles.extraCard}>
+          <View style={styles.extraSection}>
+            <Text style={styles.extraTitle}>Participaciones en drafts</Text>
+            <View style={styles.extraRow}>
+              <View style={styles.extraCell}>
+                <Text style={styles.extraNum}>{extraStats.eventsA}</Text>
+                <Text style={styles.extraLabel}>{displayName(userA)}</Text>
+              </View>
+              <View style={styles.extraCell}>
+                <Text style={styles.extraNum}>{extraStats.eventsB}</Text>
+                <Text style={styles.extraLabel}>{displayName(userB)}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.extraSection}>
+            <Text style={styles.extraTitle}>Partidas totales</Text>
+            <View style={styles.extraRow}>
+              <View style={[styles.extraCell, styles.extraCellLabel]} />
+              <View style={styles.extraCell}>
+                <Text style={styles.extraNameLabel}>{userA ? displayName(userA) : '—'}</Text>
+              </View>
+              <View style={styles.extraCell}>
+                <Text style={styles.extraNameLabel}>{userB ? displayName(userB) : '—'}</Text>
+              </View>
+            </View>
+            {[
+              { label: 'Oficiales', a: extraStats.personalMatchesA.oficiales, b: extraStats.personalMatchesB.oficiales },
+              { label: 'Venganzas', a: extraStats.personalMatchesA.venganzas, b: extraStats.personalMatchesB.venganzas },
+              { label: 'Sin contexto', a: extraStats.personalMatchesA.sinContexto, b: extraStats.personalMatchesB.sinContexto },
+            ].map(({ label, a, b }) => (
+              <View key={label} style={styles.extraRow}>
+                <View style={[styles.extraCell, styles.extraCellLabel]}>
+                  <Text style={styles.extraLabel}>{label}</Text>
+                </View>
+                <View style={styles.extraCell}>
+                  <Text style={styles.extraNum}>{a}</Text>
+                </View>
+                <View style={styles.extraCell}>
+                  <Text style={styles.extraNum}>{b}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {extraStats.topTypeA.length > 0 || extraStats.topTypeB.length > 0 ? (
+            <View style={styles.extraSection}>
+              <Text style={styles.extraTitle}>Tipo Pokémon más frecuente</Text>
+              <View style={styles.extraRow}>
+                <View style={styles.extraCell}>
+                  {extraStats.topTypeA.length > 0 ? (
+                    <>
+                      <Text style={styles.extraNum}>
+                        {extraStats.topTypeA.map((t) => t.type).join(' / ')}
+                      </Text>
+                      <Text style={styles.extraLabel}>
+                        {extraStats.topTypeA[0]!.count}/{extraStats.topTypeA[0]!.total}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.extraLabel}>-</Text>
+                  )}
+                  <Text style={styles.extraNameLabel}>{displayName(userA)}</Text>
+                </View>
+                <View style={styles.extraCell}>
+                  {extraStats.topTypeB.length > 0 ? (
+                    <>
+                      <Text style={styles.extraNum}>
+                        {extraStats.topTypeB.map((t) => t.type).join(' / ')}
+                      </Text>
+                      <Text style={styles.extraLabel}>
+                        {extraStats.topTypeB[0]!.count}/{extraStats.topTypeB[0]!.total}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.extraLabel}>-</Text>
+                  )}
+                  <Text style={styles.extraNameLabel}>{displayName(userB)}</Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -614,7 +869,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  statCell: { alignItems: 'center' },
+  statCell: { alignItems: 'center', flex: 1 },
   statNum: { fontSize: 18, fontWeight: '800', color: '#111' },
   statPct: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginTop: 1 },
   statLabel: { fontSize: 11, color: '#6B7280', marginTop: 2, textAlign: 'center' },
@@ -626,4 +881,29 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 8,
   },
+  extraCard: {
+    margin: 16,
+    marginTop: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 16,
+  },
+  extraSection: { gap: 8 },
+  extraTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#374151',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  extraRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  extraCell: { alignItems: 'center', flex: 1, gap: 2 },
+  extraCellLabel: { alignItems: 'flex-start', flex: 1.2 },
+  extraNum: { fontSize: 16, fontWeight: '800', color: '#111', textAlign: 'center' },
+  extraLabel: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
+  extraNameLabel: { fontSize: 10, color: '#9CA3AF', marginTop: 2, textAlign: 'center' },
 });
