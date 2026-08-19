@@ -68,6 +68,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
   const [startingLife, setStartingLife] = useState<number>(20);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
+  const [isOfficial, setIsOfficial] = useState(true);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
   const [cubeId, setCubeId] = useState<string | null>(null);
@@ -145,6 +146,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       created_by: user.id,
       status: 'scheduled',
       turn_tracking_enabled: turnTrackingEnabled,
+      is_official: isOfficial,
     };
     if (competitionFormat === 'swiss') {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
@@ -239,6 +241,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      <View style={styles.sandboxRow}>
+        <Text style={styles.sandboxLabel}>Modo sandbox</Text>
+        <Switch value={!isOfficial} onValueChange={(v) => setIsOfficial(!v)} />
+      </View>
+
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
 
@@ -393,6 +400,14 @@ const styles = StyleSheet.create({
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
   primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
   primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  sandboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginBottom: 20,
+  },
+  sandboxLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

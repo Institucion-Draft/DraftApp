@@ -43,6 +43,7 @@ type FormBaseline = {
   notes: string;
   forceEditOverride: boolean;
   turnTrackingEnabled: boolean;
+  isOfficial: boolean;
   eliminatoriasBo3: boolean;
   swissRoundsManual: number;
   startingLife: number;
@@ -79,6 +80,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [isOfficial, setIsOfficial] = useState(true);
   /** Suizo: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
   /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
@@ -104,7 +106,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const { data, error } = await supabase
         .from('draft_events')
         .select(
-          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, competition_format, topcut_format, swiss_rounds_manual, starting_life'
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, topcut_format, swiss_rounds_manual, starting_life'
         )
         .eq('id', eventId)
         .maybeSingle();
@@ -139,6 +141,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setForceEditOverride(false);
       const tt = !!row.turn_tracking_enabled;
       setTurnTrackingEnabled(tt);
+      const io = row.is_official !== false;
+      setIsOfficial(io);
       const rawTf = (row.topcut_format as string | null | undefined) ?? 'bo3';
       const elimBo3 = rawTf !== 'bo1';
       setEliminatoriasBo3(elimBo3);
@@ -207,6 +211,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         notes: row.notes ?? '',
         forceEditOverride: false,
         turnTrackingEnabled: tt,
+        isOfficial: io,
         eliminatoriasBo3: elimBo3,
         swissRoundsManual: roundsManual,
         startingLife: sl,
@@ -238,6 +243,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       (notes.trim() || '') !== (baseline.notes.trim() || '') ||
       forceEditOverride !== baseline.forceEditOverride ||
       turnTrackingEnabled !== baseline.turnTrackingEnabled ||
+      isOfficial !== baseline.isOfficial ||
       eliminatoriasBo3 !== baseline.eliminatoriasBo3 ||
       swissRoundsManual !== baseline.swissRoundsManual ||
       startingLife !== baseline.startingLife
@@ -253,6 +259,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
     notes,
     forceEditOverride,
     turnTrackingEnabled,
+    isOfficial,
     eliminatoriasBo3,
     swissRoundsManual,
     startingLife,
@@ -338,6 +345,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       }
     }
     patch.starting_life = startingLife;
+    patch.is_official = isOfficial;
     const { error } = await supabase.from('draft_events').update(patch).eq('id', eventId);
     setSubmitting(false);
     if (error) return Alert.alert('Error', error.message ?? 'No se pudo guardar el evento.');
@@ -375,6 +383,15 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      <View style={styles.sandboxRow}>
+        <Text style={styles.sandboxLabel}>Modo sandbox</Text>
+        <Switch
+          value={!isOfficial}
+          onValueChange={(v) => setIsOfficial(!v)}
+          disabled={loadedStatus === 'playing' || loadedStatus === 'completed'}
+        />
+      </View>
+
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
 
@@ -604,6 +621,14 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   switchLabel: { flex: 1, fontSize: 15, color: '#374151', fontWeight: '500' },
+  sandboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginBottom: 20,
+  },
+  sandboxLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
   turnTrackingRow: {
     flexDirection: 'row',
     alignItems: 'center',
