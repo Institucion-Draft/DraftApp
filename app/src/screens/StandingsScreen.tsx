@@ -896,7 +896,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     let torneoLine: string | null = null;
     if (
       fmt !== 'swiss' &&
-      (eventStatus === 'playing' || eventStatus === 'completed')
+      (eventStatus === 'playing' || eventStatus === 'completed' || eventStatus === 'concluded')
     ) {
       const frac = totalPairings > 0 ? resolvedPairings / totalPairings : 0;
       torneoLine = `Completitud: ${formatPctOneDecimal(frac)} (${resolvedPairings}/${totalPairings})`;
@@ -1352,7 +1352,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [load]);
 
   useEffect(() => {
-    if (eventStatusStored !== 'completed') return undefined;
+    if (eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return undefined;
     let cancelled = false;
     let dismissT: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
@@ -1376,7 +1376,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [eventId, eventStatusStored]);
 
   useEffect(() => {
-    if (!showPodiumIntro || eventStatusStored !== 'completed') return;
+    if (!showPodiumIntro || (eventStatusStored !== 'completed' && eventStatusStored !== 'concluded')) return;
     let cancelled = false;
     setShowConfettiOnce(true);
     void (async () => {
