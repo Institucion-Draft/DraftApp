@@ -33,17 +33,27 @@ const CARD_W = 12;
 const CARD_H = 18;
 const CARD_GAP = 3;
 const CARD_RADIUS = 2;
-const CARD_COLOR = '#C8A96E';
 const CARD_EMPTY = '#E5E7EB';
+
+const ACCENT_COLORS: Record<string, string> = {
+  blue:   '#3B82F6',
+  green:  '#10B981',
+  orange: '#F97316',
+  red:    '#EF4444',
+  purple: '#8B5CF6',
+  black:  '#1F2937',
+};
 
 function PackPanel({
   packs,
   currentPackIdx,
   completedInCurrentPack,
+  accentColor,
 }: {
   packs: number[];
   currentPackIdx: number;
   completedInCurrentPack: number;
+  accentColor: string;
 }) {
   return (
     <View style={panelStyles.container}>
@@ -57,7 +67,7 @@ function PackPanel({
             key={s}
             style={[
               panelStyles.packRow,
-              isActive && panelStyles.packRowActive,
+              isActive && [panelStyles.packRowActive, { borderColor: accentColor }],
               isDone && panelStyles.packRowDone,
             ]}
           >
@@ -80,7 +90,7 @@ function PackPanel({
                       filled
                         ? isDone
                           ? panelStyles.cardDone
-                          : panelStyles.cardFilled
+                          : { backgroundColor: accentColor }
                         : panelStyles.cardEmpty,
                     ]}
                   />
@@ -129,7 +139,7 @@ const panelStyles = StyleSheet.create({
     height: CARD_H,
     borderRadius: CARD_RADIUS,
   },
-  cardFilled: { backgroundColor: CARD_COLOR },
+  cardFilled: { backgroundColor: '#C8A96E' },
   cardDone: { backgroundColor: '#9CA3AF' },
   cardEmpty: { backgroundColor: CARD_EMPTY, borderWidth: 1, borderColor: '#D1D5DB' },
 });
@@ -159,11 +169,14 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const [paused, setPaused] = useState(false);
   const [draftStartedAt, setDraftStartedAt] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timerColor, setTimerColor] = useState('blue');
 
   const pausedRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoStartRef = useRef(false);
   const flashAnim = useRef(new Animated.Value(0)).current;
+  const roundStartRef = useRef<number | null>(null);
+  const unloggedPickRef = useRef<number | null>(null);
 
   // Keep a ref with latest state for blur-save (avoids stale closure in useFocusEffect)
   const stateRef = useRef({ phase, pickIdx, secondsLeft, paused });
@@ -176,7 +189,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
       const [eventRes, playersRes] = await Promise.all([
         supabase
           .from('draft_events')
-          .select('draft_started_at, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax')
+          .select('draft_started_at, timer_color, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax')
           .eq('id', eventId)
           .maybeSingle(),
         supabase
@@ -194,6 +207,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
 
       const row = eventRes.data as any;
       setDraftStartedAt(row.draft_started_at ?? null);
+      setTimerColor(row.timer_color ?? 'blue');
 
       const timerPacks: number[] = Array.isArray(row.timer_packs) ? row.timer_packs : [15, 15, 15];
       const numPlayers = Math.max(playersRes.count ?? 1, 1);
@@ -270,6 +284,23 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
     setPhase('waiting');
   }, []);
 
+  const logPick = useCallback((tl: PickInfo[], idx: number, actualSec: number) => {
+    const pick = tl[idx];
+    if (!pick) return;
+    const effectiveSec = pick.cardsPresent === 1 ? 0 : actualSec;
+    console.log('[TimerLog]', { idx, global: pick.globalIndex + 1, pack: pick.packIndex, inPack: pick.pickInPack, estimated: pick.timeSeconds, actual: effectiveSec, eventId });
+    void supabase.from('draft_timer_logs').insert({
+      event_id: eventId,
+      global_pick: pick.globalIndex + 1,
+      pack_index: pick.packIndex,
+      pick_in_pack: pick.pickInPack,
+      estimated_seconds: pick.timeSeconds,
+      actual_seconds: effectiveSec,
+    }).then(({ error }) => {
+      if (error) console.error('[TimerLog] insert error', error);
+    });
+  }, [eventId]);
+
   const startCountdown = useCallback((tl: PickInfo[], idx: number, packsArr: number[]) => {
     stopInterval();
     setPhase('counting');
@@ -280,13 +311,25 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
         if (prev <= 1) {
           stopInterval();
           flashRed();
+          const isLast = idx + 1 >= tl.length;
+          if (isLast) {
+            const elapsed = roundStartRef.current !== null
+              ? Math.round((Date.now() - roundStartRef.current) / 1000)
+              : 0;
+            logPick(tl, idx, elapsed);
+            roundStartRef.current = null;
+            unloggedPickRef.current = null;
+          } else {
+            // Mark as unlogged; roundStartRef stays set for next-iniciar timing.
+            unloggedPickRef.current = idx;
+          }
           setTimeout(() => advancePick(idx + 1, tl, packsArr), 600);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-  }, [stopInterval, flashRed, advancePick]);
+  }, [stopInterval, flashRed, advancePick, logPick]);
 
   useEffect(() => () => stopInterval(), [stopInterval]);
 
@@ -340,6 +383,15 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
 
   const handleBigBtn = () => {
     if (phase === 'waiting') {
+      // Log the round that just ended and was waiting for this tap.
+      if (unloggedPickRef.current !== null) {
+        const elapsed = roundStartRef.current !== null
+          ? Math.round((Date.now() - roundStartRef.current) / 1000)
+          : 0;
+        logPick(timeline, unloggedPickRef.current, elapsed);
+        unloggedPickRef.current = null;
+      }
+      roundStartRef.current = Date.now();
       startCountdown(timeline, pickIdx, packs);
     } else if (phase === 'counting' && !paused) {
       pausedRef.current = true;
@@ -352,12 +404,33 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
 
   const handleSkipToNext = () => {
     if (phase === 'counting') {
+      const isLast = pickIdx + 1 >= timeline.length;
+      if (isLast) {
+        const elapsed = roundStartRef.current !== null
+          ? Math.round((Date.now() - roundStartRef.current) / 1000)
+          : 0;
+        logPick(timeline, pickIdx, elapsed);
+        roundStartRef.current = null;
+        unloggedPickRef.current = null;
+      } else {
+        // Not last: log will fire when next round's "iniciar" is pressed.
+        unloggedPickRef.current = pickIdx;
+      }
       stopInterval();
       setPaused(false);
       pausedRef.current = false;
       flashRed();
       setTimeout(() => advancePick(pickIdx + 1, timeline, packs), 300);
     } else if (phase === 'waiting') {
+      const isLast = pickIdx + 1 >= timeline.length;
+      if (isLast) {
+        logPick(timeline, pickIdx, 0);
+        roundStartRef.current = null;
+        unloggedPickRef.current = null;
+      } else {
+        // Skipped without starting; elapsed = 0 when next iniciar fires.
+        unloggedPickRef.current = pickIdx;
+      }
       advancePick(pickIdx + 1, timeline, packs);
     }
   };
@@ -385,6 +458,8 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const completedInCurrentPack = phase === 'done' ? packSize : (pickInPack - 1);
   const displayPackIdx = phase === 'done' ? packs.length : packIdx;
 
+  const accentColor = ACCENT_COLORS[timerColor] ?? '#3B82F6';
+
   const flashBg = flashAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['rgba(254,242,242,0)', 'rgba(239,68,68,0.35)'],
@@ -409,7 +484,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
       </View>
 
       <TouchableOpacity
-        style={[styles.bigBtn, phase === 'counting' && styles.bigBtnCounting]}
+        style={[styles.bigBtn, { backgroundColor: accentColor }]}
         onPress={phase === 'done' ? () => navigation.goBack() : handleBigBtn}
         activeOpacity={0.8}
       >
@@ -437,6 +512,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
           packs={packs}
           currentPackIdx={displayPackIdx}
           completedInCurrentPack={completedInCurrentPack}
+          accentColor={accentColor}
         />
       </ScrollView>
     </Animated.View>
@@ -467,7 +543,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 4,
   },
-  bigBtnCounting: { backgroundColor: '#1D4ED8' },
   bigBtnTxt: { color: '#fff', fontSize: 20, fontWeight: '800', textAlign: 'center' },
   countdownTxt: { fontSize: 48 },
   skipBtn: {
