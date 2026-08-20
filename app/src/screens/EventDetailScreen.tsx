@@ -28,6 +28,8 @@ import {
   pairingIsBetweenParticipants,
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
+import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
+import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventDetail'>;
 
@@ -55,6 +57,15 @@ type EventRow = {
   cancelled_at: string | null;
   cancelled_by: string | null;
   deleted_at: string | null;
+  is_timed_draft?: boolean | null;
+  timer_packs?: number[] | null;
+  timer_alpha?: number | null;
+  timer_beta?: number | null;
+  timer_gamma?: number | null;
+  timer_delta?: number | null;
+  timer_rho?: number | null;
+  timer_tmin?: number | null;
+  timer_tmax?: number | null;
 };
 
 type ParticipantView = {
@@ -175,12 +186,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax'
       )
       .eq('id', eventId)
       .maybeSingle();
 
     if (error || !data) {
+      console.error('EVENT LOAD ERROR:', JSON.stringify(error));
       Alert.alert('Error', 'No se pudo cargar el evento.');
       setEvent(null);
       setActiveTiebreakGroup(null);
@@ -1160,15 +1172,46 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 <TouchableOpacity
                   style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
                   disabled={startDraftDisabled}
-                  onPress={() =>
-                    Alert.alert('Iniciar draft', '¿Iniciar el draft? Se cierran las inscripciones.', [
-                      { text: 'Volver', style: 'cancel' },
-                      {
-                        text: 'Iniciar',
-                        onPress: () => void patchEvent({ draft_started_at: new Date().toISOString(), status: 'drafting' }),
-                      },
-                    ])
-                  }
+                  onPress={() => {
+                    if (event.is_timed_draft) {
+                      const timerPacks: number[] = Array.isArray(event.timer_packs) ? event.timer_packs : [15, 15, 15];
+                      const numPlayers = Math.max(participantCount, 1);
+                      const params = {
+                        alpha: event.timer_alpha ?? DEFAULT_TIMER_PARAMS.alpha,
+                        beta:  event.timer_beta  ?? DEFAULT_TIMER_PARAMS.beta,
+                        gamma: event.timer_gamma ?? DEFAULT_TIMER_PARAMS.gamma,
+                        delta: event.timer_delta ?? DEFAULT_TIMER_PARAMS.delta,
+                        rho:   event.timer_rho   ?? DEFAULT_TIMER_PARAMS.rho,
+                        tMin:  event.timer_tmin  ?? DEFAULT_TIMER_PARAMS.tMin,
+                        tMax:  event.timer_tmax  ?? DEFAULT_TIMER_PARAMS.tMax,
+                      };
+                      const tl = computePickTimeline(timerPacks, numPlayers, params);
+                      const totalSec = tl.reduce((a, p) => a + p.timeSeconds, 0);
+                      const mins = Math.floor(totalSec / 60);
+                      const secs = totalSec % 60;
+                      const timeStr = secs > 0 ? `${mins} min ${secs} seg` : `${mins} min`;
+                      Alert.alert('Iniciar draft', `¿Iniciar el draft? Tiempo estimado: ${timeStr}`, [
+                        { text: 'Volver', style: 'cancel' },
+                        {
+                          text: 'Iniciar',
+                          onPress: async () => {
+                            await patchEvent({ draft_started_at: new Date().toISOString(), status: 'drafting' });
+                            navigation.navigate('DraftTimer', { eventId: event.id });
+                          },
+                        },
+                      ]);
+                    } else {
+                      Alert.alert('Iniciar draft', '¿Iniciar el draft? Se cierran las inscripciones.', [
+                        { text: 'Volver', style: 'cancel' },
+                        {
+                          text: 'Iniciar',
+                          onPress: async () => {
+                            await patchEvent({ draft_started_at: new Date().toISOString(), status: 'drafting' });
+                          },
+                        },
+                      ]);
+                    }
+                  }}
                 >
                   <Text style={styles.secondaryBtnTxt}>Arrancar a draftear</Text>
                 </TouchableOpacity>
@@ -1177,6 +1220,14 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 <Text style={styles.disabledHint}>
                   {startDraftDisabledHint}
                 </Text>
+              ) : null}
+              {event.is_timed_draft && event.draft_started_at && !event.draft_ended_at && hasTimerSession(event.id) ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => navigation.navigate('DraftTimer', { eventId: event.id })}
+                >
+                  <Text style={styles.secondaryBtnTxt}>Continuar cronómetro</Text>
+                </TouchableOpacity>
               ) : null}
               {event.draft_started_at && !event.draft_ended_at ? (
                 <TouchableOpacity
@@ -1189,7 +1240,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                         { text: 'Volver', style: 'cancel' },
                         {
                           text: 'Finalizar',
-                          onPress: () => void finishDraftAndGeneratePairings(),
+                          onPress: () => {
+                            clearTimerSession(event.id);
+                            void finishDraftAndGeneratePairings();
+                          },
                         },
                       ]
                     )
