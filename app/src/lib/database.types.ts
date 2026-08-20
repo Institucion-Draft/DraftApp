@@ -9,7 +9,8 @@ export type EventStatus =
   | 'drafting'
   | 'playing'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'concluded';
 
 export type Workspace = {
   id: string;

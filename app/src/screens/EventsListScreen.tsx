@@ -347,7 +347,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
           const champName = item.champion_user_id ? championNames[item.id] : null;
           const champMemberBUri = item.event_type === 'two_headed_giant' ? (championMemberBAvatars[item.id] ?? null) : null;
           const showShinyCup =
-            item.status === 'completed' && item.has_shiny_participant && !!champUri;
+            (item.status === 'completed' || item.status === 'concluded') && item.has_shiny_participant && !!champUri;
           return (
             <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}>
               <View style={styles.row}>

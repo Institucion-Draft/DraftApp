@@ -12,6 +12,8 @@ export function getEventStatusLabel(status: EventStatus): string {
       return 'Completado';
     case 'cancelled':
       return 'Cancelado';
+    case 'concluded':
+      return 'Concluido';
     default:
       return status;
   }

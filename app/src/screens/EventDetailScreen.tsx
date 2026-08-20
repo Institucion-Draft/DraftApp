@@ -38,7 +38,7 @@ type EventRow = {
   workspace_id: string;
   name: string;
   avatar_path: string | null;
-  status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled';
+  status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled' | 'concluded';
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
   competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
   giant_randomization_done?: boolean | null;
@@ -530,6 +530,183 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     await load();
   };
 
+  const concludeEvent = async () => {
+    if (!event) return;
+
+    // Fetch pairings with participant sides
+    const pairingsRes = await supabase
+      .from('pairings')
+      .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+      .eq('event_id', event.id);
+    if (pairingsRes.error) {
+      Alert.alert('Error', pairingsRes.error.message ?? 'No se pudieron cargar los enfrentamientos.');
+      return;
+    }
+
+    // Fetch matches for match-level win counts
+    const pairingIdsForMatches = (pairingsRes.data ?? []).map((pr: { id: string }) => pr.id);
+    const matchesRes = pairingIdsForMatches.length > 0
+      ? await supabase
+          .from('matches')
+          .select('pairing_id, winner_participant_id')
+          .in('pairing_id', pairingIdsForMatches)
+          .in('match_type', ['draft', 'final'])
+          .eq('status', 'completed')
+      : { data: [], error: null };
+    if (matchesRes.error) {
+      Alert.alert('Error', (matchesRes.error as { message?: string }).message ?? 'No se pudieron cargar las partidas.');
+      return;
+    }
+
+    type PairingRow = { id: string; participant_a_id: string; participant_b_id: string; official_winner_participant_id: string | null };
+    type MatchRow = { pairing_id: string; winner_participant_id: string | null };
+
+    const pairings = (pairingsRes.data ?? []) as PairingRow[];
+    const matches = (matchesRes.data ?? []) as MatchRow[];
+
+    const totalPlayers = participants.length;
+    const threshold = Math.ceil((totalPlayers - 1) * 4 / 7);
+
+    // Build per-participant stats
+    type Stats = {
+      participantId: string;
+      userId: string;
+      bo3Won: number;
+      bo3Completed: number;
+      matchesWon: number;
+      matchesCompleted: number;
+      opponentIds: string[];
+    };
+
+    const statsMap = new Map<string, Stats>();
+    for (const p of participants) {
+      statsMap.set(p.id, {
+        participantId: p.id,
+        userId: p.user_id,
+        bo3Won: 0,
+        bo3Completed: 0,
+        matchesWon: 0,
+        matchesCompleted: 0,
+        opponentIds: [],
+      });
+    }
+
+    for (const pr of pairings) {
+      const hasWinner = pr.official_winner_participant_id != null;
+      const aStats = statsMap.get(pr.participant_a_id);
+      const bStats = statsMap.get(pr.participant_b_id);
+      if (aStats) {
+        if (hasWinner) {
+          aStats.bo3Completed += 1;
+          if (pr.official_winner_participant_id === pr.participant_a_id) aStats.bo3Won += 1;
+        }
+        aStats.opponentIds.push(pr.participant_b_id);
+      }
+      if (bStats) {
+        if (hasWinner) {
+          bStats.bo3Completed += 1;
+          if (pr.official_winner_participant_id === pr.participant_b_id) bStats.bo3Won += 1;
+        }
+        bStats.opponentIds.push(pr.participant_a_id);
+      }
+    }
+
+    // Count match-level wins per participant per pairing
+    for (const m of matches) {
+      if (!m.winner_participant_id) continue;
+      const winner = statsMap.get(m.winner_participant_id);
+      if (winner) {
+        winner.matchesWon += 1;
+      }
+      // Count total matches played for both sides
+      const pr = pairings.find((x) => x.id === m.pairing_id);
+      if (pr) {
+        const aStats = statsMap.get(pr.participant_a_id);
+        const bStats = statsMap.get(pr.participant_b_id);
+        if (aStats) aStats.matchesCompleted += 1;
+        if (bStats) bStats.matchesCompleted += 1;
+      }
+    }
+
+    // Filter eligible participants
+    const eligible = Array.from(statsMap.values()).filter(
+      (s) => s.bo3Completed >= threshold
+    );
+
+    if (eligible.length === 0) {
+      Alert.alert('Sin datos suficientes', 'Ningún jugador tiene enfrentamientos suficientes para armar el podio.');
+      return;
+    }
+
+    // Compute OMW% and OGW% for each eligible participant
+    const bo3WinRate = (s: Stats) => s.bo3Completed > 0 ? s.bo3Won / s.bo3Completed : 0;
+    const matchWinRate = (s: Stats) => s.matchesCompleted > 0 ? s.matchesWon / s.matchesCompleted : 0;
+
+    const omw = (s: Stats): number => {
+      if (s.opponentIds.length === 0) return 0;
+      let sum = 0;
+      for (const oppId of s.opponentIds) {
+        const opp = statsMap.get(oppId);
+        sum += opp ? bo3WinRate(opp) : 0;
+      }
+      return sum / s.opponentIds.length;
+    };
+
+    const ogw = (s: Stats): number => {
+      if (s.opponentIds.length === 0) return 0;
+      let sum = 0;
+      for (const oppId of s.opponentIds) {
+        const opp = statsMap.get(oppId);
+        sum += opp ? matchWinRate(opp) : 0;
+      }
+      return sum / s.opponentIds.length;
+    };
+
+    // 1st place: full 5-criteria sort to find a unique winner
+    const sortedForFirst = [...eligible].sort((a, b) => {
+      if (b.bo3Won !== a.bo3Won) return b.bo3Won - a.bo3Won;
+      const bo3WrDiff = bo3WinRate(b) - bo3WinRate(a);
+      if (Math.abs(bo3WrDiff) > 1e-10) return bo3WrDiff > 0 ? 1 : -1;
+      const mwrDiff = matchWinRate(b) - matchWinRate(a);
+      if (Math.abs(mwrDiff) > 1e-10) return mwrDiff > 0 ? 1 : -1;
+      const omwDiff = omw(b) - omw(a);
+      if (Math.abs(omwDiff) > 1e-10) return omwDiff > 0 ? 1 : -1;
+      const ogwDiff = ogw(b) - ogw(a);
+      if (Math.abs(ogwDiff) > 1e-10) return ogwDiff > 0 ? 1 : -1;
+      return 0;
+    });
+
+    const first = sortedForFirst[0]!;
+    const tiedForFirst = sortedForFirst.filter((s) => {
+      if (s.bo3Won !== first.bo3Won) return false;
+      if (Math.abs(bo3WinRate(s) - bo3WinRate(first)) > 1e-10) return false;
+      if (Math.abs(matchWinRate(s) - matchWinRate(first)) > 1e-10) return false;
+      if (Math.abs(omw(s) - omw(first)) > 1e-10) return false;
+      if (Math.abs(ogw(s) - ogw(first)) > 1e-10) return false;
+      return true;
+    });
+
+    if (tiedForFirst.length > 1) {
+      Alert.alert('Empate máximo por el primer lugar', 'No se puede determinar un campeón.');
+      return;
+    }
+
+    // 2nd and 3rd: bo3Won only — ties share the step, no further tiebreakers
+    const afterFirst = eligible.filter((s) => s.participantId !== first.participantId);
+    const maxBo3WonSecond = afterFirst.reduce((max, s) => Math.max(max, s.bo3Won), -1);
+    const afterSecond = afterFirst.filter((s) => s.bo3Won !== maxBo3WonSecond);
+    const maxBo3WonThird = afterSecond.reduce((max, s) => Math.max(max, s.bo3Won), -1);
+    void maxBo3WonThird; // computed for reference; 2nd/3rd display is handled by computePodium
+
+    const championUserId = first.userId;
+
+    await patchEvent({
+      status: 'concluded',
+      event_ended_at: new Date().toISOString(),
+      champion_user_id: championUserId,
+    });
+  };
+
   const softDeleteEvent = async () => {
     if (!event) return;
     const { error } = await supabase.rpc('soft_delete_event', { p_event_id: event.id });
@@ -880,7 +1057,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   }
 
   const eventAvatar = avatarPublicUrl(event.avatar_path);
-  const playingOrDone = event.status === 'playing' || event.status === 'completed';
+  const playingOrDone = event.status === 'playing' || event.status === 'completed' || event.status === 'concluded';
   const showEnfrentamientosBtn = playingOrDone && (myParticipantId != null || isWorkspaceMember);
   const showStandingsBtn =
     isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId);
@@ -940,6 +1117,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     (isOrganizer ||
       (myParticipantId != null &&
         (event.status === 'completed' ||
+          event.status === 'concluded' ||
           event.status === 'drafting' ||
           event.status === 'playing' ||
           isBuenosAiresSameCalendarDay(event.scheduled_for))));
@@ -1508,6 +1686,29 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           )}
         </View>
       ) : null}
+
+      {isOrganizer &&
+       event.competition_format === 'round_robin' &&
+       event.status === 'playing' &&
+       Date.now() >= new Date(event.scheduled_for).getTime() + 7 * 24 * 60 * 60 * 1000 ? (
+        <View style={styles.block}>
+          <TouchableOpacity
+            style={styles.concludeBtn}
+            onPress={() =>
+              Alert.alert(
+                'Dar por concluido',
+                '¿Dar por concluido el evento? Se armará el podio con los resultados parciales.',
+                [
+                  { text: 'Volver', style: 'cancel' },
+                  { text: 'Concluir', style: 'destructive', onPress: () => void concludeEvent() },
+                ]
+              )
+            }
+          >
+            <Text style={styles.concludeTxt}>Dar por concluido</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -1583,6 +1784,16 @@ const styles = StyleSheet.create({
   secondaryBtnTxt: { color: '#3B82F6', fontSize: 15, fontWeight: '600' },
   disabledBtn: { opacity: 0.5 },
   disabledHint: { color: '#666', fontSize: 12, marginTop: -4, marginBottom: 10 },
+  concludeBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center' as const,
+    marginBottom: 4,
+  },
+  concludeTxt: { color: '#DC2626', fontSize: 14, fontWeight: '500' as const },
   dangerBtn: {
     backgroundColor: '#FEE2E2',
     borderWidth: 1,
