@@ -62,6 +62,33 @@ export type MainStackParamList = {
   ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };
   ContextFreeColorPick: { workspaceId: string; userAId: string; userBId: string; encounterType: 'bo1' | 'bo3' };
   ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string; starterUserId?: string };
+  DraftTimerConfig: {
+    timerPacks: number[];
+    numPlayers: number;
+    alpha: number;
+    beta: number;
+    gamma: number;
+    delta: number;
+    rho: number;
+    tMin: number;
+    tMax: number;
+    mode: 'create' | 'edit';
+    eventId?: string;
+  };
+  DraftTimerSim: {
+    timerPacks: number[];
+    numPlayers: number;
+    alpha: number;
+    beta: number;
+    gamma: number;
+    delta: number;
+    rho: number;
+    tMin: number;
+    tMax: number;
+  };
+  DraftTimer: {
+    eventId: string;
+  };
   ContextFreeMatchResult: {
     winnerId: string;
     encounterType: 'bo1' | 'bo3';
