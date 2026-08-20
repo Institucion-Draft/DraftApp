@@ -66,6 +66,7 @@ type EventRow = {
   timer_rho?: number | null;
   timer_tmin?: number | null;
   timer_tmax?: number | null;
+  timer_color?: string | null;
 };
 
 type ParticipantView = {
@@ -143,6 +144,7 @@ function formatNamesList(names: string[]): string {
   return `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}`;
 }
 
+
 function isBuenosAiresSameCalendarDay(scheduledFor: string, when: Date = new Date()): boolean {
   const dayA = new Date(scheduledFor).toLocaleDateString('en-CA', {
     timeZone: 'America/Argentina/Buenos_Aires',
@@ -186,7 +188,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -535,7 +537,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       Alert.alert('Error', error.message ?? 'No se pudo eliminar el evento.');
       return;
     }
-    navigation.goBack();
+    navigation.navigate('EventsList', { workspaceId: event.workspace_id });
   };
 
   const finishDraftAndGeneratePairings = async () => {
@@ -1168,13 +1170,29 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   <Text style={styles.secondaryBtnTxt}>Re-randomizar gigantes</Text>
                 </TouchableOpacity>
               ) : null}
+              {event.is_timed_draft ? (
+                <TouchableOpacity
+                  style={styles.secondaryBtn}
+                  onPress={() => navigation.navigate('DraftTimerConfig', {
+                    mode: 'event',
+                    eventId: event.id,
+                    readOnly: !!event.draft_started_at,
+                  })}
+                >
+                  <Text style={styles.secondaryBtnTxt}>⏱ Configuración rondas cronometradas</Text>
+                </TouchableOpacity>
+              ) : null}
               {event.status === 'scheduled' && !event.draft_started_at ? (
                 <TouchableOpacity
                   style={[styles.secondaryBtn, startDraftDisabled && styles.disabledBtn]}
                   disabled={startDraftDisabled}
                   onPress={() => {
                     if (event.is_timed_draft) {
-                      const timerPacks: number[] = Array.isArray(event.timer_packs) ? event.timer_packs : [15, 15, 15];
+                      if (!Array.isArray(event.timer_packs) || event.timer_packs.length === 0) {
+                        Alert.alert('Pendiente: configurá el cronómetro');
+                        return;
+                      }
+                      const timerPacks: number[] = event.timer_packs;
                       const numPlayers = Math.max(participantCount, 1);
                       const params = {
                         alpha: event.timer_alpha ?? DEFAULT_TIMER_PARAMS.alpha,

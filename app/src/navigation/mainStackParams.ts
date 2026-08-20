@@ -63,6 +63,19 @@ export type MainStackParamList = {
   ContextFreeColorPick: { workspaceId: string; userAId: string; userBId: string; encounterType: 'bo1' | 'bo3' };
   ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string; starterUserId?: string };
   DraftTimerConfig: {
+    mode: 'create' | 'edit' | 'event';
+    eventId?: string;
+    numPlayers?: number;
+    readOnly?: boolean;
+  };
+  DraftTimerAdvanced: {
+    eventId: string;
+    numPlayers: number;
+    timerPacks: number[];
+    readOnly?: boolean;
+    savedInSim?: boolean;
+  };
+  DraftTimerSim: {
     timerPacks: number[];
     numPlayers: number;
     alpha: number;
@@ -72,10 +85,10 @@ export type MainStackParamList = {
     rho: number;
     tMin: number;
     tMax: number;
-    mode: 'create' | 'edit';
     eventId?: string;
+    readOnly?: boolean;
   };
-  DraftTimerSim: {
+  DraftTimerPreview: {
     timerPacks: number[];
     numPlayers: number;
     alpha: number;

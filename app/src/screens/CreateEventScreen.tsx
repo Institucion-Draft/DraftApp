@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,6 @@ import type { EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventTypeLabel } from '../lib/labels';
-import { useFocusEffect } from '@react-navigation/native';
-import { DEFAULT_TIMER_PARAMS, type TimerParams } from '../lib/draftTimer';
-import { getAndClearPendingTimerParams } from '../lib/draftTimerStore';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
@@ -73,11 +70,6 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
   const [isOfficial, setIsOfficial] = useState(true);
   const [isTimedDraft, setIsTimedDraft] = useState(false);
-  const [equalCardsPerPack, setEqualCardsPerPack] = useState(true);
-  const [numPacks, setNumPacks] = useState(3);
-  const [cardsPerPack, setCardsPerPack] = useState(15);
-  const [cardsPerPackArr, setCardsPerPackArr] = useState<number[]>([15, 15, 15]);
-  const [timerParams, setTimerParams] = useState<TimerParams>(DEFAULT_TIMER_PARAMS);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
   const [cubeId, setCubeId] = useState<string | null>(null);
@@ -123,27 +115,6 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       setVenues(((venuesRes.data ?? []) as SimpleOption[]).map((v) => ({ id: v.id, name: v.name })));
     })();
   }, [workspaceId]);
-
-  useEffect(() => {
-    setCardsPerPackArr((prev) => {
-      const next = [...prev];
-      while (next.length < numPacks) next.push(15);
-      return next.slice(0, numPacks);
-    });
-  }, [numPacks]);
-
-  useFocusEffect(
-    useCallback(() => {
-      const p = getAndClearPendingTimerParams();
-      if (p) setTimerParams(p);
-    }, [])
-  );
-
-  const timerPacks = useMemo<number[]>(() => {
-    if (!isTimedDraft) return [];
-    if (equalCardsPerPack) return Array.from({ length: numPacks }, () => cardsPerPack);
-    return cardsPerPackArr.slice(0, numPacks);
-  }, [isTimedDraft, equalCardsPerPack, numPacks, cardsPerPack, cardsPerPackArr]);
 
   const cubeLabel = useMemo(() => cubes.find((c) => c.id === cubeId)?.name ?? 'Sin definir', [cubeId, cubes]);
   const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
@@ -191,14 +162,6 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     insertRow.starting_life = startingLife;
     if (isTimedDraft) {
       insertRow.is_timed_draft = true;
-      insertRow.timer_packs = timerPacks;
-      insertRow.timer_alpha = timerParams.alpha;
-      insertRow.timer_beta = timerParams.beta;
-      insertRow.timer_gamma = timerParams.gamma;
-      insertRow.timer_delta = timerParams.delta;
-      insertRow.timer_rho = timerParams.rho;
-      insertRow.timer_tmin = timerParams.tMin;
-      insertRow.timer_tmax = timerParams.tMax;
     }
     const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
@@ -348,99 +311,6 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         <Switch value={isTimedDraft} onValueChange={setIsTimedDraft} />
       </View>
 
-      {isTimedDraft ? (
-        <View style={styles.timerSection}>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Cartas iguales por sobre</Text>
-            <Switch value={equalCardsPerPack} onValueChange={setEqualCardsPerPack} />
-          </View>
-
-          <Text style={styles.label}>Número de sobres</Text>
-          <View style={styles.segmented}>
-            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-              <TouchableOpacity
-                key={n}
-                style={[styles.segment, numPacks === n && styles.segmentSelected]}
-                onPress={() => setNumPacks(n)}
-              >
-                <Text style={[styles.segmentTxt, numPacks === n && styles.segmentTxtSelected]}>{n}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {equalCardsPerPack ? (
-            <>
-              <Text style={styles.label}>Cartas por sobre</Text>
-              <View style={styles.stepperRow}>
-                <TouchableOpacity style={styles.stepBtn} onPress={() => setCardsPerPack((v) => Math.max(5, v - 1))}>
-                  <Text style={styles.stepBtnTxt}>−</Text>
-                </TouchableOpacity>
-                <Text style={styles.stepValue}>{cardsPerPack}</Text>
-                <TouchableOpacity style={styles.stepBtn} onPress={() => setCardsPerPack((v) => Math.min(20, v + 1))}>
-                  <Text style={styles.stepBtnTxt}>+</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.label}>Cartas por sobre</Text>
-              <View style={styles.multiPackRow}>
-                {cardsPerPackArr.slice(0, numPacks).map((n, i) => (
-                  <View key={i} style={styles.packStepper}>
-                    <Text style={styles.packLabel}>S{i + 1}</Text>
-                    <TouchableOpacity
-                      style={styles.stepBtnSm}
-                      onPress={() =>
-                        setCardsPerPackArr((prev) => {
-                          const next = [...prev];
-                          next[i] = Math.max(5, (next[i] ?? 15) - 1);
-                          return next;
-                        })
-                      }
-                    >
-                      <Text style={styles.stepBtnTxt}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.stepValueSm}>{n}</Text>
-                    <TouchableOpacity
-                      style={styles.stepBtnSm}
-                      onPress={() =>
-                        setCardsPerPackArr((prev) => {
-                          const next = [...prev];
-                          next[i] = Math.min(20, (next[i] ?? 15) + 1);
-                          return next;
-                        })
-                      }
-                    >
-                      <Text style={styles.stepBtnTxt}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            </>
-          )}
-
-          <TouchableOpacity
-            style={styles.advancedBtn}
-            onPress={() =>
-              navigation.navigate('DraftTimerConfig', {
-                timerPacks,
-                numPlayers: 8,
-                alpha: timerParams.alpha,
-                beta: timerParams.beta,
-                gamma: timerParams.gamma,
-                delta: timerParams.delta,
-                rho: timerParams.rho,
-                tMin: timerParams.tMin,
-                tMax: timerParams.tMax,
-                mode: 'create',
-              })
-            }
-          >
-            <Text style={styles.advancedBtnTxt}>Configuración avanzada del cronómetro</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-
       <Text style={styles.label}>Vida inicial</Text>
       <View style={styles.segmented}>
         {STARTING_LIFE_OPTIONS.map((n) => {
@@ -568,52 +438,4 @@ const styles = StyleSheet.create({
   segmentSelected: { backgroundColor: '#3B82F6' },
   segmentTxt: { fontSize: 16, color: '#111', fontWeight: '600' },
   segmentTxtSelected: { color: '#fff' },
-  timerSection: {
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    borderRadius: 10,
-    backgroundColor: '#EFF6FF',
-    padding: 14,
-    marginBottom: 16,
-    gap: 0,
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 16,
-  },
-  stepBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: '#DBEAFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBtnSm: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: '#DBEAFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBtnTxt: { fontSize: 20, fontWeight: '700', color: '#1E40AF' },
-  stepValue: { fontSize: 20, fontWeight: '700', color: '#111', minWidth: 36, textAlign: 'center' },
-  stepValueSm: { fontSize: 14, fontWeight: '700', color: '#111', minWidth: 24, textAlign: 'center' },
-  multiPackRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  packStepper: { alignItems: 'center', gap: 2 },
-  packLabel: { fontSize: 11, color: '#6B7280', fontWeight: '600' },
-  advancedBtn: {
-    borderWidth: 1,
-    borderColor: '#93C5FD',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    marginTop: 4,
-    backgroundColor: '#DBEAFE',
-  },
-  advancedBtnTxt: { color: '#1D4ED8', fontSize: 14, fontWeight: '600' },
 });

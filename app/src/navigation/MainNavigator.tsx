@@ -40,7 +40,9 @@ import ContextFreeColorPickScreen from '../screens/ContextFreeColorPickScreen';
 import ContextFreeLifeTrackerScreen from '../screens/ContextFreeLifeTrackerScreen';
 import ContextFreeMatchResultScreen from '../screens/ContextFreeMatchResultScreen';
 import DraftTimerConfigScreen from '../screens/DraftTimerConfigScreen';
+import DraftTimerAdvancedScreen from '../screens/DraftTimerAdvancedScreen';
 import DraftTimerSimScreen from '../screens/DraftTimerSimScreen';
+import DraftTimerPreviewScreen from '../screens/DraftTimerPreviewScreen';
 import DraftTimerScreen from '../screens/DraftTimerScreen';
 import type { MainStackParamList } from './mainStackParams';
 
@@ -168,8 +170,10 @@ export default function MainStackNavigator() {
         <Stack.Screen name="ContextFreeColorPick" component={ContextFreeColorPickScreen} options={{ title: 'Elegir colores', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeLifeTracker" component={ContextFreeLifeTrackerScreen} options={{ headerShown: false }} />
         <Stack.Screen name="ContextFreeMatchResult" component={ContextFreeMatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="DraftTimerConfig" component={DraftTimerConfigScreen} options={{ title: 'Cronómetro — configuración', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="DraftTimerConfig" component={DraftTimerConfigScreen} options={{ title: 'Configuración rondas cronometradas', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="DraftTimerAdvanced" component={DraftTimerAdvancedScreen} options={{ title: 'Cronómetro — avanzado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="DraftTimerSim" component={DraftTimerSimScreen} options={{ title: 'Simulación de tiempos', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="DraftTimerPreview" component={DraftTimerPreviewScreen} options={{ title: 'Vista previa', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="DraftTimer" component={DraftTimerScreen} options={{ title: 'Cronómetro de draft', headerBackTitle: 'Atrás', headerBackVisible: false }} />
     </Stack.Navigator>
   );
