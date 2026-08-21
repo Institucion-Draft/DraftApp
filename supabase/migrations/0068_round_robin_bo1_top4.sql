@@ -14,10 +14,10 @@ alter table public.event_tiebreak_groups
   check (group_origin in ('tiebreak', 'swiss_topcut', 'round_robin_topcut'));
 
 -- Crea el bracket top-4 para un evento round_robin_bo1_top4.
--- El cliente llama a esta función solo cuando findGuaranteedTop4 confirma que el top 4
--- es matemáticamente inevitable. La función es idempotente: retorna false si ya existe
--- un bracket o si el evento no aplica.
--- Orden de seeds: victorias desc → OMW% desc (porcentaje de victorias de los rivales).
+-- NOTA: esta versión fue reemplazada por 0069_round_robin_top4_client_ranking.sql, que
+-- cambia la firma (recibe el top 4 ya ordenado por el cliente) y elimina el cálculo de
+-- ranking wins/OMW% de acá. Se deja este bloque solo por prolijidad histórica de la
+-- migración; la definición efectiva es la de 0069.
 create or replace function public.create_round_robin_top4_bracket(p_event_id uuid)
 returns boolean
 language plpgsql

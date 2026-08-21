@@ -1356,7 +1356,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <>
               {officialMs.length > 0 ? (
                 <View style={styles.subAccBlue}>
-                  <Text style={styles.subTitleSwissBlue}>Ronda suiza</Text>
+                  <Text style={styles.subTitleSwissBlue}>
+                    {officialBo1 ? 'Fase todos contra todos' : 'Ronda suiza'}
+                  </Text>
                   {officialMs.map(renderDraftRow)}
                 </View>
               ) : null}

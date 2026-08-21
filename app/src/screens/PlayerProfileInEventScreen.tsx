@@ -189,6 +189,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
   const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
+  /** round_robin_bo1_top4: el oficial de la fase regular es a una sola partida. */
+  const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
   /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
   const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
 
@@ -521,6 +523,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const competitionFormat =
       rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setEventCompetitionFormat(competitionFormat);
+    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin_bo1_top4');
     const officialH2hFiltered =
       competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
@@ -777,18 +780,22 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const renderOfficialContent = () => {
     const bo3Pills = (winsProfile: number, winsOpp: number, tint: 'blue' | 'green') => {
       const filled = tint === 'blue' ? styles.bo3FilledBlue : styles.bo3FilledGreen;
+      // round_robin_bo1_top4: el oficial de la fase regular (tint 'blue') es a una sola
+      // partida — una sola píldora. El bracket (tint 'green') sigue siendo BO3/lo que
+      // diga topcut_format y mantiene sus 2 píldoras.
+      const singlePill = tint === 'blue' && isRoundRobinBo1;
       return (
         <View style={styles.h2hBo3Outer}>
           <View style={styles.h2hBo3Group}>
             <View style={styles.bo3Row}>
               <View style={[styles.bo3Box, winsProfile >= 1 && filled]} />
-              <View style={[styles.bo3Box, winsProfile >= 2 && filled]} />
+              {!singlePill ? <View style={[styles.bo3Box, winsProfile >= 2 && filled]} /> : null}
             </View>
           </View>
           <View style={styles.h2hBo3Group}>
             <View style={[styles.bo3Row, styles.bo3RowRight]}>
               <View style={[styles.bo3Box, winsOpp >= 1 && filled]} />
-              <View style={[styles.bo3Box, winsOpp >= 2 && filled]} />
+              {!singlePill ? <View style={[styles.bo3Box, winsOpp >= 2 && filled]} /> : null}
             </View>
           </View>
         </View>
@@ -1074,7 +1081,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           <>
             {swissMataBracketSection()}
             {tiebreakRoundRobinCards()}
-            <Text style={styles.sectionTitle}>Enfrentamientos</Text>
+            <Text style={styles.sectionTitle}>
+              {isRoundRobinBo1 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+            </Text>
             {officialH2h.map((row) => officialPairingCard(row, 'blue'))}
           </>
         )}
