@@ -24,6 +24,7 @@ import {
   getTimerSession,
   clearTimerSession,
 } from '../lib/draftTimerStore';
+import { generateEventPairings } from '../lib/generateEventPairings';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'DraftTimer'>;
 type Phase = 'loading' | 'waiting' | 'counting' | 'done';
@@ -373,10 +374,23 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (phase !== 'done') return;
     void (async () => {
-      await supabase
+      const toPlaying = await supabase
         .from('draft_events')
         .update({ draft_ended_at: new Date().toISOString(), status: 'playing' })
         .eq('id', eventId);
+      if (toPlaying.error) {
+        Alert.alert('Error', toPlaying.error.message ?? 'No se pudo marcar fin del draft.');
+        navigation.goBack();
+        return;
+      }
+      const gen = await generateEventPairings(eventId);
+      if (!gen.ok) {
+        await supabase
+          .from('draft_events')
+          .update({ status: 'drafting', draft_ended_at: null })
+          .eq('id', eventId);
+        Alert.alert('Error', gen.message);
+      }
       navigation.goBack();
     })();
   }, [phase, eventId, navigation]);

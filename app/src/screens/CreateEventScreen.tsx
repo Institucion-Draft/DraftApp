@@ -23,10 +23,11 @@ import { getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
+type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2' | 'round_robin_bo1_top4';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
+  { value: 'round_robin_bo1_top4', label: 'Todos vs todos + Top 4' },
   { value: 'swiss', label: 'Suizo' },
   { value: 'swiss_bo2', label: 'Suizo BO2' },
 ];
@@ -156,6 +157,12 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
       insertRow.swiss_rounds_manual = swissRoundsManual;
     }
+    if (competitionFormat === 'round_robin_bo1_top4') {
+      insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+      // El oficial es a una sola partida: el trigger update_pairing_official_result
+      // resuelve el pairing con el primer match 'draft' completado.
+      insertRow.match_format = 'bo1';
+    }
     if (eventType === 'two_headed_giant') {
       insertRow.giant_randomization_done = false;
     }
@@ -269,7 +276,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      {competitionFormat === 'swiss' ? (
+      {competitionFormat === 'swiss' || competitionFormat === 'round_robin_bo1_top4' ? (
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
           <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />

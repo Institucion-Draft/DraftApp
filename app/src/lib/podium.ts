@@ -450,6 +450,38 @@ function podiumBracketFinalMode(
   return { steps, spectators, isFinal };
 }
 
+/**
+ * Devuelve los participantes garantizados en el top 4 (para round_robin_bo1_top4).
+ * P está garantizado si, en el peor caso para P (pierde todo lo pendiente), menos de 4
+ * rivales Q pueden alcanzar más victorias que P en el mejor caso (Q gana todo lo pendiente).
+ * Condición: count(Q: maxWins(Q) > minWins(P)) < 4
+ *   minWins(P) = p.bo3Won
+ *   maxWins(Q) = q.bo3Won + pendingUnblockedFor(Q)
+ * Retorna null si el top 4 aún no es determinable (menos de 4 garantizados).
+ */
+export function findGuaranteedTop4(
+  participants: PodiumPlayer[],
+  pairingsRemaining: PairingRemain[]
+): PodiumPlayer[] | null {
+  // Sin pairings pendientes ni completados el torneo no arrancó: no hay nada garantizado.
+  if (pairingsRemaining.length === 0 && participants.every((p) => p.bo3Completed === 0)) {
+    return null;
+  }
+  if (participants.length < 4) return participants.length > 0 ? [...participants] : null;
+  const guaranteed: PodiumPlayer[] = [];
+  for (const p of participants) {
+    const minWinsP = p.bo3Won;
+    let canSurpass = 0;
+    for (const q of participants) {
+      if (q.participantId === p.participantId) continue;
+      const maxWinsQ = q.bo3Won + pendingUnblockedFor(pairingsRemaining, q.participantId);
+      if (maxWinsQ > minWinsP) canSurpass++;
+    }
+    if (canSurpass < 4) guaranteed.push(p);
+  }
+  return guaranteed.length >= 4 ? guaranteed : null;
+}
+
 export function computePodium(
   participants: PodiumPlayer[],
   pairingsRemaining: PairingRemain[],

@@ -657,6 +657,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   /** True cuando el formato real es swiss_bo2 (mapeado a 'swiss' para comportamiento, separado para display). */
   const [isSwissBo2, setIsSwissBo2] = useState(false);
+  /** True cuando el formato real es round_robin_bo1_top4: sin EG/EC (no hay BO3 en fase regular). */
+  const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
   /** Suizo completado: nombre + campeón/campeona (sin otras estadísticas en el banner ni en la meta junto al banner). */
   const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
@@ -796,6 +798,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const fmt = rawFmt === 'swiss' || rawFmt === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
     setIsSwissBo2(rawFmt === 'swiss_bo2');
+    setIsRoundRobinBo1(rawFmt === 'round_robin_bo1_top4');
 
     const matchesRes =
       pairingIds.length > 0
@@ -1042,7 +1045,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       }
       const groupOrigin = tgRow.group_origin ?? 'tiebreak';
       if (
-        groupOrigin === 'swiss_topcut' &&
+        (groupOrigin === 'swiss_topcut' || groupOrigin === 'round_robin_topcut') &&
         !gpRes.error &&
         gpRes.data &&
         (gpRes.data as { participant_id: string }[]).length >= 4 &&
@@ -1587,8 +1590,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
               <>
                 <Text style={[styles.cell, styles.statCol]}>PG</Text>
                 <Text style={[styles.cell, styles.statCol]}>PJ</Text>
-                <Text style={[styles.cell, styles.statCol]}>EG</Text>
-                <Text style={[styles.cell, styles.statCol]}>EC</Text>
+                {!isRoundRobinBo1 ? (
+                  <>
+                    <Text style={[styles.cell, styles.statCol]}>EG</Text>
+                    <Text style={[styles.cell, styles.statCol]}>EC</Text>
+                  </>
+                ) : null}
               </>
             )}
             {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
@@ -1676,8 +1683,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 <>
                   <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
                   <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
-                  <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
-                  <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+                  {!isRoundRobinBo1 ? (
+                    <>
+                      <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
+                      <Text style={[styles.cell, styles.statCol]}>{r.ec}</Text>
+                    </>
+                  ) : null}
                 </>
               )}
               {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
@@ -1752,7 +1763,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       </View>
       {tab === 'official' &&
       (eventFooter.torneo ||
-        (eventFooter.bo3 && !(competitionFormat === 'swiss' && swissChampionName))) ? (
+        (eventFooter.bo3 && !isRoundRobinBo1 && !(competitionFormat === 'swiss' && swissChampionName))) ? (
         <View style={styles.tourneyMeta}>
           <View style={styles.tourneyMetaRow}>
             {eventFooter.torneo ? (
@@ -1760,7 +1771,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             ) : (
               <View style={styles.tourneyMetaLeftSpacer} />
             )}
-            {eventFooter.bo3 && !(competitionFormat === 'swiss' && swissChampionName) ? (
+            {eventFooter.bo3 && !isRoundRobinBo1 && !(competitionFormat === 'swiss' && swissChampionName) ? (
               <Text style={styles.tourneyMetaRight}>
                 <Text style={eventFooter.bo3.bold20 ? styles.tourneyMetaBo3Bold : styles.tourneyMetaBo3Norm}>
                   E_2-0: {eventFooter.bo3.pct20}
@@ -1794,7 +1805,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   ).split(' · '),
                   'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
                   'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
-                ]
+                  // round_robin_bo1_top4: sin métricas de BO3 en la fase regular.
+                ].filter(
+                  (s) =>
+                    !isRoundRobinBo1 ||
+                    !(s.startsWith('EG:') || s.startsWith('EC:') || s.startsWith('E_2-0:') || s.startsWith('E_2-1:'))
+                )
             : 'VG: Venganzas Ganadas · VJ: Venganzas Jugadas Completadas · CV: Copas Venganza ganadas · SC: Súper Copas ganadas'.split(
                 ' · '
               );

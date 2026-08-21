@@ -378,7 +378,7 @@ async function fetchEventTickerContext(
       .from('event_tiebreak_groups')
       .select('id')
       .eq('event_id', eventId)
-      .eq('group_origin', 'swiss_topcut')
+      .in('group_origin', ['swiss_topcut', 'round_robin_topcut'])
       .in('status', ['active', 'resolved'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -1426,7 +1426,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const isSwissTopcutBracketTiebreak =
       matchRow.match_type === 'tiebreak' &&
       tg?.group_type === 'bracket' &&
-      tg.group_origin === 'swiss_topcut';
+      (tg.group_origin === 'swiss_topcut' || tg.group_origin === 'round_robin_topcut');
     if (isSwissTopcutBracketTiebreak) {
       const bmr = await supabase
         .from('event_tiebreak_bracket_matches')
