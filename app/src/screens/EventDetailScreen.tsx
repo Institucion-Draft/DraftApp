@@ -28,7 +28,11 @@ import {
   pairingIsBetweenParticipants,
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
-import { findGuaranteedTop4, type PodiumPlayer, type PairingRemain } from '../lib/podium';
+import {
+  rankRoundRobinBo1Standings,
+  type RoundRobinStandingInput,
+  type RoundRobinPairingResult,
+} from '../lib/podium';
 import { generateEventPairings } from '../lib/generateEventPairings';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
@@ -293,49 +297,34 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           participant_b_id: string;
           official_winner_participant_id: string | null;
         }[];
-        const winMap: Record<string, number> = {};
-        const playedMap: Record<string, number> = {};
-        for (const part of p) {
-          winMap[part.id] = 0;
-          playedMap[part.id] = 0;
-        }
-        for (const pr of rrPairings) {
-          if (pr.official_winner_participant_id == null) continue;
-          playedMap[pr.participant_a_id] = (playedMap[pr.participant_a_id] ?? 0) + 1;
-          playedMap[pr.participant_b_id] = (playedMap[pr.participant_b_id] ?? 0) + 1;
-          if (pr.official_winner_participant_id === pr.participant_a_id) {
-            winMap[pr.participant_a_id] = (winMap[pr.participant_a_id] ?? 0) + 1;
-          } else {
-            winMap[pr.participant_b_id] = (winMap[pr.participant_b_id] ?? 0) + 1;
+        // Disparador único: fase regular 100% resuelta (0 pairings sin ganador).
+        // Sin proyecciones de "quién puede llegar todavía" — solo se arma con el torneo
+        // terminado. El RPC es idempotente (no crea un segundo bracket si ya existe).
+        const allResolved =
+          rrPairings.length > 0 && rrPairings.every((pr) => pr.official_winner_participant_id != null);
+        if (allResolved) {
+          const winsByParticipant: Record<string, number> = {};
+          for (const part of p) winsByParticipant[part.id] = 0;
+          for (const pr of rrPairings) {
+            const w = pr.official_winner_participant_id;
+            if (w != null) winsByParticipant[w] = (winsByParticipant[w] ?? 0) + 1;
           }
-        }
-        const rrPodiumPlayers: PodiumPlayer[] = p.map((part) => {
-          const w = winMap[part.id] ?? 0;
-          const c = playedMap[part.id] ?? 0;
-          const wr = c > 0 ? w / c : 0;
-          return {
+          const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
             participantId: part.id,
-            userId: part.user_id,
-            name: '',
-            avatarUserId: part.user_id,
-            bo3Won: w,
-            bo3Completed: c,
-            bo3WinRate: wr,
-            matchesWon: w,
-            matchesCompleted: c,
-            matchWinRate: wr,
-          };
-        });
-        const rrPairingRemain: PairingRemain[] = rrPairings
-          .filter((pr) => pr.official_winner_participant_id == null)
-          .map((pr) => ({
+            wins: winsByParticipant[part.id] ?? 0,
+          }));
+          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
             participantAId: pr.participant_a_id,
             participantBId: pr.participant_b_id,
-            isBlocked: false,
+            winnerParticipantId: pr.official_winner_participant_id,
           }));
-        const guaranteed = findGuaranteedTop4(rrPodiumPlayers, rrPairingRemain);
-        if (guaranteed && guaranteed.length >= 4) {
-          await supabase.rpc('create_round_robin_top4_bracket', { p_event_id: e.id });
+          const ranked = rankRoundRobinBo1Standings(standingInputs, pairingResults);
+          if (ranked.length >= 4) {
+            await supabase.rpc('create_round_robin_top4_bracket', {
+              p_event_id: e.id,
+              p_top4_ordered: ranked.slice(0, 4),
+            });
+          }
         }
       }
     }

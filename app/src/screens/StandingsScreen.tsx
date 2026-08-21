@@ -1071,7 +1071,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         championDecidedBy,
         polemicaWinners,
         recognitionWinners,
-        podiumBracketMatches
+        podiumBracketMatches,
+        rawFmt
       )
     );
 
@@ -1794,14 +1795,14 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 ? 'Pts: Puntos (victoria=3, empate=1, bye=2) · OMW%: Rendimiento medio de los rivales (mín. 33%) · GW%: Porcentaje de partidas individuales ganadas · PF: Partidas individuales finalizadas · TMP: Tiempo Medio por Partida'.split(' · ')
                 : (
                     turnTrackingEnabled
-                      ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
+                      ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
                       : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
                   ).split(' · ')
               : [
                   ...(
                     turnTrackingEnabled
-                      ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno (oficial) · TMP: Tiempo Medio por Partida'
-                      : 'PG: Partidas Ganadas · PJ: Partidas Jugadas Completadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
+                      ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
+                      : 'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
                   ).split(' · '),
                   'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
                   'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',

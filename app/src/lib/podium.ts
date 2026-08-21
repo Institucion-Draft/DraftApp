@@ -450,36 +450,139 @@ function podiumBracketFinalMode(
   return { steps, spectators, isFinal };
 }
 
+// ── round_robin_bo1_top4: ranking de la fase regular (todos contra todos, BO1) ─────────────
+//
+// El bracket de top 4 se arma únicamente cuando el torneo terminó al 100% (0 pairings sin
+// resolver) — sin proyecciones de "quién puede llegar todavía". `rankRoundRobinBo1Standings`
+// calcula el orden completo de la tabla con desempates deterministas; el caller toma los
+// primeros 4 y se los pasa ya ordenados al RPC que arma el bracket.
+
+export type RoundRobinStandingInput = {
+  participantId: string;
+  /** Victorias en la fase regular (pairings oficiales ganados). */
+  wins: number;
+};
+
+export type RoundRobinPairingResult = {
+  participantAId: string;
+  participantBId: string;
+  winnerParticipantId: string | null;
+};
+
+/** Hash determinista y estable de un string (djb2-like). Solo para desempate de último recurso. */
+function stableHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+/** Victorias de `pid` contra rivales que están dentro de `groupSet` (subtabla del grupo empatado). */
+function intraGroupWins(pid: string, groupSet: Set<string>, pairings: RoundRobinPairingResult[]): number {
+  let wins = 0;
+  for (const pr of pairings) {
+    if (pr.winnerParticipantId !== pid) continue;
+    const opponent =
+      pr.participantAId === pid ? pr.participantBId : pr.participantBId === pid ? pr.participantAId : null;
+    if (opponent != null && groupSet.has(opponent)) wins++;
+  }
+  return wins;
+}
+
 /**
- * Devuelve los participantes garantizados en el top 4 (para round_robin_bo1_top4).
- * P está garantizado si, en el peor caso para P (pierde todo lo pendiente), menos de 4
- * rivales Q pueden alcanzar más victorias que P en el mejor caso (Q gana todo lo pendiente).
- * Condición: count(Q: maxWins(Q) > minWins(P)) < 4
- *   minWins(P) = p.bo3Won
- *   maxWins(Q) = q.bo3Won + pendingUnblockedFor(Q)
- * Retorna null si el top 4 aún no es determinable (menos de 4 garantizados).
+ * Suma de victorias totales (en todo el torneo) de los rivales a los que `pid` le ganó,
+ * excluyendo rivales que están en `excludeSet` (el propio ciclo empatado sin orden directo).
  */
-export function findGuaranteedTop4(
-  participants: PodiumPlayer[],
-  pairingsRemaining: PairingRemain[]
-): PodiumPlayer[] | null {
-  // Sin pairings pendientes ni completados el torneo no arrancó: no hay nada garantizado.
-  if (pairingsRemaining.length === 0 && participants.every((p) => p.bo3Completed === 0)) {
-    return null;
-  }
-  if (participants.length < 4) return participants.length > 0 ? [...participants] : null;
-  const guaranteed: PodiumPlayer[] = [];
-  for (const p of participants) {
-    const minWinsP = p.bo3Won;
-    let canSurpass = 0;
-    for (const q of participants) {
-      if (q.participantId === p.participantId) continue;
-      const maxWinsQ = q.bo3Won + pendingUnblockedFor(pairingsRemaining, q.participantId);
-      if (maxWinsQ > minWinsP) canSurpass++;
+function qualityOfRivals(
+  pid: string,
+  excludeSet: Set<string>,
+  pairings: RoundRobinPairingResult[],
+  totalWinsMap: Map<string, number>
+): number {
+  let quality = 0;
+  for (const pr of pairings) {
+    if (pr.winnerParticipantId !== pid) continue;
+    const opponent =
+      pr.participantAId === pid ? pr.participantBId : pr.participantBId === pid ? pr.participantAId : null;
+    if (opponent != null && !excludeSet.has(opponent)) {
+      quality += totalWinsMap.get(opponent) ?? 0;
     }
-    if (canSurpass < 4) guaranteed.push(p);
   }
-  return guaranteed.length >= 4 ? guaranteed : null;
+  return quality;
+}
+
+/**
+ * Ordena un grupo de jugadores empatados en victorias totales.
+ * 1) Sub-tabla interna del grupo (head-to-head): quien le ganó más veces a otros del grupo
+ *    va arriba. Con 2 empatados esto es exactamente "quien le ganó al otro va arriba".
+ * 2) Si el head-to-head no diferencia a todo el grupo (ciclo tipo A>B>C>A), esos jugadores
+ *    quedan con el mismo registro interno: se desempatan por "calidad de rivales" (victorias
+ *    totales de los rivales a los que le ganaron, excluyendo al propio ciclo).
+ * 3) Si todavía empatan, orden determinista por hash estable del participantId.
+ */
+function resolveTieGroup(
+  group: string[],
+  pairings: RoundRobinPairingResult[],
+  totalWinsMap: Map<string, number>
+): string[] {
+  if (group.length <= 1) return group;
+
+  const groupSet = new Set(group);
+  const buckets = new Map<number, string[]>();
+  for (const pid of group) {
+    const iw = intraGroupWins(pid, groupSet, pairings);
+    if (!buckets.has(iw)) buckets.set(iw, []);
+    buckets.get(iw)!.push(pid);
+  }
+
+  const orderedKeys = [...buckets.keys()].sort((a, b) => b - a);
+  const result: string[] = [];
+  for (const key of orderedKeys) {
+    const bucket = buckets.get(key)!;
+    if (bucket.length === 1) {
+      result.push(bucket[0]!);
+    } else if (bucket.length === group.length) {
+      // El head-to-head no diferenció a nadie del grupo: ciclo. Calidad de rivales.
+      const bucketSet = new Set(bucket);
+      const withQuality = bucket.map((pid) => ({
+        pid,
+        quality: qualityOfRivals(pid, bucketSet, pairings, totalWinsMap),
+        hash: stableHash(pid),
+      }));
+      withQuality.sort((a, b) => (b.quality !== a.quality ? b.quality - a.quality : a.hash - b.hash));
+      result.push(...withQuality.map((x) => x.pid));
+    } else {
+      // Progreso parcial: recursar sobre el subgrupo aún empatado.
+      result.push(...resolveTieGroup(bucket, pairings, totalWinsMap));
+    }
+  }
+  return result;
+}
+
+/**
+ * Ranking completo de la fase regular round_robin_bo1_top4, mejor primero.
+ * Solo tiene sentido llamarla con el torneo 100% resuelto (sin pairings pendientes):
+ * el desempate por head-to-head asume que cada par de empatados ya jugó su cruce directo.
+ */
+export function rankRoundRobinBo1Standings(
+  participants: RoundRobinStandingInput[],
+  pairings: RoundRobinPairingResult[]
+): string[] {
+  const totalWinsMap = new Map<string, number>();
+  for (const p of participants) totalWinsMap.set(p.participantId, p.wins);
+
+  const byWins = new Map<number, string[]>();
+  for (const p of participants) {
+    if (!byWins.has(p.wins)) byWins.set(p.wins, []);
+    byWins.get(p.wins)!.push(p.participantId);
+  }
+
+  const ranked: string[] = [];
+  for (const w of [...byWins.keys()].sort((a, b) => b - a)) {
+    ranked.push(...resolveTieGroup(byWins.get(w)!, pairings, totalWinsMap));
+  }
+  return ranked;
 }
 
 export function computePodium(
@@ -492,8 +595,20 @@ export function computePodium(
   championDecidedBy?: string | null,
   polemicaWinners?: string[] | null,
   recognitionWinners?: string[] | null,
-  bracketMatches?: BracketMatchPodiumInput[] | null
+  bracketMatches?: BracketMatchPodiumInput[] | null,
+  competitionFormat?: string | null
 ): PodiumState {
+  // round_robin_bo1_top4: el único podio válido sale del bracket (podiumBracketFinalMode).
+  // Sin bracket creado todavía, podio vacío — nunca proyectar desde la tabla BO1 (ni
+  // podiumPendingMode, podiumSettledMode, ni campeón declarado aplican a este formato).
+  if (competitionFormat === 'round_robin_bo1_top4' && activeTiebreakGroup == null) {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: participants,
+      isFinal: false,
+    };
+  }
+
   if (participants.length === 0) {
     return {
       steps: [emptyStep(1), emptyStep(2), emptyStep(3)],

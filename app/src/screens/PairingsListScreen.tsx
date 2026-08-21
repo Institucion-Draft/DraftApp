@@ -1602,7 +1602,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   );
                 })}
                 {!isSwissOfficialSectioned ? (
-                  <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>Enfrentamientos</Text>
+                  <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>
+                    {officialBo1 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+                  </Text>
                 ) : null}
               </View>
             ) : null
