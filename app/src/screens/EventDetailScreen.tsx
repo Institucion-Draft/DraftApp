@@ -28,6 +28,8 @@ import {
   pairingIsBetweenParticipants,
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
+import { findGuaranteedTop4, type PodiumPlayer, type PairingRemain } from '../lib/podium';
+import { generateEventPairings } from '../lib/generateEventPairings';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
 
@@ -40,7 +42,7 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled' | 'concluded';
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
-  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
+  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | 'round_robin_bo1_top4' | null;
   giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
@@ -91,13 +93,6 @@ type ParticipantView = {
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }[]
     | null;
-};
-
-type PairingInsert = {
-  event_id: string;
-  participant_a_id: string;
-  participant_b_id: string;
-  data_source: 'app';
 };
 
 type TiebreakGroupParticipantRow = {
@@ -286,6 +281,64 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     // a user has multiple default_avatars entries.
     const seen = new Set<string>();
     setParticipants(p.filter((ep) => (seen.has(ep.id) ? false : (seen.add(ep.id), true))));
+
+    if (e.status === 'playing' && e.competition_format === 'round_robin_bo1_top4') {
+      const rrPairingsRes = await supabase
+        .from('pairings')
+        .select('participant_a_id, participant_b_id, official_winner_participant_id')
+        .eq('event_id', e.id);
+      if (!rrPairingsRes.error && rrPairingsRes.data) {
+        const rrPairings = rrPairingsRes.data as {
+          participant_a_id: string;
+          participant_b_id: string;
+          official_winner_participant_id: string | null;
+        }[];
+        const winMap: Record<string, number> = {};
+        const playedMap: Record<string, number> = {};
+        for (const part of p) {
+          winMap[part.id] = 0;
+          playedMap[part.id] = 0;
+        }
+        for (const pr of rrPairings) {
+          if (pr.official_winner_participant_id == null) continue;
+          playedMap[pr.participant_a_id] = (playedMap[pr.participant_a_id] ?? 0) + 1;
+          playedMap[pr.participant_b_id] = (playedMap[pr.participant_b_id] ?? 0) + 1;
+          if (pr.official_winner_participant_id === pr.participant_a_id) {
+            winMap[pr.participant_a_id] = (winMap[pr.participant_a_id] ?? 0) + 1;
+          } else {
+            winMap[pr.participant_b_id] = (winMap[pr.participant_b_id] ?? 0) + 1;
+          }
+        }
+        const rrPodiumPlayers: PodiumPlayer[] = p.map((part) => {
+          const w = winMap[part.id] ?? 0;
+          const c = playedMap[part.id] ?? 0;
+          const wr = c > 0 ? w / c : 0;
+          return {
+            participantId: part.id,
+            userId: part.user_id,
+            name: '',
+            avatarUserId: part.user_id,
+            bo3Won: w,
+            bo3Completed: c,
+            bo3WinRate: wr,
+            matchesWon: w,
+            matchesCompleted: c,
+            matchWinRate: wr,
+          };
+        });
+        const rrPairingRemain: PairingRemain[] = rrPairings
+          .filter((pr) => pr.official_winner_participant_id == null)
+          .map((pr) => ({
+            participantAId: pr.participant_a_id,
+            participantBId: pr.participant_b_id,
+            isBlocked: false,
+          }));
+        const guaranteed = findGuaranteedTop4(rrPodiumPlayers, rrPairingRemain);
+        if (guaranteed && guaranteed.length >= 4) {
+          await supabase.rpc('create_round_robin_top4_bracket', { p_event_id: e.id });
+        }
+      }
+    }
 
     let multiTiebreakGroup: ActiveTiebreakGroupState | null = null;
     const activeGroupRes = await supabase
@@ -732,200 +785,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       return;
     }
 
-    const partsRes = await supabase
-      .from('event_participants')
-      .select(
-        `
-        id,
-        users!event_participants_user_id_fkey (
-          display_name,
-          username
-        )
-      `
-      )
-      .eq('event_id', event.id)
-      .eq('role', 'player');
-
-    if (partsRes.error) {
-      if (__DEV__) {
-        console.error('[finishDraft] Error cargando participantes', partsRes.error);
-      }
+    const gen = await generateEventPairings(event.id);
+    if (!gen.ok) {
       await supabase
         .from('draft_events')
         .update({ status: 'drafting', draft_ended_at: null })
         .eq('id', event.id);
-      Alert.alert('Error', partsRes.error.message ?? 'No se pudieron generar los enfrentamientos.');
+      Alert.alert('Error', gen.message);
       await load();
       return;
     }
 
-    const players = ((partsRes.data ?? []) as Array<{ id: string; users: any }>).map((p) => {
-      const u = relationOne(p.users) as { display_name?: string; username?: string } | null;
-      const name = (u?.display_name || u?.username || '').trim();
-      return { id: p.id, sortName: name.toLocaleLowerCase('es-AR') };
-    });
-
-    if (players.length < 2) {
-      if (__DEV__) {
-        console.error('[finishDraft] Jugadores insuficientes para generar pairings', {
-          eventId: event.id,
-          playersLength: players.length,
-        });
-      }
-      await supabase
-        .from('draft_events')
-        .update({ status: 'drafting', draft_ended_at: null })
-        .eq('id', event.id);
-      Alert.alert('Error', 'Se necesitan al menos 2 jugadores para generar enfrentamientos.');
-      await load();
-      return;
-    }
-
-    players.sort((a, b) => a.sortName.localeCompare(b.sortName, 'es', { sensitivity: 'base' }));
-
-    const competitionFormat = event.competition_format ?? 'round_robin';
-    if (competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2') {
-      const isBo2 = competitionFormat === 'swiss_bo2';
-      const roundRpc = isBo2 ? 'generate_swiss_bo2_round' : 'generate_swiss_round';
-      const nPlayers = players.length;
-      const swiss_rounds_total = Math.max(1, Math.ceil(Math.log2(Math.max(nPlayers, 2))));
-      const updSwiss = await supabase.from('draft_events').update({ swiss_rounds_total }).eq('id', event.id);
-      if (updSwiss.error) {
-        if (__DEV__) {
-          console.error('[finishDraft] Error guardando swiss_rounds_total', updSwiss.error);
-        }
-        await supabase
-          .from('draft_events')
-          .update({ status: 'drafting', draft_ended_at: null })
-          .eq('id', event.id);
-        Alert.alert('Error', updSwiss.error.message ?? 'No se pudo configurar el formato suizo.');
-        await load();
-        return;
-      }
-
-      const allPairRes = await supabase.rpc('generate_all_pairings', { p_event_id: event.id });
-      if (allPairRes.error) {
-        if (__DEV__) {
-          console.error('[finishDraft] Error generate_all_pairings', allPairRes.error);
-        }
-        await supabase
-          .from('draft_events')
-          .update({ status: 'drafting', draft_ended_at: null })
-          .eq('id', event.id);
-        Alert.alert('Error', allPairRes.error.message ?? 'No se pudieron crear los enfrentamientos.');
-        await load();
-        return;
-      }
-
-      const rpcRes = await supabase.rpc(roundRpc, { p_event_id: event.id, p_round: 1 });
-      if (rpcRes.error) {
-        if (__DEV__) {
-          console.error(`[finishDraft] Error ${roundRpc}`, rpcRes.error);
-        }
-        await supabase
-          .from('draft_events')
-          .update({ status: 'drafting', draft_ended_at: null })
-          .eq('id', event.id);
-        Alert.alert('Error', rpcRes.error.message ?? 'No se pudo generar la ronda suiza.');
-        await load();
-        return;
-      }
-
-      Alert.alert('Listo', 'Se generó la ronda 1 (formato suizo).');
-      await load();
-      return;
-    }
-
-    const inserts: PairingInsert[] = [];
-    for (let i = 0; i < players.length; i += 1) {
-      for (let j = i + 1; j < players.length; j += 1) {
-        const aId = players[i]?.id ?? '';
-        const bId = players[j]?.id ?? '';
-        if (!aId || !bId || aId === bId) continue;
-        const participant_a_id = aId < bId ? aId : bId;
-        const participant_b_id = aId < bId ? bId : aId;
-        inserts.push({
-          event_id: event.id,
-          participant_a_id,
-          participant_b_id,
-          data_source: 'app',
-        });
-      }
-    }
-
-    if (inserts.length === 0) {
-      if (__DEV__) {
-        console.error('[finishDraft] inserts vacío con jugadores suficientes', {
-          eventId: event.id,
-          playersLength: players.length,
-          playerIds: players.map((p) => p.id),
-        });
-      }
-      await supabase
-        .from('draft_events')
-        .update({ status: 'drafting', draft_ended_at: null })
-        .eq('id', event.id);
-      Alert.alert('Error', 'No se pudieron generar enfrentamientos. Probá de nuevo.');
-      await load();
-      return;
-    }
-
-    if (inserts.length > 0) {
-      const insertRes = await supabase.from('pairings').upsert(inserts, {
-        onConflict: 'event_id,participant_a_id,participant_b_id',
-        ignoreDuplicates: true,
-      });
-      if (insertRes.error) {
-        if (__DEV__) {
-          console.error('[finishDraft] Error insertando/upsert pairings', insertRes.error);
-        }
-        await supabase
-          .from('draft_events')
-          .update({ status: 'drafting', draft_ended_at: null })
-          .eq('id', event.id);
-        Alert.alert('Error', insertRes.error.message ?? 'No se pudieron crear los enfrentamientos.');
-        await load();
-        return;
-      }
-    }
-
-    const verifyRes = await supabase
-      .from('pairings')
-      .select('id', { count: 'exact', head: true })
-      .eq('event_id', event.id);
-    if (verifyRes.error) {
-      if (__DEV__) {
-        console.error('[finishDraft] Error verificando pairings insertados', verifyRes.error);
-      }
-      await supabase
-        .from('draft_events')
-        .update({ status: 'drafting', draft_ended_at: null })
-        .eq('id', event.id);
-      Alert.alert('Error', verifyRes.error.message ?? 'No se pudieron verificar los enfrentamientos generados.');
-      await load();
-      return;
-    }
-    const totalInDb = verifyRes.count ?? 0;
-    if (totalInDb !== inserts.length) {
-      if (__DEV__) {
-        console.error('[finishDraft] Verificación inconsistente de pairings', {
-          eventId: event.id,
-          expected: inserts.length,
-          actual: totalInDb,
-        });
-      }
-      await supabase
-        .from('draft_events')
-        .update({ status: 'drafting', draft_ended_at: null })
-        .eq('id', event.id);
-      Alert.alert('Error', 'No se pudieron generar enfrentamientos. Probá de nuevo.');
-      await load();
-      return;
-    }
-
-    if (inserts.length > 0) {
-      Alert.alert('Listo', `Se generaron ${inserts.length} enfrentamientos`);
-    }
+    Alert.alert('Listo', gen.message);
     await load();
   };
 
@@ -1075,11 +946,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const multiTiebreakBannerVisible =
     activeTiebreakGroup != null &&
     activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
+    activeTiebreakGroup.group_origin !== 'round_robin_topcut' &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
     event.competition_format !== 'swiss_bo2' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
+    activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));
 

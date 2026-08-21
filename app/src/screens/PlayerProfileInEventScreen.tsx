@@ -183,7 +183,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [revengeH2h, setRevengeH2h] = useState<RevengeH2HRow[]>([]);
   const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
   const [profileInTiebreakGroup, setProfileInTiebreakGroup] = useState(false);
-  const [profileTiebreakGroupOrigin, setProfileTiebreakGroupOrigin] = useState<'tiebreak' | 'swiss_topcut'>('tiebreak');
+  const [profileTiebreakGroupOrigin, setProfileTiebreakGroupOrigin] = useState<
+    'tiebreak' | 'swiss_topcut' | 'round_robin_topcut'
+  >('tiebreak');
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
   const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
@@ -589,11 +591,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         const uidByPid = new Map(gList.map((r) => [r.participant_id, r.user_id]));
         if (gPidSet.has(participantId)) {
           setProfileInTiebreakGroup(true);
-          setProfileTiebreakGroupOrigin(tgOrigin === 'swiss_topcut' ? 'swiss_topcut' : 'tiebreak');
+          setProfileTiebreakGroupOrigin(
+            tgOrigin === 'swiss_topcut'
+              ? 'swiss_topcut'
+              : tgOrigin === 'round_robin_topcut'
+                ? 'round_robin_topcut'
+                : 'tiebreak'
+          );
           setProfileTiebreakGroupRound(tgRound);
           const pairingById = new Map(pairings.map((p) => [p.id, p]));
           const tgType = (tgRes.data as { group_type?: string | null }).group_type ?? '';
-          const isSwissBracketMata = tgOrigin === 'swiss_topcut' && tgType === 'bracket';
+          const isSwissBracketMata =
+            (tgOrigin === 'swiss_topcut' || tgOrigin === 'round_robin_topcut') &&
+            tgType === 'bracket';
 
           if (isSwissBracketMata) {
             const bmRes = await supabase
@@ -817,6 +827,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const tiebreakRoundRobinCards = () => {
       if (!profileInTiebreakGroup) return null;
       if (eventCompetitionFormat === 'swiss') return null;
+      // round_robin_topcut se muestra con la sección de fases (swissMataBracketSection).
+      if (profileTiebreakGroupOrigin === 'round_robin_topcut') return null;
       return (
         <>
           <Text style={styles.sectionTitle}>
@@ -968,7 +980,13 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     };
 
     const swissMataBracketSection = () => {
-      if (!profileInTiebreakGroup || profileTiebreakGroupOrigin !== 'swiss_topcut') return null;
+      if (
+        !profileInTiebreakGroup ||
+        (profileTiebreakGroupOrigin !== 'swiss_topcut' &&
+          profileTiebreakGroupOrigin !== 'round_robin_topcut')
+      ) {
+        return null;
+      }
       if (!profileMataByPhase) {
         return (
           <>
@@ -1054,6 +1072,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           </>
         ) : (
           <>
+            {swissMataBracketSection()}
             {tiebreakRoundRobinCards()}
             <Text style={styles.sectionTitle}>Enfrentamientos</Text>
             {officialH2h.map((row) => officialPairingCard(row, 'blue'))}

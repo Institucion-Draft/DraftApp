@@ -130,7 +130,7 @@ type TiebreakOfficialSection = {
   kind: 'round_robin' | 'bracket';
   groupRoundNumber: number;
   rounds: TiebreakOfficialRoundBlock[];
-  groupOrigin: 'tiebreak' | 'swiss_topcut';
+  groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut';
 };
 
 type RevengeItemView = {
@@ -282,6 +282,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
   const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  /** round_robin_bo1_top4: el oficial es a una sola partida (una píldora por jugador). */
+  const [officialBo1, setOfficialBo1] = useState(false);
   const [eventType, setEventType] = useState<string | null>(null);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
   const [tiebreakOfficialSection, setTiebreakOfficialSection] = useState<TiebreakOfficialSection | null>(null);
@@ -370,6 +372,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         ? 'swiss'
         : 'round_robin';
     setCompetitionFormat(competitionFormat);
+    setOfficialBo1(eventFlags?.competition_format === 'round_robin_bo1_top4');
     const csrRaw = eventFlags?.current_swiss_round;
     const currentSwissRound: number | null =
       csrRaw == null
@@ -740,8 +743,12 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         const gIds = new Set((gpRes.data as { participant_id: string }[]).map((x) => x.participant_id));
         if (gIds.size >= 2) {
           const groupRoundNumber = ag.round_number ?? 1;
-          const groupOrigin: 'tiebreak' | 'swiss_topcut' =
-            ag.group_origin === 'swiss_topcut' ? 'swiss_topcut' : 'tiebreak';
+          const groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' =
+            ag.group_origin === 'swiss_topcut'
+              ? 'swiss_topcut'
+              : ag.group_origin === 'round_robin_topcut'
+                ? 'round_robin_topcut'
+                : 'tiebreak';
 
           const itemForPairing = (
             pairing: PairingRow,
@@ -1263,7 +1270,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 <Text style={styles.name}>{leftName}</Text>
                 <View style={styles.bo3Row}>
                   <View style={[styles.bo3Box, winsLeft >= 1 && styles.bo3Filled]} />
-                  <View style={[styles.bo3Box, winsLeft >= 2 && styles.bo3Filled]} />
+                  {!officialBo1 ? (
+                    <View style={[styles.bo3Box, winsLeft >= 2 && styles.bo3Filled]} />
+                  ) : null}
                 </View>
               </View>
             </View>
@@ -1281,7 +1290,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 <Text style={styles.nameRight}>{rightName}</Text>
                 <View style={[styles.bo3Row, styles.bo3RowRight]}>
                   <View style={[styles.bo3Box, winsRight >= 1 && styles.bo3Filled]} />
-                  <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
+                  {!officialBo1 ? (
+                    <View style={[styles.bo3Box, winsRight >= 2 && styles.bo3Filled]} />
+                  ) : null}
                 </View>
               </View>
               {isGiantEvent ? (
@@ -1384,7 +1395,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             tiebreakOfficialSection && tiebreakCardsTotal > 0 ? (
               <View style={styles.tiebreakOfficialHeaderWrap}>
                 <Text style={styles.groupHeader}>
-                  {tiebreakOfficialSection.groupOrigin === 'swiss_topcut' ? 'Fase mata-mata' : 'Desempate'}
+                  {tiebreakOfficialSection.groupOrigin === 'swiss_topcut' ||
+                  tiebreakOfficialSection.groupOrigin === 'round_robin_topcut'
+                    ? 'Fase mata-mata'
+                    : 'Desempate'}
                 </Text>
                 {tiebreakOfficialSection.rounds.map((block) => {
                   const isBracket = tiebreakOfficialSection.kind === 'bracket';

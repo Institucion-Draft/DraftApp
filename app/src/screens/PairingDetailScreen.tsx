@@ -263,6 +263,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  /** round_robin_bo1_top4: el oficial es a una sola partida. */
+  const [officialBo1, setOfficialBo1] = useState(false);
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [eventStartingLife, setEventStartingLife] = useState(20);
@@ -401,6 +403,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         ? 'swiss'
         : 'round_robin'
     );
+    setOfficialBo1(evFlags?.competition_format === 'round_robin_bo1_top4');
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
       csr == null
@@ -521,12 +524,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setMataB(mB);
 
     let hadSwissTopcutBracketPairing = !!bracketRow;
-    if (!hadSwissTopcutBracketPairing && evFlags?.competition_format === 'swiss') {
+    const historyTopcutOrigin =
+      evFlags?.competition_format === 'swiss'
+        ? 'swiss_topcut'
+        : evFlags?.competition_format === 'round_robin_bo1_top4'
+          ? 'round_robin_topcut'
+          : null;
+    if (!hadSwissTopcutBracketPairing && historyTopcutOrigin != null) {
       const gHistRes = await supabase
         .from('event_tiebreak_groups')
         .select('id')
         .eq('event_id', p.event_id)
-        .eq('group_origin', 'swiss_topcut')
+        .eq('group_origin', historyTopcutOrigin)
         .eq('group_type', 'bracket');
       const gids = (gHistRes.data ?? []).map((r: { id: string }) => r.id);
       if (!gHistRes.error && gids.length > 0) {
@@ -894,11 +903,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   ).length;
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
-    activeTiebreakGroup?.group_origin === 'swiss_topcut' ? 'Fase mata-mata' : 'Desempate';
+    activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
+    activeTiebreakGroup?.group_origin === 'round_robin_topcut'
+      ? 'Fase mata-mata'
+      : 'Desempate';
+  // Layout de bracket: top cut suizo o top 4 de round_robin_bo1_top4.
   const useSwissTopcutBracketDetailLayout =
-    competitionFormat === 'swiss' &&
-    activeTiebreakGroup?.group_origin === 'swiss_topcut' &&
-    bracketMatchRow != null;
+    bracketMatchRow != null &&
+    ((competitionFormat === 'swiss' && activeTiebreakGroup?.group_origin === 'swiss_topcut') ||
+      activeTiebreakGroup?.group_origin === 'round_robin_topcut');
 
   const tiebreakBracketPrimaryLabel = (() => {
     if (!bracketMatchRow) return null;
@@ -923,6 +936,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const winsB = officialMs.filter(
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id
   ).length;
+  // round_robin_bo1_top4: oficial resuelto = official_winner seteado o 1 partida oficial ganada
+  // (cubre el caso donde el trigger todavía no reflejó el ganador en el pairing).
+  const officialResolved =
+    pairing.official_winner_participant_id != null ||
+    (officialBo1 && (winsA >= 1 || winsB >= 1));
   const revengeCompleted = revengeMs.filter((m) => m.status === 'completed');
   const revengeWinsA = revengeCompleted.filter(
     (m) => m.winner_participant_id === pairing.participant_a_id
@@ -994,7 +1012,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         ? tiebreakBracketPrimaryLabel ?? bracketIniciarPhrase(bracketMatchRow.bracket_phase)
         : isTiebreakPending
           ? 'Iniciar desempate'
-          : pairing.official_winner_participant_id != null
+          : officialResolved
             ? 'Iniciar venganza'
             : swissOfficialPendingThisRound || competitionFormat !== 'swiss'
               ? 'Iniciar partida'
@@ -1064,7 +1082,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     ) {
       matchType = 'revenge';
     } else if (
-      !pairing.official_winner_participant_id &&
+      !officialResolved &&
       (competitionFormat !== 'swiss' ||
         (pairing.swiss_round != null &&
           currentSwissRound != null &&
@@ -1288,7 +1306,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroBlueRow ? (
               <View style={[styles.heroBo3RowLeft, showHeroGreenRow && styles.heroBo3RowBlueBelow]}>
                 <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 1 && styles.heroBo3Filled]} />
-                <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 2 && styles.heroBo3Filled]} />
+                {!officialBo1 ? (
+                  <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 2 && styles.heroBo3Filled]} />
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -1318,7 +1338,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroBlueRow ? (
               <View style={[styles.heroBo3RowRight, showHeroGreenRow && styles.heroBo3RowBlueBelow]}>
                 <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 1 && styles.heroBo3Filled]} />
-                <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 2 && styles.heroBo3Filled]} />
+                {!officialBo1 ? (
+                  <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 2 && styles.heroBo3Filled]} />
+                ) : null}
               </View>
             ) : null}
           </View>
