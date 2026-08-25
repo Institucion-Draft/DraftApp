@@ -345,9 +345,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         .select('id, group_type, round_number, status, champion_user_id, group_origin')
         .eq('event_id', p.event_id)
         .in('status', ['active', 'resolved'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+        .order('created_at', { ascending: false }),
     ]);
 
     const currentUserId = meRes.data.user?.id ?? null;
@@ -435,18 +433,65 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     }
     setMatchTurnsByMatchId(turnsByMatch);
 
-    let tiebreakGroupState: ActiveTiebreakGroupState | null = null;
-    const tgRow = tiebreakGroupRes.data as
-      | {
+    // round_robin_bo1_top4 puede tener DOS grupos "bracket-ish" vivos a la vez para el mismo
+    // evento: el desempate por el 4to puesto (group_type='fourth_place') y, una vez resuelto,
+    // el bracket real de top4 (group_type='bracket') recién creado — el de 4to puesto queda
+    // 'resolved' pero sigue siendo el que corresponde a ESTE pairing específico. Por eso NO
+    // alcanza con "el grupo más reciente del evento" (lo que hacían las queries de acá):
+    // resolvemos primero cuál de los grupos bracket-ish tiene efectivamente una fila en
+    // event_tiebreak_bracket_matches para este pairing, y solo si ninguno aplica caemos al
+    // grupo no-bracket más reciente (desempate clásico de 1er puesto — ahí sí solo existe uno
+    // relevante por evento, como antes).
+    const tgRows = (tiebreakGroupRes.data ?? []) as {
+      id: string;
+      group_type: string;
+      round_number: number;
+      status: string;
+      champion_user_id: string | null;
+      group_origin?: string | null;
+    }[];
+    const bracketTypeGroups = tgRows.filter((g) => g.group_type === 'bracket' || g.group_type === 'fourth_place');
+    const otherGroups = tgRows.filter((g) => g.group_type !== 'bracket' && g.group_type !== 'fourth_place');
+
+    let tgRow: (typeof tgRows)[number] | null = null;
+    let bracketRow: typeof bracketMatchRow = null;
+
+    if (bracketTypeGroups.length > 0) {
+      const bmRes = await supabase
+        .from('event_tiebreak_bracket_matches')
+        .select('id, group_id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
+        .in(
+          'group_id',
+          bracketTypeGroups.map((g) => g.id)
+        );
+      if (!bmRes.error && bmRes.data) {
+        const rows = bmRes.data as {
           id: string;
-          group_type: string;
-          round_number: number;
-          status: string;
-          champion_user_id: string | null;
-          group_origin?: string | null;
+          group_id: string;
+          bracket_phase: 'semi' | 'final' | 'third_place';
+          pairing_id: string | null;
+          participant_a_id: string;
+          participant_b_id: string;
+          winner_participant_id: string | null;
+        }[];
+        const matchedRow =
+          // Si la navegación indicó el cruce de mata-mata, ese manda (identidad real).
+          (bracketMatchId ? rows.find((bm) => bm.id === bracketMatchId) : undefined) ??
+          rows.find((bm) => bm.pairing_id === p.id) ??
+          rows.find((bm) => bracketRowMatchesPairing(bm, p)) ??
+          null;
+        if (matchedRow) {
+          bracketRow = matchedRow;
+          tgRow = bracketTypeGroups.find((g) => g.id === matchedRow.group_id) ?? null;
         }
-      | null;
-    if (!tiebreakGroupRes.error && tgRow) {
+      }
+    }
+    if (!tgRow) {
+      tgRow = otherGroups[0] ?? null;
+    }
+
+    let tiebreakGroupState: ActiveTiebreakGroupState | null = null;
+    if (tgRow) {
       const tpRes = await supabase
         .from('event_tiebreak_group_participants')
         .select('participant_id, user_id, seed')
@@ -459,30 +504,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       }
     }
     setActiveTiebreakGroup(tiebreakGroupState);
-
-    let bracketRow: typeof bracketMatchRow = null;
-    if (tiebreakGroupState && tiebreakGroupState.group_type === 'bracket') {
-      const bmRes = await supabase
-        .from('event_tiebreak_bracket_matches')
-        .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
-        .eq('group_id', tiebreakGroupState.id);
-      if (!bmRes.error && bmRes.data) {
-        const rows = bmRes.data as {
-          id: string;
-          bracket_phase: 'semi' | 'final' | 'third_place';
-          pairing_id: string | null;
-          participant_a_id: string;
-          participant_b_id: string;
-          winner_participant_id: string | null;
-        }[];
-        bracketRow =
-          // Si la navegación indicó el cruce de mata-mata, ese manda (identidad real).
-          (bracketMatchId ? rows.find((bm) => bm.id === bracketMatchId) : undefined) ??
-          rows.find((bm) => bm.pairing_id === p.id) ??
-          rows.find((bm) => bracketRowMatchesPairing(bm, p)) ??
-          null;
-      }
-    }
     setBracketMatchRow(bracketRow);
 
     // Identidad del cruce mata-mata desde el bracket match (no desde el pairing,
@@ -523,7 +544,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setMataA(mA);
     setMataB(mB);
 
-    let hadSwissTopcutBracketPairing = !!bracketRow;
+    // bracketRow puede ser una fila del bracket real (group_type='bracket') O del desempate
+    // por el 4to puesto (group_type='fourth_place') — ver resolución de tgRow/bracketRow arriba.
+    // hadSwissTopcutBracketPairing es específicamente para el bracket real (swiss_topcut /
+    // round_robin_topcut): si bracketRow resultó ser el de fourth_place, NO cuenta acá, aunque
+    // exista igual — si no, showHeroGreenRow terminaba mostrando las píldoras verdes del
+    // bracket real (semis/final) para un pairing que solo jugó el desempate del 4to puesto.
+    let hadSwissTopcutBracketPairing = !!bracketRow && tgRow?.group_type === 'bracket';
     const historyTopcutOrigin =
       evFlags?.competition_format === 'swiss'
         ? 'swiss_topcut'
@@ -819,7 +846,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   );
   const inProgressMatch = matches.find((m) => m.status === 'in_progress') ?? null;
 
-  const isBracketGroup = activeTiebreakGroup?.group_type === 'bracket';
+  const isBracketGroup =
+    activeTiebreakGroup?.group_type === 'bracket' || activeTiebreakGroup?.group_type === 'fourth_place';
 
   const pairingIsInActiveGroup = Boolean(
     activeTiebreakGroup &&
@@ -906,7 +934,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
     activeTiebreakGroup?.group_origin === 'round_robin_topcut'
       ? 'Fase mata-mata'
-      : 'Desempate';
+      : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
+        ? 'Desempate por el 4to puesto'
+        : 'Desempate';
   // Layout de bracket: top cut suizo o top 4 de round_robin_bo1_top4.
   const useSwissTopcutBracketDetailLayout =
     bracketMatchRow != null &&
@@ -916,7 +946,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const tiebreakBracketPrimaryLabel = (() => {
     if (!bracketMatchRow) return null;
     const phase = bracketMatchRow.bracket_phase;
-    const wn = topcutWinsNeededClient(topcutFormat, phase);
+    // Desempate por el 4to puesto: siempre BO1 (1 partida decisiva), sin importar topcut_format
+    // (eso es solo para el bracket real de semis/final).
+    const wn =
+      activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
+        ? 1
+        : topcutWinsNeededClient(topcutFormat, phase);
     if (inProgressMatch?.status === 'in_progress' && inProgressMatch.match_type === 'tiebreak') {
       return `Retomar ${bracketPhaseDisplayName(phase)} en curso`;
     }
@@ -1114,13 +1149,24 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     navigation.navigate('LifeTracker', { matchId: String(data.id), fromTab: fromPairingsTab });
   };
 
+  // Mismo criterio que tiebreakBracketPrimaryLabel: el desempate por el 4to puesto siempre es
+  // BO1, independientemente de topcut_format.
   const bracketLegWinsNeeded =
-    bracketMatchRow != null ? topcutWinsNeededClient(topcutFormat, bracketMatchRow.bracket_phase) : 2;
+    bracketMatchRow != null
+      ? activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
+        ? 1
+        : topcutWinsNeededClient(topcutFormat, bracketMatchRow.bracket_phase)
+      : 2;
   const hasCompletedBracketLegMatches = tiebreakMs.some(
     (m) => m.match_type === 'tiebreak' && m.status === 'completed' && m.winner_participant_id != null
   );
+  // Desempate por el 4to puesto (round_robin_bo1_top4): píldora naranja aparte, siempre 1 sola
+  // (BO1) — no comparte la fila verde del bracket real (que es BO3/lo que diga topcut_format).
+  const showHeroOrangeRow =
+    bracketMatchRow != null && activeTiebreakGroup?.group_origin === 'round_robin_fourth_place';
   const showHeroGreenRow =
-    bracketMatchRow != null || (pairingHadSwissTopcutBracket && hasCompletedBracketLegMatches);
+    (bracketMatchRow != null && !showHeroOrangeRow) ||
+    (pairingHadSwissTopcutBracket && hasCompletedBracketLegMatches);
   const showHeroBlueRow = competitionFormat !== 'swiss' || officialMs.length > 0;
   const showPrimaryInSwissMata =
     movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || isOrganizer);
@@ -1303,8 +1349,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 <View style={[styles.heroBo3Box, dispTieLeft >= 2 && styles.heroBo3FilledGreen]} />
               </View>
             ) : null}
+            {showHeroOrangeRow ? (
+              <View style={[styles.heroBo3RowLeft, styles.heroBo3RowOrange]}>
+                <View style={[styles.heroBo3Box, dispTieLeft >= 1 && styles.heroBo3FilledOrange]} />
+              </View>
+            ) : null}
             {showHeroBlueRow ? (
-              <View style={[styles.heroBo3RowLeft, showHeroGreenRow && styles.heroBo3RowBlueBelow]}>
+              <View
+                style={[
+                  styles.heroBo3RowLeft,
+                  (showHeroGreenRow || showHeroOrangeRow) && styles.heroBo3RowBlueBelow,
+                ]}
+              >
                 <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 1 && styles.heroBo3Filled]} />
                 {!officialBo1 ? (
                   <View style={[styles.heroBo3Box, dispWinsLeftOfficial >= 2 && styles.heroBo3Filled]} />
@@ -1335,8 +1391,18 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 <View style={[styles.heroBo3Box, dispTieRight >= 2 && styles.heroBo3FilledGreen]} />
               </View>
             ) : null}
+            {showHeroOrangeRow ? (
+              <View style={[styles.heroBo3RowRight, styles.heroBo3RowOrange]}>
+                <View style={[styles.heroBo3Box, dispTieRight >= 1 && styles.heroBo3FilledOrange]} />
+              </View>
+            ) : null}
             {showHeroBlueRow ? (
-              <View style={[styles.heroBo3RowRight, showHeroGreenRow && styles.heroBo3RowBlueBelow]}>
+              <View
+                style={[
+                  styles.heroBo3RowRight,
+                  (showHeroGreenRow || showHeroOrangeRow) && styles.heroBo3RowBlueBelow,
+                ]}
+              >
                 <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 1 && styles.heroBo3Filled]} />
                 {!officialBo1 ? (
                   <View style={[styles.heroBo3Box, dispWinsRightOfficial >= 2 && styles.heroBo3Filled]} />
@@ -1410,29 +1476,61 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           </>
         ) : (
           <>
-            <Text style={styles.sectionSubtitle}>Partidas oficiales</Text>
-            {officialMs.length === 0 ? (
-              <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
-            ) : (
-              officialMs.map(renderDraftRow)
-            )}
-            {showTiebreakSection ? (
-              <>
-                <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>{tiebreakSectionTitle}</Text>
-                {bracketMatchRow ? null : (
-                  <Text style={styles.revengeCounter}>
-                    {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
-                    {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
-                  </Text>
-                )}
-                {tiebreakMs.length === 0 ? (
-                  bracketMatchRow ? null : (
-                    <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
-                  )
+            {officialBo1 ? (
+              <View style={styles.subAccBlue}>
+                <Text style={styles.subTitleSwissBlue}>Fase todos contra todos</Text>
+                {officialMs.length === 0 ? (
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
                 ) : (
-                  tiebreakMs.map(renderTiebreakRow)
+                  officialMs.map(renderDraftRow)
+                )}
+              </View>
+            ) : (
+              <>
+                <Text style={styles.sectionSubtitle}>Partidas oficiales</Text>
+                {officialMs.length === 0 ? (
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                ) : (
+                  officialMs.map(renderDraftRow)
                 )}
               </>
+            )}
+            {showTiebreakSection ? (
+              activeTiebreakGroup?.group_origin === 'round_robin_fourth_place' ? (
+                <View style={[styles.subAccOrange, officialMs.length > 0 && styles.subAccOrangeSpaced]}>
+                  <Text style={styles.subTitleSwissOrange}>{tiebreakSectionTitle}</Text>
+                  {bracketMatchRow ? null : (
+                    <Text style={styles.revengeCounter}>
+                      {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
+                      {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
+                    </Text>
+                  )}
+                  {tiebreakMs.length === 0 ? (
+                    bracketMatchRow ? null : (
+                      <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
+                    )
+                  ) : (
+                    tiebreakMs.map(renderTiebreakRow)
+                  )}
+                </View>
+              ) : (
+                <>
+                  <Text style={[styles.sectionSubtitle, styles.sectionSubtitleSpaced]}>{tiebreakSectionTitle}</Text>
+                  {bracketMatchRow ? null : (
+                    <Text style={styles.revengeCounter}>
+                      {shortName(dispLeftName)} {dispTieLeft} - {dispTieRight} {shortName(dispRightName)}
+                      {tiebreakWinnerName ? ` · Ganó ${tiebreakWinnerName}` : ''}
+                    </Text>
+                  )}
+                  {tiebreakMs.length === 0 ? (
+                    bracketMatchRow ? null : (
+                      <Text style={styles.muted}>Todavía no hay partidas de desempate.</Text>
+                    )
+                  ) : (
+                    tiebreakMs.map(renderTiebreakRow)
+                  )}
+                </>
+              )
             ) : null}
             {showPrimaryInOfficialsLegacy ? (
               <View style={styles.primaryAboveRevengeWrap}>
@@ -1595,6 +1693,7 @@ const styles = StyleSheet.create({
   heroBo3RowLeft: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-start', paddingLeft: 4 },
   heroBo3RowRight: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },
   heroBo3RowGreen: { marginTop: 8 },
+  heroBo3RowOrange: { marginTop: 8 },
   heroBo3RowBlueBelow: { marginTop: 6 },
   heroBo3Box: {
     width: 26,
@@ -1606,6 +1705,7 @@ const styles = StyleSheet.create({
   },
   heroBo3Filled: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
   heroBo3FilledGreen: { backgroundColor: '#15803D', borderColor: '#15803D' },
+  heroBo3FilledOrange: { backgroundColor: '#F59E0B', borderColor: '#F59E0B' },
   subAccBlue: {
     borderLeftWidth: 3,
     borderLeftColor: '#3B82F6',
@@ -1621,8 +1721,17 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   subAccGreenSpaced: { marginTop: 16 },
+  subAccOrange: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+    paddingLeft: 10,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  subAccOrangeSpaced: { marginTop: 16 },
   subTitleSwissBlue: { fontSize: 14, fontWeight: '700', color: '#2563EB', marginBottom: 6 },
   subTitleSwissGreen: { fontSize: 14, fontWeight: '700', color: '#15803D', marginBottom: 6 },
+  subTitleSwissOrange: { fontSize: 14, fontWeight: '700', color: '#F59E0B', marginBottom: 6 },
   block: { paddingHorizontal: 24, paddingTop: 18 },
   blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8 },
   sectionSubtitle: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 6 },

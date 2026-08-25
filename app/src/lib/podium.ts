@@ -461,6 +461,8 @@ export type RoundRobinStandingInput = {
   participantId: string;
   /** Victorias en la fase regular (pairings oficiales ganados). */
   wins: number;
+  /** Si está seteado, el participante se excluye del cálculo de standings/desempate. */
+  leftEventAt?: string | null;
 };
 
 export type RoundRobinPairingResult = {
@@ -516,17 +518,25 @@ function qualityOfRivals(
  * Ordena un grupo de jugadores empatados en victorias totales.
  * 1) Sub-tabla interna del grupo (head-to-head): quien le ganó más veces a otros del grupo
  *    va arriba. Con 2 empatados esto es exactamente "quien le ganó al otro va arriba".
- * 2) Si el head-to-head no diferencia a todo el grupo (ciclo tipo A>B>C>A), esos jugadores
- *    quedan con el mismo registro interno: se desempatan por "calidad de rivales" (victorias
- *    totales de los rivales a los que le ganaron, excluyendo al propio ciclo).
+ * 2) Si el head-to-head no diferencia a todo el grupo (ciclo tipo A>B>C>A), se elige solo al
+ *    primero por "calidad de rivales" (victorias totales de los rivales a los que le ganaron,
+ *    excluyendo al propio ciclo; hash estable como desempate final), y se recursa sobre el
+ *    resto del ciclo — así su resultado directo entre ellos (parte del ciclo original) decide
+ *    el orden interno, en vez de volver a compararlos por calidad de rivales.
  * 3) Si todavía empatan, orden determinista por hash estable del participantId.
+ *
+ * Además de el orden, devuelve `arbitrary`: el set de participantIds que en algún nivel de la
+ * recursión terminaron desempatados por `stableHash` porque ni el head-to-head ni la calidad de
+ * rivales los distinguieron (p. ej. el "ganador" del hash en un ciclo perfecto A>B>C>A donde los
+ * 3 tienen exactamente la misma calidad de rivales). Un participante resuelto por head-to-head
+ * real, o por una calidad de rivales estrictamente mayor a la del resto, NUNCA entra en este set.
  */
 function resolveTieGroup(
   group: string[],
   pairings: RoundRobinPairingResult[],
   totalWinsMap: Map<string, number>
-): string[] {
-  if (group.length <= 1) return group;
+): { order: string[]; arbitrary: Set<string> } {
+  if (group.length <= 1) return { order: group, arbitrary: new Set() };
 
   const groupSet = new Set(group);
   const buckets = new Map<number, string[]>();
@@ -537,27 +547,68 @@ function resolveTieGroup(
   }
 
   const orderedKeys = [...buckets.keys()].sort((a, b) => b - a);
-  const result: string[] = [];
+  const order: string[] = [];
+  const arbitrary = new Set<string>();
   for (const key of orderedKeys) {
     const bucket = buckets.get(key)!;
     if (bucket.length === 1) {
-      result.push(bucket[0]!);
+      order.push(bucket[0]!);
     } else if (bucket.length === group.length) {
-      // El head-to-head no diferenció a nadie del grupo: ciclo. Calidad de rivales.
+      // El head-to-head no diferenció a nadie del grupo: ciclo. Elegir solo al primero por
+      // calidad de rivales (hash como desempate), y recursar sobre el resto: así el resultado
+      // directo entre ellos (parte del ciclo) decide su orden, no una nueva comparación de
+      // calidad de rivales sobre todo el bucket.
       const bucketSet = new Set(bucket);
       const withQuality = bucket.map((pid) => ({
         pid,
         quality: qualityOfRivals(pid, bucketSet, pairings, totalWinsMap),
         hash: stableHash(pid),
       }));
+      const maxQuality = Math.max(...withQuality.map((x) => x.quality));
+      const topCandidates = withQuality.filter((x) => x.quality === maxQuality);
       withQuality.sort((a, b) => (b.quality !== a.quality ? b.quality - a.quality : a.hash - b.hash));
-      result.push(...withQuality.map((x) => x.pid));
+      const chosen = withQuality[0]!.pid;
+      // Solo es arbitrario si la calidad de rivales tampoco distinguió un único candidato top
+      // (tuvo que decidir el hash entre 2+ con la misma calidad máxima).
+      if (topCandidates.length > 1) arbitrary.add(chosen);
+      order.push(chosen);
+      const rest = bucket.filter((pid) => pid !== chosen);
+      const sub = resolveTieGroup(rest, pairings, totalWinsMap);
+      order.push(...sub.order);
+      for (const pid of sub.arbitrary) arbitrary.add(pid);
     } else {
       // Progreso parcial: recursar sobre el subgrupo aún empatado.
-      result.push(...resolveTieGroup(bucket, pairings, totalWinsMap));
+      const sub = resolveTieGroup(bucket, pairings, totalWinsMap);
+      order.push(...sub.order);
+      for (const pid of sub.arbitrary) arbitrary.add(pid);
     }
   }
-  return result;
+  return { order, arbitrary };
+}
+
+/** Igual que `rankRoundRobinBo1Standings`, pero además expone qué participantIds quedaron
+ *  resueltos arbitrariamente por hash en algún nivel de `resolveTieGroup`. */
+function rankWithArbitraryInfo(
+  participants: RoundRobinStandingInput[],
+  pairings: RoundRobinPairingResult[]
+): { order: string[]; arbitrary: Set<string> } {
+  const totalWinsMap = new Map<string, number>();
+  for (const p of participants) totalWinsMap.set(p.participantId, p.wins);
+
+  const byWins = new Map<number, string[]>();
+  for (const p of participants) {
+    if (!byWins.has(p.wins)) byWins.set(p.wins, []);
+    byWins.get(p.wins)!.push(p.participantId);
+  }
+
+  const order: string[] = [];
+  const arbitrary = new Set<string>();
+  for (const w of [...byWins.keys()].sort((a, b) => b - a)) {
+    const sub = resolveTieGroup(byWins.get(w)!, pairings, totalWinsMap);
+    order.push(...sub.order);
+    for (const pid of sub.arbitrary) arbitrary.add(pid);
+  }
+  return { order, arbitrary };
 }
 
 /**
@@ -569,20 +620,134 @@ export function rankRoundRobinBo1Standings(
   participants: RoundRobinStandingInput[],
   pairings: RoundRobinPairingResult[]
 ): string[] {
+  return rankWithArbitraryInfo(participants, pairings).order;
+}
+
+export type FinalStandingsWithTiebreakSplit = {
+  /** Orden completo de la tanda 1 (desempate olímpico → calidad de rivales → hash), sin left_event_at. */
+  standings: string[];
+  /**
+   * IDs en disputa por el 4to puesto: participantes con exactamente las mismas victorias que el
+   * de la posición 4 que además cumplen alguna de estas dos condiciones:
+   * - están en la posición 4 (índice 3) o más abajo, o
+   * - fueron resueltos arbitrariamente por hash en algún punto de tanda 1 (aunque hayan quedado
+   *   en posición 1-3) — un empate que tanda 1 solo pudo "adivinar" no le regala el puesto alto,
+   *   se juega en tanda 2.
+   * Vacío si no queda más de 1 participante cumpliendo lo anterior (4to puesto ya resuelto con
+   * evidencia real).
+   */
+  fourthPlaceTieGroup: string[];
+};
+
+/**
+ * Ranking en dos tandas para round_robin_bo1_top4:
+ * - Tanda 1: orden total de TODOS los participantes activos (excluye left_event_at), reutilizando
+ *   la misma lógica que `rankRoundRobinBo1Standings` — sin decidir todavía quién entra al top4.
+ * - Tanda 2: a partir de ese orden, detecta si hay empate exacto en victorias en el corte del
+ *   4to puesto (posición 4 en adelante), sumando también a cualquiera que tanda 1 haya resuelto
+ *   arbitrariamente por hash (ver `resolveTieGroup`).
+ */
+export function computeFinalStandingsWithTiebreakSplit(
+  participants: RoundRobinStandingInput[],
+  pairings: RoundRobinPairingResult[]
+): FinalStandingsWithTiebreakSplit {
+  const eligible = participants.filter((p) => !p.leftEventAt);
+  const { order: standings, arbitrary } = rankWithArbitraryInfo(eligible, pairings);
+
+  if (standings.length < 4) {
+    return { standings, fourthPlaceTieGroup: [] };
+  }
+
+  const winsById = new Map<string, number>();
+  for (const p of eligible) winsById.set(p.participantId, p.wins);
+
+  const fourthWins = winsById.get(standings[3]!) ?? 0;
+  const tiedFromFourth = standings.filter((pid, idx) => {
+    if ((winsById.get(pid) ?? 0) !== fourthWins) return false;
+    return idx >= 3 || arbitrary.has(pid);
+  });
+
+  return {
+    standings,
+    fourthPlaceTieGroup: tiedFromFourth.length > 1 ? tiedFromFourth : [],
+  };
+}
+
+/** Un slot de partido: participante fijo, o el ganador de otro partido del propio bracket de desempate. */
+export type FourthPlaceTiebreakSlot = { participantId: string } | { winnerOfMatch: number };
+
+export type FourthPlaceTiebreakMatch = {
+  round: number;
+  a: FourthPlaceTiebreakSlot;
+  b: FourthPlaceTiebreakSlot;
+  /** 'final_4th': el ganador de este partido es el 4to puesto. Number: índice del próximo match en `matches`. */
+  winnerAdvancesTo: 'final_4th' | number;
+};
+
+export type FourthPlaceTiebreakBracket = {
+  /** Seteado solo si se resuelve sin partidos (grupo de 5+: el mejor ordenado queda 4to directo). */
+  fourthPlaceParticipantId: string | null;
+  matches: FourthPlaceTiebreakMatch[];
+};
+
+/**
+ * Arma el bracket de desempate por el 4to puesto a partir del `fourthPlaceTieGroup` ya detectado
+ * por `computeFinalStandingsWithTiebreakSplit`. Pura lógica de cálculo — no toca DB ni RPCs.
+ *
+ * Orden interno del grupo empatado (mismos 3 criterios que `resolveTieGroup`, reutilizada tal cual):
+ * 1) Victorias dentro del grupo (head-to-head contra los otros integrantes).
+ * 2) Si empata: calidad de rivales (victorias totales de a quiénes venció, excluyendo rivales
+ *    que están dentro del propio grupo).
+ * 3) Si aún empata: hash determinístico por participantId.
+ *
+ * Con ese orden, según el tamaño del grupo:
+ * - 2: un BO1 entre ambos, el ganador es el 4to puesto.
+ * - 3: el 1° tiene bye; BO1 entre 2° y 3°; el ganador juega BO1 contra el 1°; ese ganador es el 4to puesto.
+ * - 4: BO1 entre 1°-4° y BO1 entre 2°-3° (en paralelo); los ganadores juegan BO1 entre sí por el 4to puesto.
+ * - 5+: el 1° ordenado queda 4to puesto directo, sin partidos; el resto no pasa al top4.
+ */
+export function computeFourthPlaceTiebreakBracket(
+  tieGroup: string[],
+  pairings: RoundRobinPairingResult[]
+): FourthPlaceTiebreakBracket {
+  if (tieGroup.length <= 1) {
+    return { fourthPlaceParticipantId: tieGroup[0] ?? null, matches: [] };
+  }
+
   const totalWinsMap = new Map<string, number>();
-  for (const p of participants) totalWinsMap.set(p.participantId, p.wins);
+  for (const pr of pairings) {
+    if (pr.winnerParticipantId != null) {
+      totalWinsMap.set(pr.winnerParticipantId, (totalWinsMap.get(pr.winnerParticipantId) ?? 0) + 1);
+    }
+  }
+  const ordered = resolveTieGroup(tieGroup, pairings, totalWinsMap).order;
 
-  const byWins = new Map<number, string[]>();
-  for (const p of participants) {
-    if (!byWins.has(p.wins)) byWins.set(p.wins, []);
-    byWins.get(p.wins)!.push(p.participantId);
+  if (ordered.length >= 5) {
+    return { fourthPlaceParticipantId: ordered[0]!, matches: [] };
   }
 
-  const ranked: string[] = [];
-  for (const w of [...byWins.keys()].sort((a, b) => b - a)) {
-    ranked.push(...resolveTieGroup(byWins.get(w)!, pairings, totalWinsMap));
+  if (ordered.length === 2) {
+    const matches: FourthPlaceTiebreakMatch[] = [
+      { round: 1, a: { participantId: ordered[0]! }, b: { participantId: ordered[1]! }, winnerAdvancesTo: 'final_4th' },
+    ];
+    return { fourthPlaceParticipantId: null, matches };
   }
-  return ranked;
+
+  if (ordered.length === 3) {
+    const matches: FourthPlaceTiebreakMatch[] = [
+      { round: 1, a: { participantId: ordered[1]! }, b: { participantId: ordered[2]! }, winnerAdvancesTo: 1 },
+      { round: 2, a: { winnerOfMatch: 0 }, b: { participantId: ordered[0]! }, winnerAdvancesTo: 'final_4th' },
+    ];
+    return { fourthPlaceParticipantId: null, matches };
+  }
+
+  // ordered.length === 4
+  const matches: FourthPlaceTiebreakMatch[] = [
+    { round: 1, a: { participantId: ordered[0]! }, b: { participantId: ordered[3]! }, winnerAdvancesTo: 2 },
+    { round: 1, a: { participantId: ordered[1]! }, b: { participantId: ordered[2]! }, winnerAdvancesTo: 2 },
+    { round: 2, a: { winnerOfMatch: 0 }, b: { winnerOfMatch: 1 }, winnerAdvancesTo: 'final_4th' },
+  ];
+  return { fourthPlaceParticipantId: null, matches };
 }
 
 export function computePodium(

@@ -267,7 +267,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         group_type: string;
         group_origin: string | null;
       } | null;
-      if (tgd?.group_type === 'bracket') {
+      if (tgd?.group_type === 'bracket' || tgd?.group_type === 'fourth_place') {
         const bmRes = await supabase
           .from('event_tiebreak_bracket_matches')
           .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
