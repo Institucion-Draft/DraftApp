@@ -29,7 +29,8 @@ import {
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
 import {
-  rankRoundRobinBo1Standings,
+  computeFinalStandingsWithTiebreakSplit,
+  computeFourthPlaceTiebreakBracket,
   type RoundRobinStandingInput,
   type RoundRobinPairingResult,
 } from '../lib/podium';
@@ -119,6 +120,20 @@ type ActiveTiebreakGroupState = {
   participants: TiebreakGroupParticipantRow[];
 };
 
+/**
+ * Desempate por el 4to puesto (group_origin='round_robin_fourth_place'). A diferencia de los
+ * demás group_type, event_tiebreak_group_participants NO contiene a los que están en disputa acá
+ * (solo a los 3 ya resueltos, ver 0071) — por eso este estado se arma aparte, leyendo
+ * event_tiebreak_bracket_matches + pending_bracket_matches directamente, sin tocar el mecanismo
+ * viejo de multiTiebreakGroup.participants.
+ */
+type FourthPlaceTiebreakState = {
+  /** Partidos jugables ahora mismo (1 en grupos de 2/3, hasta 2 en paralelo en grupos de 4). */
+  playable: { id: string; pairingId: string | null; aName: string; bName: string }[];
+  /** Quien tiene bye: ya está en el desempate pero no juega hasta que se resuelva otro partido. */
+  waitingNames: string[];
+};
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -179,6 +194,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
   const [tiebreakVsNav, setTiebreakVsNav] = useState<{ pairingId: string; opponentName: string }[]>([]);
   const [currentUserInBracketWaiting, setCurrentUserInBracketWaiting] = useState(false);
+  const [fourthPlaceTiebreak, setFourthPlaceTiebreak] = useState<FourthPlaceTiebreakState | null>(null);
+  const [fourthPlaceMyVsNav, setFourthPlaceMyVsNav] = useState<{ pairingId: string; opponentName: string } | null>(
+    null
+  );
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
 
@@ -199,6 +218,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       setActiveTiebreakGroup(null);
       setTiebreakVsNav([]);
       setCurrentUserInBracketWaiting(false);
+      setFourthPlaceTiebreak(null);
+      setFourthPlaceMyVsNav(null);
       return;
     }
     const e = data as EventRow;
@@ -207,6 +228,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setActiveTiebreakGroup(null);
     setTiebreakVsNav([]);
     setCurrentUserInBracketWaiting(false);
+    setFourthPlaceTiebreak(null);
+    setFourthPlaceMyVsNav(null);
     setChampionName(null);
     setChampionGender(null);
 
@@ -299,7 +322,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         }[];
         // Disparador único: fase regular 100% resuelta (0 pairings sin ganador).
         // Sin proyecciones de "quién puede llegar todavía" — solo se arma con el torneo
-        // terminado. El RPC es idempotente (no crea un segundo bracket si ya existe).
+        // terminado. Los RPCs son idempotentes (no crean un segundo grupo/bracket si ya existe).
         const allResolved =
           rrPairings.length > 0 && rrPairings.every((pr) => pr.official_winner_participant_id != null);
         if (allResolved) {
@@ -312,18 +335,65 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
             participantId: part.id,
             wins: winsByParticipant[part.id] ?? 0,
+            leftEventAt: part.left_event_at,
           }));
           const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
             participantAId: pr.participant_a_id,
             participantBId: pr.participant_b_id,
             winnerParticipantId: pr.official_winner_participant_id,
           }));
-          const ranked = rankRoundRobinBo1Standings(standingInputs, pairingResults);
-          if (ranked.length >= 4) {
-            await supabase.rpc('create_round_robin_top4_bracket', {
-              p_event_id: e.id,
-              p_top4_ordered: ranked.slice(0, 4),
-            });
+          const { standings, fourthPlaceTieGroup } = computeFinalStandingsWithTiebreakSplit(
+            standingInputs,
+            pairingResults
+          );
+
+          if (fourthPlaceTieGroup.length === 0) {
+            // Sin empate en el corte del 4to puesto: top4 directo, comportamiento sin cambios.
+            if (standings.length >= 4) {
+              await supabase.rpc('create_round_robin_top4_bracket', {
+                p_event_id: e.id,
+                p_top4_ordered: standings.slice(0, 4),
+              });
+            }
+          } else {
+            // Los 3 lugares NO en disputa: quienes no están en fourthPlaceTieGroup. Un integrante
+            // del grupo puede haber quedado en posición 1-3 en tanda 1 solo si fue resuelto
+            // arbitrariamente (ver computeFinalStandingsWithTiebreakSplit) — por eso no alcanza
+            // con tomar standings[0:3] tal cual, hay que filtrar el grupo en disputa primero.
+            const top3 = standings.filter((pid) => !fourthPlaceTieGroup.includes(pid)).slice(0, 3);
+            const { fourthPlaceParticipantId, matches } = computeFourthPlaceTiebreakBracket(
+              fourthPlaceTieGroup,
+              pairingResults
+            );
+
+            if (matches.length === 0 && fourthPlaceParticipantId != null) {
+              // Grupo de 5+: el mejor ordenado del grupo entra directo como 4to puesto, sin
+              // partidos extra.
+              if (top3.length === 3) {
+                await supabase.rpc('create_round_robin_top4_bracket', {
+                  p_event_id: e.id,
+                  p_top4_ordered: [...top3, fourthPlaceParticipantId],
+                });
+              }
+            } else if (matches.length > 0 && top3.length === 3) {
+              // 2, 3 o 4 en disputa: armar el grupo de desempate si todavía no existe. El
+              // bracket real de top4 se dispara recién cuando ese desempate se resuelva (el
+              // trigger de avance en 0072 arma [top3, ganador] y llama a
+              // create_round_robin_top4_bracket) — acá NO se llama a ese RPC.
+              const existingGroupRes = await supabase
+                .from('event_tiebreak_groups')
+                .select('id')
+                .eq('event_id', e.id)
+                .eq('group_type', 'fourth_place')
+                .maybeSingle();
+              if (!existingGroupRes.error && !existingGroupRes.data) {
+                await supabase.rpc('create_fourth_place_tiebreak_group', {
+                  p_event_id: e.id,
+                  p_matches: matches,
+                  p_top3_ordered: top3,
+                });
+              }
+            }
           }
         }
       }
@@ -358,12 +428,98 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
     setActiveTiebreakGroup(multiTiebreakGroup);
 
+    const isFourthPlaceGroup = multiTiebreakGroup?.group_origin === 'round_robin_fourth_place';
+
+    // Desempate por el 4to puesto: estado propio, independiente del mecanismo viejo de abajo
+    // (que asume multiTiebreakGroup.participants = quienes juegan, algo falso para este
+    // group_origin — acá esa tabla solo tiene a los 3 ya resueltos, ver 0071).
+    let fourthPlaceState: FourthPlaceTiebreakState | null = null;
+    let fourthPlaceMyVs: { pairingId: string; opponentName: string } | null = null;
+    if (multiTiebreakGroup && isFourthPlaceGroup) {
+      const [groupRowRes, bmRes] = await Promise.all([
+        supabase
+          .from('event_tiebreak_groups')
+          .select('pending_bracket_matches')
+          .eq('id', multiTiebreakGroup.id)
+          .maybeSingle(),
+        supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('id, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
+          .eq('group_id', multiTiebreakGroup.id),
+      ]);
+
+      if (!bmRes.error && bmRes.data) {
+        const rows = bmRes.data as {
+          id: string;
+          pairing_id: string | null;
+          participant_a_id: string;
+          participant_b_id: string;
+          winner_participant_id: string | null;
+        }[];
+        const pending = (groupRowRes.data?.pending_bracket_matches ?? null) as
+          | { a?: { participantId?: string }; b?: { participantId?: string } }[]
+          | null;
+
+        const nameFor = (pid: string) =>
+          relationOne(p.find((x) => x.id === pid)?.users)?.display_name?.trim() || 'Jugador';
+        const userIdFor = (pid: string) => p.find((x) => x.id === pid)?.user_id ?? null;
+
+        const playableRows = rows.filter((r) => r.winner_participant_id == null);
+        const playableIds = new Set<string>();
+        for (const r of playableRows) {
+          playableIds.add(r.participant_a_id);
+          playableIds.add(r.participant_b_id);
+        }
+        const eliminatedIds = new Set<string>();
+        for (const r of rows) {
+          if (r.winner_participant_id == null) continue;
+          eliminatedIds.add(
+            r.winner_participant_id === r.participant_a_id ? r.participant_b_id : r.participant_a_id
+          );
+        }
+        const concreteIds = new Set<string>();
+        for (const m of pending ?? []) {
+          if (m.a?.participantId) concreteIds.add(m.a.participantId);
+          if (m.b?.participantId) concreteIds.add(m.b.participantId);
+        }
+        // Bye: participante concreto en la estructura completa que ni juega ahora ni ya perdió.
+        // Con los tamaños de grupo soportados (2/3/4) nunca hay más de un partido jugable a la
+        // vez mientras esto pasa.
+        const waitingIds = [...concreteIds].filter((id) => !playableIds.has(id) && !eliminatedIds.has(id));
+
+        fourthPlaceState = {
+          playable: playableRows.map((r) => ({
+            id: r.id,
+            pairingId: r.pairing_id,
+            aName: nameFor(r.participant_a_id),
+            bName: nameFor(r.participant_b_id),
+          })),
+          waitingNames: waitingIds.map(nameFor),
+        };
+
+        if (currentUserId) {
+          const mine = playableRows.find(
+            (r) => userIdFor(r.participant_a_id) === currentUserId || userIdFor(r.participant_b_id) === currentUserId
+          );
+          if (mine && mine.pairing_id) {
+            const iAmA = userIdFor(mine.participant_a_id) === currentUserId;
+            fourthPlaceMyVs = {
+              pairingId: mine.pairing_id,
+              opponentName: iAmA ? nameFor(mine.participant_b_id) : nameFor(mine.participant_a_id),
+            };
+          }
+        }
+      }
+    }
+    setFourthPlaceTiebreak(fourthPlaceState);
+    setFourthPlaceMyVsNav(fourthPlaceMyVs);
+
     const groupHasChampionOnRow =
       multiTiebreakGroup?.champion_user_id != null &&
       String(multiTiebreakGroup.champion_user_id).trim() !== '';
     const vsNav: { pairingId: string; opponentName: string }[] = [];
     let inBracketWaiting = false;
-    if (multiTiebreakGroup && !groupHasChampionOnRow && currentUserId) {
+    if (multiTiebreakGroup && !groupHasChampionOnRow && currentUserId && !isFourthPlaceGroup) {
       const meGp = multiTiebreakGroup.participants.find((x) => x.user_id === currentUserId);
       if (meGp) {
         if (multiTiebreakGroup.group_type === 'bracket') {
@@ -936,14 +1092,20 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup != null &&
     activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup.group_origin !== 'round_robin_topcut' &&
+    activeTiebreakGroup.group_origin !== 'round_robin_fourth_place' &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
     event.competition_format !== 'swiss_bo2' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&
+    activeTiebreakGroup?.group_origin !== 'round_robin_fourth_place' &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));
+
+  // Banner específico del desempate por el 4to puesto (round_robin_bo1_top4): independiente del
+  // sistema de arriba, que asume que el empate es por 1er puesto.
+  const showFourthPlaceTiebreakBanner = activeTiebreakGroup?.group_origin === 'round_robin_fourth_place';
 
   const participantNamesOrdered = activeTiebreakGroup
     ? [...activeTiebreakGroup.participants]
@@ -1079,6 +1241,46 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 </TouchableOpacity>
               ) : null}
             </>
+          )}
+        </View>
+      ) : null}
+
+      {showFourthPlaceTiebreakBanner ? (
+        <View style={styles.tiebreakNotice}>
+          <Text style={styles.tiebreakNoticeTitle}>Desempate pendiente por el 4to puesto</Text>
+          {fourthPlaceTiebreak && fourthPlaceTiebreak.playable.length > 0 ? (
+            <>
+              <Text style={styles.tiebreakNoticeBody}>
+                {fourthPlaceTiebreak.playable.map((m) => `${m.aName} vs ${m.bName}`).join(' · ')}
+              </Text>
+              {fourthPlaceTiebreak.waitingNames.length > 0 && fourthPlaceTiebreak.playable.length === 1 ? (
+                <Text style={styles.tiebreakNoticeSecondary}>
+                  El ganador juega contra {formatNamesList(fourthPlaceTiebreak.waitingNames)}
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.tiebreakNoticeBody}>Armando el cruce del desempate...</Text>
+          )}
+          {fourthPlaceMyVsNav ? (
+            <TouchableOpacity
+              style={styles.tiebreakNoticeBtn}
+              onPress={() =>
+                navigation.navigate('PairingDetail', {
+                  pairingId: fourthPlaceMyVsNav.pairingId,
+                  fromTab: 'official',
+                })
+              }
+            >
+              <Text style={styles.tiebreakNoticeBtnTxt}>vs {fourthPlaceMyVsNav.opponentName}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.tiebreakNoticeBtn}
+              onPress={() => navigation.navigate('PairingsList', { eventId: event.id })}
+            >
+              <Text style={styles.tiebreakNoticeBtnTxt}>Ver enfrentamientos</Text>
+            </TouchableOpacity>
           )}
         </View>
       ) : null}
@@ -1609,6 +1811,7 @@ const styles = StyleSheet.create({
   },
   tiebreakNoticeTitle: { fontSize: 15, fontWeight: '700', color: '#92400E', marginBottom: 6 },
   tiebreakNoticeBody: { fontSize: 14, color: '#78350F', lineHeight: 20 },
+  tiebreakNoticeSecondary: { fontSize: 12, color: '#B45309', marginTop: 2 },
   tiebreakNoticeBtn: {
     marginTop: 12,
     backgroundColor: '#F59E0B',

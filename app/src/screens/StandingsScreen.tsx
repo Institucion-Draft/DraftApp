@@ -659,6 +659,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando el formato real es round_robin_bo1_top4: sin EG/EC (no hay BO3 en fase regular). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
+  /** round_robin_bo1_top4: participantIds que disputaron el desempate por el 4to puesto (si lo hubo). */
+  const [fourthPlaceDisputantIds, setFourthPlaceDisputantIds] = useState<Set<string>>(new Set());
+  /** Subconjunto de fourthPlaceDisputantIds que ya perdió su partido dentro de ese desempate. */
+  const [fourthPlaceEliminatedIds, setFourthPlaceEliminatedIds] = useState<Set<string>>(new Set());
   /** Suizo completado: nombre + campeón/campeona (sin otras estadísticas en el banner ni en la meta junto al banner). */
   const [swissChampionName, setSwissChampionName] = useState<string | null>(null);
   const [swissChampionHonorific, setSwissChampionHonorific] = useState<string | null>(null);
@@ -799,6 +803,62 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setCompetitionFormat(fmt);
     setIsSwissBo2(rawFmt === 'swiss_bo2');
     setIsRoundRobinBo1(rawFmt === 'round_robin_bo1_top4');
+
+    // round_robin_bo1_top4: resaltar en la tabla a quienes disputaron el desempate por el 4to
+    // puesto (si el evento tuvo uno). Query dedicada e independiente de tiebreakGroupRes de
+    // arriba: ese trae "el" grupo más reciente por event_id (limit 1), que una vez resuelto el
+    // desempate queda reemplazado por el bracket real de top4 recién creado — este resaltado
+    // necesita el grupo fourth_place puntualmente, exista o no todavía uno más nuevo.
+    // Los eliminados salen de event_tiebreak_bracket_matches (filas ya jugables/resueltas), pero
+    // los disputantes NO: esa tabla no tiene fila para quien tiene bye hasta que se resuelve el
+    // primer partido (el patrón de "insertar recién cuando la dependencia está lista", ver
+    // 0071/0072). La fuente completa de quién disputa es pending_bracket_matches — el jsonb
+    // íntegro armado por computeFourthPlaceTiebreakBracket, con TODOS los participantIds
+    // concretos del grupo (jugables ahora o no todavía) — no event_tiebreak_group_participants
+    // (para 'fourth_place' esa tabla solo tiene el trío de posiciones 1-3 ya resueltas).
+    const newFourthPlaceDisputantIds = new Set<string>();
+    const newFourthPlaceEliminatedIds = new Set<string>();
+    if (rawFmt === 'round_robin_bo1_top4') {
+      const fpGroupRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('id, pending_bracket_matches')
+        .eq('event_id', eventId)
+        .eq('group_origin', 'round_robin_fourth_place')
+        .maybeSingle();
+      if (!fpGroupRes.error && fpGroupRes.data?.id) {
+        const pending = (fpGroupRes.data as { pending_bracket_matches?: unknown }).pending_bracket_matches as
+          | { a?: { participantId?: string }; b?: { participantId?: string } }[]
+          | null;
+        for (const m of pending ?? []) {
+          if (m.a?.participantId) newFourthPlaceDisputantIds.add(m.a.participantId);
+          if (m.b?.participantId) newFourthPlaceDisputantIds.add(m.b.participantId);
+        }
+
+        const fpBmRes = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('participant_a_id, participant_b_id, winner_participant_id')
+          .eq('group_id', fpGroupRes.data.id);
+        if (!fpBmRes.error && fpBmRes.data) {
+          for (const bm of fpBmRes.data as {
+            participant_a_id: string;
+            participant_b_id: string;
+            winner_participant_id: string | null;
+          }[]) {
+            newFourthPlaceDisputantIds.add(bm.participant_a_id);
+            newFourthPlaceDisputantIds.add(bm.participant_b_id);
+            if (bm.winner_participant_id != null) {
+              const loser =
+                bm.winner_participant_id === bm.participant_a_id
+                  ? bm.participant_b_id
+                  : bm.participant_a_id;
+              newFourthPlaceEliminatedIds.add(loser);
+            }
+          }
+        }
+      }
+    }
+    setFourthPlaceDisputantIds(newFourthPlaceDisputantIds);
+    setFourthPlaceEliminatedIds(newFourthPlaceEliminatedIds);
 
     const matchesRes =
       pairingIds.length > 0
@@ -1604,10 +1664,17 @@ export default function StandingsScreen({ route, navigation }: Props) {
             ) : null}
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
-          {rows.map((r) => (
+          {rows.map((r) => {
+            const isFourthPlaceDisputant = fourthPlaceDisputantIds.has(r.participantId);
+            const isFourthPlaceEliminated = isFourthPlaceDisputant && fourthPlaceEliminatedIds.has(r.participantId);
+            return (
             <TouchableOpacity
               key={r.participantId}
-              style={[styles.row, r.leftEventAt ? styles.rowLeftEvent : null]}
+              style={[
+                styles.row,
+                isFourthPlaceDisputant ? styles.rowFourthPlaceDispute : null,
+                r.leftEventAt ? styles.rowLeftEvent : null,
+              ]}
               activeOpacity={0.7}
               onPress={() =>
                 navigation.navigate('PlayerProfileInEvent', {
@@ -1617,6 +1684,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 })
               }
             >
+              <View style={[styles.rowContent, isFourthPlaceEliminated ? styles.rowContentDimmed : null]}>
               <View style={[styles.playerCell, styles.playerCol]}>
                 {eventTypeStored === 'two_headed_giant' ? (
                   <View style={styles.giantAvatarPairStandings}>
@@ -1706,8 +1774,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
               <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
                 {formatTmpDisplay(r.tmp)}
               </Text>
+              </View>
             </TouchableOpacity>
-          ))}
+            );
+          })}
         </>
       ) : (
         <>
@@ -1932,6 +2002,15 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
   rowLeftEvent: { opacity: 0.5 },
+  // Mismo tono que tcMatchRowWin (resaltado de ganador en el cuadro de mata-mata suizo), para
+  // que el fondo de "disputó el 4to puesto" se lea con intensidad consistente en toda la app.
+  rowFourthPlaceDispute: { backgroundColor: '#FEF3C7' },
+  rowContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  // La opacidad de "eliminado" va en el contenido, NUNCA en el contenedor que tiene el fondo
+  // amarillo (rowFourthPlaceDispute): opacity ahí compositaría el fondo contra lo que hay
+  // detrás de la fila, dando un amarillo más pálido/distinto en vez de la MISMA intensidad
+  // atenuada para todos los disputantes.
+  rowContentDimmed: { opacity: 0.5 },
   cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
   tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
   playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },

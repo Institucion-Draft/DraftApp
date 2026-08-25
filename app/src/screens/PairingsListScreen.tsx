@@ -130,7 +130,7 @@ type TiebreakOfficialSection = {
   kind: 'round_robin' | 'bracket';
   groupRoundNumber: number;
   rounds: TiebreakOfficialRoundBlock[];
-  groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut';
+  groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place';
 };
 
 type RevengeItemView = {
@@ -286,7 +286,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [officialBo1, setOfficialBo1] = useState(false);
   const [eventType, setEventType] = useState<string | null>(null);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
-  const [tiebreakOfficialSection, setTiebreakOfficialSection] = useState<TiebreakOfficialSection | null>(null);
+  const [tiebreakOfficialSections, setTiebreakOfficialSections] = useState<TiebreakOfficialSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const firstLoadRef = useRef(true);
@@ -354,7 +354,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       setCurrentSwissRoundStored(null);
       setSwissRevengeStandalone([]);
       setRevengeItems([]);
-      setTiebreakOfficialSection(null);
+      setTiebreakOfficialSections([]);
       setCompetitionFormat('round_robin');
       return false;
     }
@@ -409,7 +409,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       setCurrentSwissRoundStored(null);
       setSwissRevengeStandalone([]);
       setRevengeItems([]);
-      setTiebreakOfficialSection(null);
+      setTiebreakOfficialSections([]);
       setCompetitionFormat('round_robin');
       return false;
     }
@@ -421,7 +421,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       (x): x is DbMatchRow => x != null
     );
     for (const m of safeMatches) {
-      if (m.match_type === 'revenge') continue;
+      // 'revenge': va aparte (sección de venganzas). 'tiebreak': un pairing de fase regular
+      // puede tener un partido de tiebreak adicional vinculado (desempate por 4to puesto en
+      // round_robin_bo1_top4, reusa el mismo pairing) — pertenece a la sección de desempate,
+      // no debe sumar píldora acá en "Fase todos contra todos".
+      if (m.match_type === 'revenge' || m.match_type === 'tiebreak') continue;
       const pid = m.pairing_id;
       if (m.status === 'in_progress') {
         inProgressByPairing.set(pid, (inProgressByPairing.get(pid) ?? 0) + 1);
@@ -718,23 +722,19 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setItems(mapped);
     setRevengeItems(revengeMapped);
 
-    let tiebreakSection: TiebreakOfficialSection | null = null;
-    const agRes = await supabase
-      .from('event_tiebreak_groups')
-      .select('id, group_type, round_number, champion_user_id, status, created_at, group_origin')
-      .eq('event_id', eventId)
-      .in('status', ['active', 'resolved', 'failed'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!agRes.error && agRes.data) {
-      const ag = agRes.data as {
-        id: string;
-        group_type: string;
-        round_number: number;
-        champion_user_id: string | null;
-        group_origin?: string | null;
-      };
+    // Arma la sección de un event_tiebreak_groups puntual. Separado en función porque un evento
+    // round_robin_bo1_top4 puede tener DOS grupos relevantes a la vez: el desempate por el 4to
+    // puesto (group_origin='round_robin_fourth_place') y, una vez que se resuelve, el bracket
+    // real de top4 (group_origin='round_robin_topcut') que se crea recién ahí — el de 4to puesto
+    // pasa a 'resolved' pero debe seguir visible como historial, no reemplazado por el nuevo.
+    const buildSectionForGroup = async (ag: {
+      id: string;
+      group_type: string;
+      round_number: number;
+      champion_user_id: string | null;
+      group_origin?: string | null;
+    }): Promise<TiebreakOfficialSection | null> => {
+      let tiebreakSection: TiebreakOfficialSection | null = null;
       const gpRes = await supabase
         .from('event_tiebreak_group_participants')
         .select('participant_id')
@@ -743,12 +743,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         const gIds = new Set((gpRes.data as { participant_id: string }[]).map((x) => x.participant_id));
         if (gIds.size >= 2) {
           const groupRoundNumber = ag.round_number ?? 1;
-          const groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' =
+          const groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place' =
             ag.group_origin === 'swiss_topcut'
               ? 'swiss_topcut'
               : ag.group_origin === 'round_robin_topcut'
                 ? 'round_robin_topcut'
-                : 'tiebreak';
+                : ag.group_origin === 'round_robin_fourth_place'
+                  ? 'round_robin_fourth_place'
+                  : 'tiebreak';
 
           const itemForPairing = (
             pairing: PairingRow,
@@ -866,40 +868,22 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             };
           };
 
-          if (ag.group_type === 'bracket') {
-            const bmRes = await supabase
-              .from('event_tiebreak_bracket_matches')
-              .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id, created_at')
-              .eq('group_id', ag.id)
-              .order('created_at', { ascending: true });
-            if (!bmRes.error && bmRes.data) {
-              const bracketRows = bmRes.data as {
-                id: string;
-                bracket_phase: BracketPhase;
-                pairing_id: string | null;
-                participant_a_id: string;
-                participant_b_id: string;
-                winner_participant_id: string | null;
-              }[];
-              const phaseOrder: Record<BracketPhase, number> = { final: 0, third_place: 1, semi: 2 };
-              const sortedBracketRows = [...bracketRows].sort(
-                (x, y) => phaseOrder[x.bracket_phase] - phaseOrder[y.bracket_phase]
-              );
-              // Fuente de verdad de la fase mata-mata: event_tiebreak_bracket_matches.
-              // El pairing puede estar COMPARTIDO con la ronda suiza (misma fila por la
-              // constraint única event_id+a+b), así que NO leemos participantes ni ganador
-              // del pairing: los tomamos del bracket match. El pairing solo se usa para el
-              // marcador parcial (matches tiebreak) y para el match en vivo / navegación.
-              const itemForBracketRow = (
-                bm: {
-                  id: string;
-                  bracket_phase: BracketPhase;
-                  participant_a_id: string;
-                  participant_b_id: string;
-                  winner_participant_id: string | null;
-                },
-                pairing: PairingRow | null
-              ): TiebreakOfficialItem => {
+          // Fuente de verdad de la fase mata-mata (bracket real de campeón, y desempate por el
+          // 4to puesto): event_tiebreak_bracket_matches. Compartido por ambos group_type porque
+          // la tabla y su semántica de fila (siempre ambos participantes concretos — los
+          // placeholders sin resolver nunca llegan a esta tabla, ver 0071/0072) son idénticas;
+          // solo cambia qué título de sección y qué origin se les asigna más abajo.
+          const phaseOrder: Record<BracketPhase, number> = { final: 0, third_place: 1, semi: 2 };
+          const itemForBracketRow = (
+            bm: {
+              id: string;
+              bracket_phase: BracketPhase;
+              participant_a_id: string;
+              participant_b_id: string;
+              winner_participant_id: string | null;
+            },
+            pairing: PairingRow | null
+          ): TiebreakOfficialItem => {
                 const pa = pMap.get(bm.participant_a_id);
                 const pb = pMap.get(bm.participant_b_id);
                 const ua = relationOne(pa?.users);
@@ -995,21 +979,62 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   bracketWinsB,
                 };
               };
-              const tbItems: TiebreakOfficialItem[] = [];
-              for (const bm of sortedBracketRows) {
-                const pairing = bm.pairing_id
-                  ? pairingsAll.find((p) => p.id === bm.pairing_id) ?? null
-                  : null;
-                tbItems.push(itemForBracketRow(bm, pairing));
-              }
-              if (tbItems.length > 0) {
-                tiebreakSection = {
-                  kind: 'bracket',
-                  groupRoundNumber: 1,
-                  rounds: [{ round: 1, items: tbItems }],
-                  groupOrigin,
-                };
-              }
+
+          // Compartido por 'bracket' y 'fourth_place': trae las filas de event_tiebreak_bracket_matches
+          // del grupo (todas ya con ambos participantes concretos) y las arma como items de sección.
+          const fetchBracketSectionItems = async (): Promise<TiebreakOfficialItem[]> => {
+            const bmRes = await supabase
+              .from('event_tiebreak_bracket_matches')
+              .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id, created_at')
+              .eq('group_id', ag.id)
+              .order('created_at', { ascending: true });
+            if (bmRes.error || !bmRes.data) return [];
+            const bracketRows = bmRes.data as {
+              id: string;
+              bracket_phase: BracketPhase;
+              pairing_id: string | null;
+              participant_a_id: string;
+              participant_b_id: string;
+              winner_participant_id: string | null;
+            }[];
+            const sortedBracketRows = [...bracketRows].sort(
+              (x, y) => phaseOrder[x.bracket_phase] - phaseOrder[y.bracket_phase]
+            );
+            const tbItems: TiebreakOfficialItem[] = [];
+            for (const bm of sortedBracketRows) {
+              const pairing = bm.pairing_id
+                ? pairingsAll.find((p) => p.id === bm.pairing_id) ?? null
+                : null;
+              tbItems.push(itemForBracketRow(bm, pairing));
+            }
+            return tbItems;
+          };
+
+          if (ag.group_type === 'bracket') {
+            const tbItems = await fetchBracketSectionItems();
+            if (tbItems.length > 0) {
+              tiebreakSection = {
+                kind: 'bracket',
+                groupRoundNumber: 1,
+                rounds: [{ round: 1, items: tbItems }],
+                groupOrigin,
+              };
+            }
+          } else if (ag.group_type === 'fourth_place') {
+            // Desempate por el 4to puesto de round_robin_bo1_top4 (0071/0072). bracket_phase acá
+            // solo puede ser 'semi' o 'final' (nunca 'third_place': no hay disputa por 3er
+            // puesto en este grupo). A diferencia de la rama round_robin de abajo, NO se usa
+            // event_tiebreak_group_participants para armar esta sección — para este group_type
+            // esa tabla solo tiene el seed de las posiciones 1-3 ya resueltas (para que el
+            // trigger de avance arme el top4), no a los jugadores en disputa.
+            const tbItems = await fetchBracketSectionItems();
+            if (tbItems.length > 0) {
+              tiebreakSection = {
+                kind: 'bracket',
+                groupRoundNumber: 1,
+                rounds: [{ round: 1, items: tbItems }],
+                groupOrigin,
+              };
             }
           } else {
             const buildTiebreakItemsForRound = (roundNum: number): TiebreakOfficialItem[] => {
@@ -1037,8 +1062,38 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           }
         }
       }
+      return tiebreakSection;
+    };
+
+    const agsRes = await supabase
+      .from('event_tiebreak_groups')
+      .select('id, group_type, round_number, champion_user_id, status, created_at, group_origin')
+      .eq('event_id', eventId)
+      .in('status', ['active', 'resolved', 'failed'])
+      .order('created_at', { ascending: false });
+
+    const tiebreakSections: TiebreakOfficialSection[] = [];
+    if (!agsRes.error && agsRes.data) {
+      const agRows = agsRes.data as {
+        id: string;
+        group_type: string;
+        round_number: number;
+        champion_user_id: string | null;
+        group_origin?: string | null;
+      }[];
+      const fourthPlaceGroup = agRows.find((r) => r.group_origin === 'round_robin_fourth_place') ?? null;
+      const mainGroup = agRows.find((r) => r.group_origin !== 'round_robin_fourth_place') ?? null;
+
+      if (mainGroup) {
+        const s = await buildSectionForGroup(mainGroup);
+        if (s) tiebreakSections.push(s);
+      }
+      if (fourthPlaceGroup) {
+        const s = await buildSectionForGroup(fourthPlaceGroup);
+        if (s) tiebreakSections.push(s);
+      }
     }
-    setTiebreakOfficialSection(tiebreakSection);
+    setTiebreakOfficialSections(tiebreakSections);
 
     let needsCheckIn = false;
     if (eventStatus === 'playing' && currentUserId) {
@@ -1185,8 +1240,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     swissRevengeStandalone.length === 0 &&
     !hasOtherSwissRevenge;
 
-  const tiebreakCardsTotal =
-    tiebreakOfficialSection?.rounds.reduce((sum, b) => sum + b.items.length, 0) ?? 0;
+  const tiebreakCardsTotal = tiebreakOfficialSections.reduce(
+    (total, section) => total + section.rounds.reduce((sum, b) => sum + b.items.length, 0),
+    0
+  );
 
   const isSwissOfficialSectioned = competitionFormat === 'swiss' && currentSwissRoundStored != null;
 
@@ -1392,16 +1449,20 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             ) : null
           }
           ListHeaderComponent={
-            tiebreakOfficialSection && tiebreakCardsTotal > 0 ? (
+            tiebreakOfficialSections.length > 0 ? (
               <View style={styles.tiebreakOfficialHeaderWrap}>
+                {tiebreakOfficialSections.map((section, sectionIdx) => (
+                  <View key={`tb-section-${section.groupOrigin}-${sectionIdx}`}>
                 <Text style={styles.groupHeader}>
-                  {tiebreakOfficialSection.groupOrigin === 'swiss_topcut' ||
-                  tiebreakOfficialSection.groupOrigin === 'round_robin_topcut'
+                  {section.groupOrigin === 'swiss_topcut' ||
+                  section.groupOrigin === 'round_robin_topcut'
                     ? 'Fase mata-mata'
-                    : 'Desempate'}
+                    : section.groupOrigin === 'round_robin_fourth_place'
+                      ? 'Desempate por el 4to puesto'
+                      : 'Desempate'}
                 </Text>
-                {tiebreakOfficialSection.rounds.map((block) => {
-                  const isBracket = tiebreakOfficialSection.kind === 'bracket';
+                {section.rounds.map((block) => {
+                  const isBracket = section.kind === 'bracket';
                   const itemsToRender = block.items;
                   const firstIdByPhase: Record<BracketPhase, string | null> = isBracket
                     ? {
@@ -1463,8 +1524,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   };
                   return (
                   <React.Fragment key={`tb-round-${block.round}`}>
-                    {tiebreakOfficialSection.kind === 'round_robin' &&
-                    tiebreakOfficialSection.groupRoundNumber >= 2 ? (
+                    {section.kind === 'round_robin' &&
+                    section.groupRoundNumber >= 2 ? (
                       <Text
                         style={[styles.groupHeader, styles.officialListSectionTitle, styles.tiebreakRoundSubheader]}
                       >
@@ -1601,6 +1662,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   </React.Fragment>
                   );
                 })}
+                  </View>
+                ))}
                 {!isSwissOfficialSectioned ? (
                   <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>
                     {officialBo1 ? 'Fase todos contra todos' : 'Enfrentamientos'}
