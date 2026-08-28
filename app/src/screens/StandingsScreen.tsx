@@ -25,10 +25,13 @@ import ColorFlag from '../components/ColorFlag';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   computePodium,
+  computeFinalStandingsWithTiebreakSplit,
   type PodiumState,
   type ActiveTiebreakGroupPodiumInput,
   type TiebreakMatchPodiumInput,
   type BracketMatchPodiumInput,
+  type RoundRobinStandingInput,
+  type RoundRobinPairingResult,
 } from '../lib/podium';
 
 /** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
@@ -1297,6 +1300,35 @@ export default function StandingsScreen({ route, navigation }: Props) {
         // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
         return a.userId.localeCompare(b.userId);
       });
+    } else if (rawFmt === 'round_robin_bo1_top4') {
+      // El mismo orden que arma el bracket de top4 (EventDetailScreen usa exactamente esta
+      // función para decidir los 4 seeds): desempate olímpico (head-to-head) → calidad de
+      // rivales → hash determinístico. El sort de winrate+DMV de abajo NO es equivalente acá:
+      // para BO1, eg/ec y pg/pj son prácticamente el mismo número (1 partida por pairing), así
+      // que el desempate real terminaba siendo DMV — sin relación con el criterio que realmente
+      // decide el bracket, dando un orden distinto en empates (ver bug reportado).
+      const standingInputs: RoundRobinStandingInput[] = rowsBuilt.map((r) => ({
+        participantId: r.participantId,
+        wins: r.eg,
+        leftEventAt: r.leftEventAt,
+      }));
+      const pairingResultsForRanking: RoundRobinPairingResult[] = (pairings as any[]).map((pr) => ({
+        participantAId: String(pr.participant_a_id),
+        participantBId: String(pr.participant_b_id),
+        winnerParticipantId:
+          pr.official_winner_participant_id != null ? String(pr.official_winner_participant_id) : null,
+      }));
+      const { standings } = computeFinalStandingsWithTiebreakSplit(standingInputs, pairingResultsForRanking);
+      const orderIndex = new Map(standings.map((pid, idx) => [pid, idx]));
+      const rowsById = new Map(rowsBuilt.map((r) => [r.participantId, r]));
+      // computeFinalStandingsWithTiebreakSplit excluye a quienes tienen left_event_at (no
+      // compiten por el top4); igual deben seguir viendo su fila en la tabla, así que los
+      // participantes excluidos del cálculo se agregan al final en su propio orden simple.
+      const ranked = standings.map((pid) => rowsById.get(pid)).filter((r): r is RowView => r != null);
+      const leftOut = rowsBuilt.filter((r) => !orderIndex.has(r.participantId));
+      leftOut.sort((a, b) => (b.eg !== a.eg ? b.eg - a.eg : b.pg - a.pg));
+      rowsBuilt.length = 0;
+      rowsBuilt.push(...ranked, ...leftOut);
     } else {
       const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
       const winrateMatches = (r: RowView) => (r.pj > 0 ? r.pg / r.pj : 0);
