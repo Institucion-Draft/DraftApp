@@ -199,9 +199,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         .select('id, group_type, group_origin')
         .eq('event_id', p.event_id)
         .in('status', ['active', 'resolved'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+        .order('created_at', { ascending: false }),
     ]);
     if (
       partsRes.error ||
@@ -262,18 +260,29 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const tf = tfRaw === 'bo1' || tfRaw === 'sf_bo1_f_bo3' || tfRaw === 'bo3' ? tfRaw : 'bo3';
     let bracketWN: number | null = null;
     if (m.match_type === 'tiebreak') {
-      const tgd = tiebreakGroupRes.data as {
+      // round_robin_bo1_top4 puede tener DOS grupos "bracket-ish" para el mismo evento: el
+      // desempate por el 4to puesto (group_type='fourth_place') y, una vez resuelto, el bracket
+      // real de top4 (group_type='bracket') recién creado. No alcanza con "el grupo más
+      // reciente del evento" (lo que hacía antes con .limit(1)): hay que resolver cuál de los
+      // grupos bracket-ish tiene efectivamente una fila para ESTE pairing — mismo mecanismo que
+      // ya usamos en PairingDetailScreen.
+      const tgRows = (tiebreakGroupRes.data ?? []) as {
         id: string;
         group_type: string;
         group_origin: string | null;
-      } | null;
-      if (tgd?.group_type === 'bracket' || tgd?.group_type === 'fourth_place') {
+      }[];
+      const bracketTypeGroups = tgRows.filter((g) => g.group_type === 'bracket' || g.group_type === 'fourth_place');
+      if (bracketTypeGroups.length > 0) {
         const bmRes = await supabase
           .from('event_tiebreak_bracket_matches')
-          .select('bracket_phase, pairing_id, participant_a_id, participant_b_id')
-          .eq('group_id', tgd.id);
+          .select('group_id, bracket_phase, pairing_id, participant_a_id, participant_b_id')
+          .in(
+            'group_id',
+            bracketTypeGroups.map((g) => g.id)
+          );
         if (!bmRes.error && bmRes.data) {
           const rows = bmRes.data as {
+            group_id: string;
             bracket_phase: 'semi' | 'final' | 'third_place';
             pairing_id: string | null;
             participant_a_id: string;
@@ -288,7 +297,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
             ) ??
             null;
           if (row) {
-            bracketWN = topcutWinsNeededClient(tf, row.bracket_phase);
+            const owningGroup = bracketTypeGroups.find((g) => g.id === row.group_id);
+            // Desempate por el 4to puesto: siempre BO1 (1 partida decisiva), sin importar
+            // topcut_format (eso es solo para el bracket real de semis/final).
+            bracketWN =
+              owningGroup?.group_type === 'fourth_place' ? 1 : topcutWinsNeededClient(tf, row.bracket_phase);
           }
         }
       }
