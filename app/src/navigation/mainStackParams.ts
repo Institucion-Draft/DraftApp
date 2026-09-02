@@ -4,6 +4,7 @@ export type MainStackParamList = {
   MemberProfile: { userId: string; workspaceId: string; from?: 'Playground' };
   CreateWorkspace: undefined;
   WorkspaceDetail: { workspaceId: string };
+  WorkspaceDiary: { workspaceId: string };
   SearchWorkspaces: undefined;
   MyJoinRequests: undefined;
   IncomingJoinRequests: { workspaceId: string };
@@ -61,7 +62,7 @@ export type MainStackParamList = {
   ContextFreeMatches: { workspaceId: string };
   ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };
   ContextFreeColorPick: { workspaceId: string; userAId: string; userBId: string; encounterType: 'bo1' | 'bo3' };
-  ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string; starterUserId?: string };
+  ContextFreeLifeTracker: { matchId: string; encounterId: string; workspaceId: string };
   DraftTimerConfig: {
     mode: 'create' | 'edit' | 'event';
     eventId?: string;

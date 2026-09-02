@@ -16,12 +16,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { PLAYGROUND_PRESENCE_COOLDOWN_HOURS, expireStalePresence, splitPresenceByCooldown } from '../lib/playgroundPresence';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Playground'>;
 
-const COOLDOWN_HOURS = 4;
+const COOLDOWN_HOURS = PLAYGROUND_PRESENCE_COOLDOWN_HOURS;
 const AVATAR_REUSE_HOURS = 24;
 
 type PresenceRow = {
@@ -87,7 +89,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
 
     const { data: ownData } = await supabase
       .from('playground_presence')
-      .select('avatar_id, is_shiny, avatar_assigned_at')
+      .select('avatar_id, is_shiny, avatar_assigned_at, is_active')
       .eq('user_id', user.id)
       .eq('workspace_id', workspaceId)
       .maybeSingle();
@@ -96,7 +98,10 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
       avatar_id: string | null;
       is_shiny: boolean;
       avatar_assigned_at: string | null;
+      is_active: boolean;
     } | null;
+
+    const isReactivating = existingRow == null || existingRow.is_active === false;
 
     const reuseAvatar =
       existingRow?.avatar_id != null &&
@@ -128,6 +133,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
         avatar_assigned_at: avatarAssignedAt,
         is_active: true,
         left_at: null,
+        ...(isReactivating ? { last_match_ended_at: null, joined_at: now } : {}),
       },
       { onConflict: 'user_id,workspace_id' }
     );
@@ -155,15 +161,14 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
     }
 
     const rows = (data ?? []) as unknown as PresenceRow[];
-    const cutoffMs = COOLDOWN_HOURS * 60 * 60 * 1000;
-    const now = Date.now();
-
-    const activeRows = rows.filter((r) => {
-      const ref = r.last_match_ended_at ?? r.joined_at;
-      return now - new Date(ref).getTime() < cutoffMs;
-    });
+    const { active: activeRows, stale } = splitPresenceByCooldown(rows);
 
     setPresence(activeRows);
+
+    if (stale.length > 0) {
+      void expireStalePresence(workspaceId, stale.map((r) => r.user_id));
+    }
+
     return activeRows;
   }, [workspaceId, user?.id]);
 
@@ -186,6 +191,12 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
       return () => { cancelled = true; };
     }, [load, autoJoin, user?.id])
   );
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }),
+    });
+  }, [navigation, workspaceId]);
 
   useLayoutEffect(() => {
     if (!user?.id) return;
@@ -225,7 +236,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
             Alert.alert('Error', 'No se pudo salir de la sala.');
             return;
           }
-          navigation.goBack();
+          navigation.navigate('WorkspaceDetail', { workspaceId });
         },
       },
     ]);

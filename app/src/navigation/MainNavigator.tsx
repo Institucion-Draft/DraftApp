@@ -6,6 +6,7 @@ import MyProfileScreen from '../screens/MyProfileScreen';
 import MemberProfileScreen from '../screens/MemberProfileScreen';
 import CreateWorkspaceScreen from '../screens/CreateWorkspaceScreen';
 import WorkspaceDetailScreen from '../screens/WorkspaceDetailScreen';
+import WorkspaceDiaryScreen from '../screens/WorkspaceDiaryScreen';
 import SearchWorkspacesScreen from '../screens/SearchWorkspacesScreen';
 import MyJoinRequestsScreen from '../screens/MyJoinRequestsScreen';
 import IncomingJoinRequestsScreen from '../screens/IncomingJoinRequestsScreen';
@@ -99,6 +100,11 @@ export default function MainStackNavigator() {
           }}
         />
         <Stack.Screen
+          name="WorkspaceDiary"
+          component={WorkspaceDiaryScreen}
+          options={{ title: 'Bugs y sugerencias', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
           name="SearchWorkspaces"
           component={SearchWorkspacesScreen}
           options={{
@@ -165,7 +171,7 @@ export default function MainStackNavigator() {
         <Stack.Screen name="MatchResult" component={MatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Standings" component={StandingsScreen} options={{ title: 'Tabla de posiciones', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Playground" component={PlaygroundScreen} options={{ title: 'Partidas sin contexto', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="ContextFreeMatches" component={ContextFreeMatchesScreen} options={{ title: 'Historial de partidas', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ContextFreeMatches" component={ContextFreeMatchesScreen} options={{ title: 'Enfrentamientos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeEncounter" component={ContextFreeEncounterScreen} options={{ title: 'Encuentro', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeColorPick" component={ContextFreeColorPickScreen} options={{ title: 'Elegir colores', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeLifeTracker" component={ContextFreeLifeTrackerScreen} options={{ headerShown: false }} />

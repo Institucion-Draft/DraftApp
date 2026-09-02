@@ -152,7 +152,7 @@ function pickCoordinatedBgColors(
 
 export default function ContextFreeLifeTrackerScreen({ route, navigation }: Props) {
   useKeepAwake();
-  const { matchId, encounterId, workspaceId, starterUserId } = route.params;
+  const { matchId, encounterId, workspaceId } = route.params;
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<MatchRow | null>(null);
   const [encounter, setEncounter] = useState<EncounterRow | null>(null);
