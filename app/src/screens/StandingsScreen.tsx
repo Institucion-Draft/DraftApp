@@ -807,26 +807,37 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setIsSwissBo2(rawFmt === 'swiss_bo2');
     setIsRoundRobinBo1(rawFmt === 'round_robin_bo1_top4');
 
-    // round_robin_bo1_top4: resaltar en la tabla a quienes disputaron el desempate por el 4to
-    // puesto (si el evento tuvo uno). Query dedicada e independiente de tiebreakGroupRes de
-    // arriba: ese trae "el" grupo más reciente por event_id (limit 1), que una vez resuelto el
-    // desempate queda reemplazado por el bracket real de top4 recién creado — este resaltado
-    // necesita el grupo fourth_place puntualmente, exista o no todavía uno más nuevo.
+    // round_robin_bo1_top4 (4to puesto real) O round_robin BO3 clásico (1er puesto, 0075):
+    // resaltar en la tabla a quienes disputaron el desempate (si el evento tuvo uno). Query
+    // dedicada e independiente de tiebreakGroupRes de arriba: para round_robin_bo1_top4 ese
+    // trae "el" grupo más reciente por event_id (limit 1), que una vez resuelto el desempate
+    // de 4to puesto queda reemplazado por el bracket real de top4 recién creado — este
+    // resaltado necesita el grupo fourth_place puntualmente, exista o no todavía uno más nuevo
+    // (round_robin clásico no tiene ese problema — nunca hay un grupo posterior — pero usamos
+    // la misma query dedicada por consistencia).
     // Los eliminados salen de event_tiebreak_bracket_matches (filas ya jugables/resueltas), pero
     // los disputantes NO: esa tabla no tiene fila para quien tiene bye hasta que se resuelve el
     // primer partido (el patrón de "insertar recién cuando la dependencia está lista", ver
     // 0071/0072). La fuente completa de quién disputa es pending_bracket_matches — el jsonb
     // íntegro armado por computeFourthPlaceTiebreakBracket, con TODOS los participantIds
     // concretos del grupo (jugables ahora o no todavía) — no event_tiebreak_group_participants
-    // (para 'fourth_place' esa tabla solo tiene el trío de posiciones 1-3 ya resueltas).
+    // (para 'fourth_place' esa tabla solo tiene el trío de posiciones 1-3 ya resueltas en
+    // round_robin_fourth_place, o a todos los empatados en round_robin_first_place — cualquiera
+    // de las dos alcanza igual con pending_bracket_matches, no hace falta leerla acá).
     const newFourthPlaceDisputantIds = new Set<string>();
     const newFourthPlaceEliminatedIds = new Set<string>();
-    if (rawFmt === 'round_robin_bo1_top4') {
+    const tiebreakDisputeGroupOrigin =
+      rawFmt === 'round_robin_bo1_top4'
+        ? 'round_robin_fourth_place'
+        : rawFmt === 'round_robin'
+          ? 'round_robin_first_place'
+          : null;
+    if (tiebreakDisputeGroupOrigin) {
       const fpGroupRes = await supabase
         .from('event_tiebreak_groups')
         .select('id, pending_bracket_matches')
         .eq('event_id', eventId)
-        .eq('group_origin', 'round_robin_fourth_place')
+        .eq('group_origin', tiebreakDisputeGroupOrigin)
         .maybeSingle();
       if (!fpGroupRes.error && fpGroupRes.data?.id) {
         const pending = (fpGroupRes.data as { pending_bracket_matches?: unknown }).pending_bracket_matches as
@@ -1063,7 +1074,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
       if (!gpRes.error && gpRes.data && (gpRes.data as { participant_id: string }[]).length > 0) {
         podiumTiebreakGroup = {
           id: tgRow.id,
-          group_type: tgRow.group_type === 'bracket' ? 'bracket' : 'round_robin',
+          group_type:
+            tgRow.group_type === 'bracket'
+              ? 'bracket'
+              : tgRow.group_type === 'fourth_place'
+                ? 'fourth_place'
+                : 'round_robin',
+          group_origin: tgRow.group_origin ?? null,
           round_number: tgRow.round_number ?? 1,
           champion_user_id: tgRow.champion_user_id,
           participants: gpRes.data as { participant_id: string; user_id: string; seed: number }[],
@@ -1086,7 +1103,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           tiebreak_round: m.tiebreak_round != null ? Number(m.tiebreak_round) : null,
         });
       }
-      if (tgRow.group_type === 'bracket') {
+      if (tgRow.group_type === 'bracket' || tgRow.group_type === 'fourth_place') {
         const bmRes = await supabase
           .from('event_tiebreak_bracket_matches')
           .select('bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
@@ -1300,16 +1317,20 @@ export default function StandingsScreen({ route, navigation }: Props) {
         // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
         return a.userId.localeCompare(b.userId);
       });
-    } else if (rawFmt === 'round_robin_bo1_top4') {
-      // El mismo orden que arma el bracket de top4 (EventDetailScreen usa exactamente esta
-      // función para decidir los 4 seeds): desempate olímpico (head-to-head) → calidad de
-      // rivales → hash determinístico. El sort de winrate+DMV de abajo NO es equivalente acá:
-      // para BO1, eg/ec y pg/pj son prácticamente el mismo número (1 partida por pairing), así
-      // que el desempate real terminaba siendo DMV — sin relación con el criterio que realmente
-      // decide el bracket, dando un orden distinto en empates (ver bug reportado).
+    } else if (rawFmt === 'round_robin_bo1_top4' || rawFmt === 'round_robin') {
+      // Mismo orden que decide el desempate jugable de este modo (round_robin_bo1_top4: el
+      // bracket de top4, ver EventDetailScreen; round_robin BO3 clásico: el desempate de 1er
+      // puesto, ver 0075): desempate olímpico (head-to-head) → calidad de rivales → hash
+      // determinístico. El sort de winrate+DMV de abajo NO es equivalente acá: en ambos formatos
+      // eg/ec y pg/pj pueden coincidir o casi coincidir entre empatados, así que el desempate
+      // real terminaba siendo winrate de partidas individuales o DMV — sin relación con el
+      // criterio que realmente decide el desempate/bracket, dando un orden distinto en empates
+      // (ver bug reportado). cutoffPosition=0 para round_robin (frontera = 1er puesto); para
+      // round_robin_bo1_top4 no importa el valor acá — solo se usa `standings`, no
+      // `cutoffTieGroup` (el cutoff real de top4 lo calcula EventDetailScreen aparte).
       const standingInputs: RoundRobinStandingInput[] = rowsBuilt.map((r) => ({
         participantId: r.participantId,
-        wins: r.eg,
+        points: r.eg,
         leftEventAt: r.leftEventAt,
       }));
       const pairingResultsForRanking: RoundRobinPairingResult[] = (pairings as any[]).map((pr) => ({
@@ -1318,12 +1339,16 @@ export default function StandingsScreen({ route, navigation }: Props) {
         winnerParticipantId:
           pr.official_winner_participant_id != null ? String(pr.official_winner_participant_id) : null,
       }));
-      const { standings } = computeFinalStandingsWithTiebreakSplit(standingInputs, pairingResultsForRanking);
+      const { standings } = computeFinalStandingsWithTiebreakSplit(
+        standingInputs,
+        pairingResultsForRanking,
+        0
+      );
       const orderIndex = new Map(standings.map((pid, idx) => [pid, idx]));
       const rowsById = new Map(rowsBuilt.map((r) => [r.participantId, r]));
       // computeFinalStandingsWithTiebreakSplit excluye a quienes tienen left_event_at (no
-      // compiten por el top4); igual deben seguir viendo su fila en la tabla, así que los
-      // participantes excluidos del cálculo se agregan al final en su propio orden simple.
+      // compiten por el top4/1er puesto); igual deben seguir viendo su fila en la tabla, así que
+      // los participantes excluidos del cálculo se agregan al final en su propio orden simple.
       const ranked = standings.map((pid) => rowsById.get(pid)).filter((r): r is RowView => r != null);
       const leftOut = rowsBuilt.filter((r) => !orderIndex.has(r.participantId));
       leftOut.sort((a, b) => (b.eg !== a.eg ? b.eg - a.eg : b.pg - a.pg));

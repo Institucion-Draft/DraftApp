@@ -130,7 +130,12 @@ type TiebreakOfficialSection = {
   kind: 'round_robin' | 'bracket';
   groupRoundNumber: number;
   rounds: TiebreakOfficialRoundBlock[];
-  groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place';
+  groupOrigin:
+    | 'tiebreak'
+    | 'swiss_topcut'
+    | 'round_robin_topcut'
+    | 'round_robin_fourth_place'
+    | 'round_robin_first_place';
 };
 
 type RevengeItemView = {
@@ -743,14 +748,21 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         const gIds = new Set((gpRes.data as { participant_id: string }[]).map((x) => x.participant_id));
         if (gIds.size >= 2) {
           const groupRoundNumber = ag.round_number ?? 1;
-          const groupOrigin: 'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place' =
+          const groupOrigin:
+            | 'tiebreak'
+            | 'swiss_topcut'
+            | 'round_robin_topcut'
+            | 'round_robin_fourth_place'
+            | 'round_robin_first_place' =
             ag.group_origin === 'swiss_topcut'
               ? 'swiss_topcut'
               : ag.group_origin === 'round_robin_topcut'
                 ? 'round_robin_topcut'
                 : ag.group_origin === 'round_robin_fourth_place'
                   ? 'round_robin_fourth_place'
-                  : 'tiebreak';
+                  : ag.group_origin === 'round_robin_first_place'
+                    ? 'round_robin_first_place'
+                    : 'tiebreak';
 
           const itemForPairing = (
             pairing: PairingRow,
@@ -1021,12 +1033,15 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               };
             }
           } else if (ag.group_type === 'fourth_place') {
-            // Desempate por el 4to puesto de round_robin_bo1_top4 (0071/0072). bracket_phase acá
-            // solo puede ser 'semi' o 'final' (nunca 'third_place': no hay disputa por 3er
-            // puesto en este grupo). A diferencia de la rama round_robin de abajo, NO se usa
-            // event_tiebreak_group_participants para armar esta sección — para este group_type
-            // esa tabla solo tiene el seed de las posiciones 1-3 ya resueltas (para que el
-            // trigger de avance arme el top4), no a los jugadores en disputa.
+            // Desempate por el 4to puesto de round_robin_bo1_top4 (0071/0072) o por el 1er
+            // puesto de round_robin BO3 clásico (0075). bracket_phase acá solo puede ser 'semi'
+            // o 'final' (nunca 'third_place': no hay disputa por 3er puesto dentro de ESTE
+            // grupo — para round_robin_first_place el 3er puesto se resuelve aparte, ver
+            // podium.ts). A diferencia de la rama round_robin de abajo, NO se usa
+            // event_tiebreak_group_participants para armar esta sección — para round_robin_
+            // fourth_place esa tabla solo tiene el seed de las posiciones 1-3 ya resueltas (para
+            // que el trigger de avance arme el top4); para round_robin_first_place tiene a TODOS
+            // los empatados (0075), pero tampoco hace falta acá.
             const tbItems = await fetchBracketSectionItems();
             if (tbItems.length > 0) {
               tiebreakSection = {
@@ -1081,15 +1096,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         champion_user_id: string | null;
         group_origin?: string | null;
       }[];
-      const fourthPlaceGroup = agRows.find((r) => r.group_origin === 'round_robin_fourth_place') ?? null;
-      const mainGroup = agRows.find((r) => r.group_origin !== 'round_robin_fourth_place') ?? null;
+      // group_type='fourth_place' (4to puesto real de round_robin_bo1_top4 O 1er puesto de
+      // round_robin BO3 clásico, ver 0075) siempre se procesa aparte del grupo "principal": para
+      // round_robin_bo1_top4 puede coexistir con el bracket real de top4 creado al resolverse.
+      const fourthPlaceFamilyGroups = agRows.filter((r) => r.group_type === 'fourth_place');
+      const mainGroup = agRows.find((r) => r.group_type !== 'fourth_place') ?? null;
 
       if (mainGroup) {
         const s = await buildSectionForGroup(mainGroup);
         if (s) tiebreakSections.push(s);
       }
-      if (fourthPlaceGroup) {
-        const s = await buildSectionForGroup(fourthPlaceGroup);
+      for (const g of fourthPlaceFamilyGroups) {
+        const s = await buildSectionForGroup(g);
         if (s) tiebreakSections.push(s);
       }
     }
@@ -1459,7 +1477,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     ? 'Fase mata-mata'
                     : section.groupOrigin === 'round_robin_fourth_place'
                       ? 'Desempate por el 4to puesto'
-                      : 'Desempate'}
+                      : section.groupOrigin === 'round_robin_first_place'
+                        ? 'Desempate por el 1er puesto'
+                        : 'Desempate'}
                 </Text>
                 {section.rounds.map((block) => {
                   const isBracket = section.kind === 'bracket';
