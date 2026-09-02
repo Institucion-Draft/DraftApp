@@ -121,11 +121,12 @@ type ActiveTiebreakGroupState = {
 };
 
 /**
- * Desempate por el 4to puesto (group_origin='round_robin_fourth_place'). A diferencia de los
- * demás group_type, event_tiebreak_group_participants NO contiene a los que están en disputa acá
- * (solo a los 3 ya resueltos, ver 0071) — por eso este estado se arma aparte, leyendo
- * event_tiebreak_bracket_matches + pending_bracket_matches directamente, sin tocar el mecanismo
- * viejo de multiTiebreakGroup.participants.
+ * Desempate de group_type='fourth_place': el 4to puesto real de round_robin_bo1_top4
+ * (group_origin='round_robin_fourth_place', ver 0071) o el 1er puesto de round_robin BO3
+ * clásico (group_origin='round_robin_first_place', ver 0075). Se arma aparte, leyendo
+ * event_tiebreak_bracket_matches + pending_bracket_matches directamente, sin tocar el
+ * mecanismo viejo de multiTiebreakGroup.participants (que para 'round_robin_fourth_place' no
+ * contiene a los que están en disputa, solo a los 3 ya resueltos).
  */
 type FourthPlaceTiebreakState = {
   /** Partidos jugables ahora mismo (1 en grupos de 2/3, hasta 2 en paralelo en grupos de 4). */
@@ -334,7 +335,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           }
           const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
             participantId: part.id,
-            wins: winsByParticipant[part.id] ?? 0,
+            points: winsByParticipant[part.id] ?? 0,
             leftEventAt: part.left_event_at,
           }));
           const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
@@ -399,6 +400,73 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       }
     }
 
+    // round_robin BO3 clásico: desempate de 1er puesto (0075). compute_event_champion detecta
+    // el empate (2+ líderes en winrate) y solo marca final_pending=true — el cliente arma acá
+    // el grupo con la cascada completa de tanda1/tanda2 de podium.ts (head-to-head → calidad de
+    // rivales → hash), igual patrón que round_robin_bo1_top4 usa arriba para el 4to puesto.
+    if (
+      e.status === 'playing' &&
+      e.competition_format === 'round_robin' &&
+      e.final_pending === true &&
+      !e.champion_user_id
+    ) {
+      const existingFirstPlaceGroupRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('id')
+        .eq('event_id', e.id)
+        .eq('group_origin', 'round_robin_first_place')
+        .maybeSingle();
+      if (!existingFirstPlaceGroupRes.error && !existingFirstPlaceGroupRes.data) {
+        const rrPairingsRes = await supabase
+          .from('pairings')
+          .select('participant_a_id, participant_b_id, official_winner_participant_id')
+          .eq('event_id', e.id);
+        if (!rrPairingsRes.error && rrPairingsRes.data) {
+          const rrPairings = rrPairingsRes.data as {
+            participant_a_id: string;
+            participant_b_id: string;
+            official_winner_participant_id: string | null;
+          }[];
+          const winsByParticipant: Record<string, number> = {};
+          for (const part of p) winsByParticipant[part.id] = 0;
+          for (const pr of rrPairings) {
+            const w = pr.official_winner_participant_id;
+            if (w != null) winsByParticipant[w] = (winsByParticipant[w] ?? 0) + 1;
+          }
+          const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
+            participantId: part.id,
+            points: winsByParticipant[part.id] ?? 0,
+            leftEventAt: part.left_event_at,
+          }));
+          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
+            participantAId: pr.participant_a_id,
+            participantBId: pr.participant_b_id,
+            winnerParticipantId: pr.official_winner_participant_id,
+          }));
+          // cutoffPosition=0: la frontera es el 1er puesto (índice 0-based), no el 4to.
+          const { cutoffTieGroup } = computeFinalStandingsWithTiebreakSplit(
+            standingInputs,
+            pairingResults,
+            0
+          );
+          if (cutoffTieGroup.length > 1) {
+            // computeFourthPlaceTiebreakBracket soporta grupos de 2/3/4; con 5+ recorta a los 4
+            // mejor ordenados por tanda1 antes de armar los partidos (cutoffTieGroup ya viene en
+            // ese orden — es un subarray de `standings`).
+            const tied = cutoffTieGroup.length > 4 ? cutoffTieGroup.slice(0, 4) : cutoffTieGroup;
+            const { matches } = computeFourthPlaceTiebreakBracket(tied, pairingResults);
+            if (matches.length > 0) {
+              await supabase.rpc('create_round_robin_first_place_tiebreak_group', {
+                p_event_id: e.id,
+                p_matches: matches,
+                p_tied_participants_ordered: tied,
+              });
+            }
+          }
+        }
+      }
+    }
+
     let multiTiebreakGroup: ActiveTiebreakGroupState | null = null;
     const activeGroupRes = await supabase
       .from('event_tiebreak_groups')
@@ -428,11 +496,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
     setActiveTiebreakGroup(multiTiebreakGroup);
 
-    const isFourthPlaceGroup = multiTiebreakGroup?.group_origin === 'round_robin_fourth_place';
+    // group_type='fourth_place' cubre tanto el desempate real de 4to puesto de
+    // round_robin_bo1_top4 (group_origin='round_robin_fourth_place') como el desempate de 1er
+    // puesto de round_robin BO3 clásico (group_origin='round_robin_first_place', 0075) — mismo
+    // armado de datos (event_tiebreak_bracket_matches + pending_bracket_matches), solo cambia
+    // el copy del banner más abajo.
+    const isFourthPlaceGroup = multiTiebreakGroup?.group_type === 'fourth_place';
 
-    // Desempate por el 4to puesto: estado propio, independiente del mecanismo viejo de abajo
+    // Desempate por el 4to/1er puesto: estado propio, independiente del mecanismo viejo de abajo
     // (que asume multiTiebreakGroup.participants = quienes juegan, algo falso para este
-    // group_origin — acá esa tabla solo tiene a los 3 ya resueltos, ver 0071).
+    // group_type — acá esa tabla puede tener a los 3 ya resueltos, ver 0071, o a todos los
+    // empatados, ver 0075).
     let fourthPlaceState: FourthPlaceTiebreakState | null = null;
     let fourthPlaceMyVs: { pairingId: string; opponentName: string } | null = null;
     if (multiTiebreakGroup && isFourthPlaceGroup) {
@@ -1090,22 +1164,25 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const multiTiebreakBannerVisible =
     activeTiebreakGroup != null &&
+    activeTiebreakGroup.group_type !== 'fourth_place' &&
     activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup.group_origin !== 'round_robin_topcut' &&
-    activeTiebreakGroup.group_origin !== 'round_robin_fourth_place' &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
     event.competition_format !== 'swiss_bo2' &&
+    activeTiebreakGroup?.group_type !== 'fourth_place' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&
-    activeTiebreakGroup?.group_origin !== 'round_robin_fourth_place' &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));
 
-  // Banner específico del desempate por el 4to puesto (round_robin_bo1_top4): independiente del
-  // sistema de arriba, que asume que el empate es por 1er puesto.
-  const showFourthPlaceTiebreakBanner = activeTiebreakGroup?.group_origin === 'round_robin_fourth_place';
+  // Banner específico del desempate por el 4to puesto de round_robin_bo1_top4 O del 1er puesto
+  // de round_robin BO3 clásico (0075, group_origin='round_robin_first_place'): independiente
+  // del sistema de arriba, que asume que el empate viejo se resuelve con matches por pairing
+  // directo en vez de un bracket con bye.
+  const showFourthPlaceTiebreakBanner = activeTiebreakGroup?.group_type === 'fourth_place';
+  const isFirstPlaceTiebreak = activeTiebreakGroup?.group_origin === 'round_robin_first_place';
 
   const participantNamesOrdered = activeTiebreakGroup
     ? [...activeTiebreakGroup.participants]
@@ -1247,7 +1324,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {showFourthPlaceTiebreakBanner ? (
         <View style={styles.tiebreakNotice}>
-          <Text style={styles.tiebreakNoticeTitle}>Desempate pendiente por el 4to puesto</Text>
+          <Text style={styles.tiebreakNoticeTitle}>
+            {isFirstPlaceTiebreak ? 'Desempate pendiente por el 1er puesto' : 'Desempate pendiente por el 4to puesto'}
+          </Text>
           {fourthPlaceTiebreak && fourthPlaceTiebreak.playable.length > 0 ? (
             <>
               <Text style={styles.tiebreakNoticeBody}>

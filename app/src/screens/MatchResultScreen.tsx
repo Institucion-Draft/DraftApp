@@ -299,9 +299,17 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           if (row) {
             const owningGroup = bracketTypeGroups.find((g) => g.id === row.group_id);
             // Desempate por el 4to puesto: siempre BO1 (1 partida decisiva), sin importar
-            // topcut_format (eso es solo para el bracket real de semis/final).
+            // topcut_format (eso es solo para el bracket real de semis/final). Desempate por el
+            // 1er puesto de round_robin BO3 clásico (0075): BO1 en semi, BO3 (2 victorias) en
+            // la final — la que corona campeón se juega con la misma exigencia de siempre.
             bracketWN =
-              owningGroup?.group_type === 'fourth_place' ? 1 : topcutWinsNeededClient(tf, row.bracket_phase);
+              owningGroup?.group_origin === 'round_robin_first_place'
+                ? row.bracket_phase === 'final'
+                  ? 2
+                  : 1
+                : owningGroup?.group_type === 'fourth_place'
+                  ? 1
+                  : topcutWinsNeededClient(tf, row.bracket_phase);
           }
         }
       }

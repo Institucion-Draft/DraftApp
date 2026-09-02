@@ -184,7 +184,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
   const [profileInTiebreakGroup, setProfileInTiebreakGroup] = useState(false);
   const [profileTiebreakGroupOrigin, setProfileTiebreakGroupOrigin] = useState<
-    'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place'
+    'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place' | 'round_robin_first_place'
   >('tiebreak');
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
@@ -193,8 +193,10 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
   /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
   const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
-  /** round_robin_bo1_top4: participó en el desempate por el 4to puesto (grupo aparte del principal). */
+  /** Participó en el desempate group_type='fourth_place' (4to puesto real de
+   *  round_robin_bo1_top4, o 1er puesto de round_robin BO3 clásico — 0075), grupo aparte del principal. */
   const [profileInFourthPlaceGroup, setProfileInFourthPlaceGroup] = useState(false);
+  const [profileFourthPlaceIsFirstPlace, setProfileFourthPlaceIsFirstPlace] = useState(false);
   const [profileFourthPlaceRows, setProfileFourthPlaceRows] = useState<{
     semi: OfficialH2HRow[];
     final: OfficialH2HRow[];
@@ -578,15 +580,16 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     });
     setRevengeH2h(revRows);
 
-    // Grupo "principal" (fase mata-mata suiza/real de top4, o desempate clásico de 1er puesto):
-    // excluye explícitamente 'round_robin_fourth_place' — ese se procesa aparte más abajo, con
-    // su propia query, para que no lo tape un grupo más nuevo (el bracket real de top4, creado
-    // recién cuando el desempate por el 4to puesto se resuelve) ni quede tapado por él.
+    // Grupo "principal" (fase mata-mata suiza/real de top4, o desempate clásico viejo tipo
+    // 'tiebreak'): excluye explícitamente group_type='fourth_place' — ese se procesa aparte más
+    // abajo, con su propia query, para que no lo tape un grupo más nuevo (el bracket real de
+    // top4, creado recién cuando el desempate por el 4to puesto se resuelve) ni quede tapado por
+    // él. Cubre tanto 'round_robin_fourth_place' como 'round_robin_first_place' (0075).
     const tgRes = await supabase
       .from('event_tiebreak_groups')
       .select('id, round_number, group_origin, group_type')
       .eq('event_id', eventId)
-      .neq('group_origin', 'round_robin_fourth_place')
+      .neq('group_type', 'fourth_place')
       .in('status', ['active', 'resolved', 'failed'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -741,18 +744,22 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
     }
 
-    // Desempate por el 4to puesto (round_robin_bo1_top4): query propia e independiente de la de
-    // arriba. No puede vivir en tgRes (limit 1, la tapa un grupo 'bracket' más nuevo apenas se
-    // resuelve el desempate) — este grupo debe seguir mostrándose como historial aunque ya no
-    // sea "el" grupo más reciente del evento.
+    // Desempate group_type='fourth_place' (4to puesto real de round_robin_bo1_top4, o 1er
+    // puesto de round_robin BO3 clásico — 0075): query propia e independiente de la de arriba.
+    // No puede vivir en tgRes (limit 1, la tapa un grupo 'bracket' más nuevo apenas se resuelve
+    // el desempate de 4to puesto) — este grupo debe seguir mostrándose como historial aunque ya
+    // no sea "el" grupo más reciente del evento. A lo sumo hay uno de estos por evento.
     const fpGroupRes = await supabase
       .from('event_tiebreak_groups')
-      .select('id')
+      .select('id, group_origin')
       .eq('event_id', eventId)
-      .eq('group_origin', 'round_robin_fourth_place')
+      .eq('group_type', 'fourth_place')
       .maybeSingle();
 
     if (!fpGroupRes.error && fpGroupRes.data?.id) {
+      setProfileFourthPlaceIsFirstPlace(
+        (fpGroupRes.data as { group_origin?: string | null }).group_origin === 'round_robin_first_place'
+      );
       const fpBmRes = await supabase
         .from('event_tiebreak_bracket_matches')
         .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
@@ -805,6 +812,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
     } else {
       setProfileInFourthPlaceGroup(false);
+      setProfileFourthPlaceIsFirstPlace(false);
       setProfileFourthPlaceRows({ semi: [], final: [] });
     }
 
@@ -882,9 +890,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         tint === 'blue' ? styles.bo3FilledBlue : tint === 'orange' ? styles.bo3FilledOrange : styles.bo3FilledGreen;
       // round_robin_bo1_top4: el oficial de la fase regular (tint 'blue') es a una sola
       // partida — una sola píldora. El bracket (tint 'green') sigue siendo BO3/lo que
-      // diga topcut_format y mantiene sus 2 píldoras. El desempate por el 4to puesto
-      // (tint 'orange') siempre es 1 partido decisivo, sin importar topcut_format.
-      const singlePill = (tint === 'blue' && isRoundRobinBo1) || tint === 'orange' || !!forceSingle;
+      // diga topcut_format y mantiene sus 2 píldoras. El desempate (tint 'orange') NO es
+      // single siempre: el 4to puesto real (round_robin_fourth_place) sí lo es, pero el de
+      // 1er puesto (round_robin_first_place) es BO1 en semi y BO3 en la final — cada caller
+      // de tint='orange' decide vía forceSingle según fase/origin (ver fourthPlaceMataSection).
+      const singlePill = (tint === 'blue' && isRoundRobinBo1) || !!forceSingle;
       return (
         <View style={styles.h2hBo3Outer}>
           <View style={styles.h2hBo3Group}>
@@ -1148,7 +1158,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       const total = profileFourthPlaceRows.semi.length + profileFourthPlaceRows.final.length;
       return (
         <>
-          <Text style={styles.sectionTitle}>Desempate por el 4to puesto</Text>
+          <Text style={styles.sectionTitle}>
+            {profileFourthPlaceIsFirstPlace ? 'Desempate por el 1er puesto' : 'Desempate por el 4to puesto'}
+          </Text>
           {total === 0 ? (
             <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
           ) : (
@@ -1156,13 +1168,18 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               {profileFourthPlaceRows.semi.length > 0 ? (
                 <>
                   <Text style={[styles.profilePhaseSubtitle, styles.profilePhaseSubtitleOrange]}>Semifinal</Text>
-                  {profileFourthPlaceRows.semi.map((row) => officialPairingCard(row, 'orange'))}
+                  {/* Semi siempre es BO1 (1 píldora), en los dos origin de group_type='fourth_place'. */}
+                  {profileFourthPlaceRows.semi.map((row) => officialPairingCard(row, 'orange', true))}
                 </>
               ) : null}
               {profileFourthPlaceRows.final.length > 0 ? (
                 <>
                   <Text style={[styles.profilePhaseSubtitle, styles.profilePhaseSubtitleOrange]}>Final</Text>
-                  {profileFourthPlaceRows.final.map((row) => officialPairingCard(row, 'orange'))}
+                  {/* La final del 4to puesto real sigue siendo BO1 (1 píldora); la del 1er puesto
+                      (round_robin_first_place) es BO3 (2 píldoras, ver 0075). */}
+                  {profileFourthPlaceRows.final.map((row) =>
+                    officialPairingCard(row, 'orange', !profileFourthPlaceIsFirstPlace)
+                  )}
                 </>
               ) : null}
             </>

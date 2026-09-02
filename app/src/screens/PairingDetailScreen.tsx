@@ -265,6 +265,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   /** round_robin_bo1_top4: el oficial es a una sola partida. */
   const [officialBo1, setOfficialBo1] = useState(false);
+  /** round_robin BO3 clásico (todos contra todos, sin fase mata-mata separada). */
+  const [isRoundRobinClassic, setIsRoundRobinClassic] = useState(false);
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [eventStartingLife, setEventStartingLife] = useState(20);
@@ -402,6 +404,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         : 'round_robin'
     );
     setOfficialBo1(evFlags?.competition_format === 'round_robin_bo1_top4');
+    setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin');
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
       csr == null
@@ -936,7 +939,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       ? 'Fase mata-mata'
       : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
         ? 'Desempate por el 4to puesto'
-        : 'Desempate';
+        : activeTiebreakGroup?.group_origin === 'round_robin_first_place'
+          ? 'Desempate por el 1er puesto'
+          : 'Desempate';
   // Layout de bracket: top cut suizo o top 4 de round_robin_bo1_top4.
   const useSwissTopcutBracketDetailLayout =
     bracketMatchRow != null &&
@@ -947,11 +952,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (!bracketMatchRow) return null;
     const phase = bracketMatchRow.bracket_phase;
     // Desempate por el 4to puesto: siempre BO1 (1 partida decisiva), sin importar topcut_format
-    // (eso es solo para el bracket real de semis/final).
+    // (eso es solo para el bracket real de semis/final). Desempate por el 1er puesto de
+    // round_robin BO3 clásico (0075): BO1 en semi, BO3 (2 victorias) en la final — la que
+    // corona campeón se juega con la misma exigencia que tenía antes de esta migración.
     const wn =
-      activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
-        ? 1
-        : topcutWinsNeededClient(topcutFormat, phase);
+      activeTiebreakGroup?.group_origin === 'round_robin_first_place'
+        ? phase === 'final'
+          ? 2
+          : 1
+        : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
+          ? 1
+          : topcutWinsNeededClient(topcutFormat, phase);
     if (inProgressMatch?.status === 'in_progress' && inProgressMatch.match_type === 'tiebreak') {
       return `Retomar ${bracketPhaseDisplayName(phase)} en curso`;
     }
@@ -1150,20 +1161,30 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   };
 
   // Mismo criterio que tiebreakBracketPrimaryLabel: el desempate por el 4to puesto siempre es
-  // BO1, independientemente de topcut_format.
+  // BO1; el de 1er puesto (0075) es BO1 en semi y BO3 en la final.
   const bracketLegWinsNeeded =
     bracketMatchRow != null
-      ? activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
-        ? 1
-        : topcutWinsNeededClient(topcutFormat, bracketMatchRow.bracket_phase)
+      ? activeTiebreakGroup?.group_origin === 'round_robin_first_place'
+        ? bracketMatchRow.bracket_phase === 'final'
+          ? 2
+          : 1
+        : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
+          ? 1
+          : topcutWinsNeededClient(topcutFormat, bracketMatchRow.bracket_phase)
       : 2;
   const hasCompletedBracketLegMatches = tiebreakMs.some(
     (m) => m.match_type === 'tiebreak' && m.status === 'completed' && m.winner_participant_id != null
   );
-  // Desempate por el 4to puesto (round_robin_bo1_top4): píldora naranja aparte, siempre 1 sola
-  // (BO1) — no comparte la fila verde del bracket real (que es BO3/lo que diga topcut_format).
+  // Desempate por el 4to o 1er puesto (group_type='fourth_place'): píldora naranja aparte — no
+  // comparte la fila verde del bracket real (que es BO3/lo que diga topcut_format).
   const showHeroOrangeRow =
-    bracketMatchRow != null && activeTiebreakGroup?.group_origin === 'round_robin_fourth_place';
+    bracketMatchRow != null && activeTiebreakGroup?.group_type === 'fourth_place';
+  // round_robin_first_place: semi es BO1 (1 píldora), la final que corona campeón es BO3 (2
+  // píldoras) — mismo criterio fase-dependiente que bracketLegWinsNeeded. round_robin_fourth_place
+  // (el 4to puesto real) SIEMPRE es 1 sola píldora, sin importar la fase — no se toca.
+  const showSecondOrangeBox =
+    activeTiebreakGroup?.group_origin === 'round_robin_first_place' &&
+    bracketMatchRow?.bracket_phase === 'final';
   const showHeroGreenRow =
     (bracketMatchRow != null && !showHeroOrangeRow) ||
     (pairingHadSwissTopcutBracket && hasCompletedBracketLegMatches);
@@ -1352,6 +1373,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroOrangeRow ? (
               <View style={[styles.heroBo3RowLeft, styles.heroBo3RowOrange]}>
                 <View style={[styles.heroBo3Box, dispTieLeft >= 1 && styles.heroBo3FilledOrange]} />
+                {showSecondOrangeBox ? (
+                  <View style={[styles.heroBo3Box, dispTieLeft >= 2 && styles.heroBo3FilledOrange]} />
+                ) : null}
               </View>
             ) : null}
             {showHeroBlueRow ? (
@@ -1394,6 +1418,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroOrangeRow ? (
               <View style={[styles.heroBo3RowRight, styles.heroBo3RowOrange]}>
                 <View style={[styles.heroBo3Box, dispTieRight >= 1 && styles.heroBo3FilledOrange]} />
+                {showSecondOrangeBox ? (
+                  <View style={[styles.heroBo3Box, dispTieRight >= 2 && styles.heroBo3FilledOrange]} />
+                ) : null}
               </View>
             ) : null}
             {showHeroBlueRow ? (
@@ -1485,6 +1512,19 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                   officialMs.map(renderDraftRow)
                 )}
               </View>
+            ) : isRoundRobinClassic ? (
+              // round_robin BO3 clásico: no tiene fase mata-mata separada del resto (son los
+              // únicos partidos de la temporada regular hasta que eventualmente hay desempate)
+              // — mismo tratamiento visual azul que "Fase todos contra todos" de
+              // round_robin_bo1_top4, pero con su propio título.
+              <View style={styles.subAccBlue}>
+                <Text style={styles.subTitleSwissBlue}>Cruces</Text>
+                {officialMs.length === 0 ? (
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                ) : (
+                  officialMs.map(renderDraftRow)
+                )}
+              </View>
             ) : (
               <>
                 <Text style={styles.sectionSubtitle}>Partidas oficiales</Text>
@@ -1496,7 +1536,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               </>
             )}
             {showTiebreakSection ? (
-              activeTiebreakGroup?.group_origin === 'round_robin_fourth_place' ? (
+              activeTiebreakGroup?.group_type === 'fourth_place' ? (
                 <View style={[styles.subAccOrange, officialMs.length > 0 && styles.subAccOrangeSpaced]}>
                   <Text style={styles.subTitleSwissOrange}>{tiebreakSectionTitle}</Text>
                   {bracketMatchRow ? null : (
