@@ -354,6 +354,18 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         );
       })}
+
+      <View style={styles.diarySection}>
+        <TouchableOpacity
+          style={styles.diaryBtn}
+          onPress={() => navigation.navigate('WorkspaceDiary', { workspaceId })}
+          accessibilityRole="button"
+          accessibilityLabel="Bugs y sugerencias"
+        >
+          <Text style={styles.diaryBtnIcon}>🐛💡</Text>
+          <Text style={styles.diaryBtnText}>Bugs y sugerencias</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -509,5 +521,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginTop: 2,
+  },
+  diarySection: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+  },
+  diaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingVertical: 12,
+  },
+  diaryBtnIcon: {
+    fontSize: 16,
+  },
+  diaryBtnText: {
+    color: '#374151',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

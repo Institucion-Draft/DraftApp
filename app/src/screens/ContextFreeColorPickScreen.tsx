@@ -122,6 +122,7 @@ export default function ContextFreeColorPickScreen({ navigation, route }: Props)
           match_number: 1,
           starting_life_a: STARTING_LIFE,
           starting_life_b: STARTING_LIFE,
+          started_by_user_id: starterUserId,
         })
         .select('id')
         .single();
@@ -136,7 +137,6 @@ export default function ContextFreeColorPickScreen({ navigation, route }: Props)
         matchId: matchData.id,
         encounterId,
         workspaceId,
-        ...(starterUserId ? { starterUserId } : {}),
       });
     } catch (e) {
       setSaving(false);

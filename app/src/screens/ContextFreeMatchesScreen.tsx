@@ -16,12 +16,15 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
+import { expireStalePresence, splitPresenceByCooldown } from '../lib/playgroundPresence';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeMatches'>;
 
 type PresenceRow = {
   user_id: string;
   is_shiny: boolean;
+  last_match_ended_at: string | null;
+  joined_at: string;
   default_avatars: {
     storage_path: string;
     storage_path_shiny: string | null;
@@ -80,12 +83,13 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
       .from('playground_presence')
       .select(
         `
-        user_id, is_shiny,
+        user_id, is_shiny, last_match_ended_at, joined_at,
         default_avatars ( storage_path, storage_path_shiny ),
         users!playground_presence_user_id_fkey ( username, display_name )
       `
       )
       .eq('workspace_id', workspaceId)
+      .eq('is_active', true)
       .order('joined_at', { ascending: true });
 
     if (error) {
@@ -94,7 +98,13 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
     }
 
     const rows = (data ?? []) as unknown as PresenceRow[];
-    setPairs(buildPairs(rows, user?.id));
+    const { active: activeRows, stale } = splitPresenceByCooldown(rows);
+
+    setPairs(buildPairs(activeRows, user?.id));
+
+    if (stale.length > 0) {
+      void expireStalePresence(workspaceId, stale.map((r) => r.user_id));
+    }
   }, [workspaceId, user?.id]);
 
   useFocusEffect(
