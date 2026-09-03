@@ -308,7 +308,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, current_swiss_round, topcut_format, event_type, starting_life'
+          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, top_size, current_swiss_round, topcut_format, event_type, starting_life'
         )
         .eq('id', p.event_id)
         .maybeSingle(),
@@ -386,6 +386,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const evFlags = eventRes.data as {
       turn_tracking_enabled?: boolean | null;
       competition_format?: string | null;
+      top_size?: number | null;
       current_swiss_round?: number | null;
       topcut_format?: string | null;
       event_type?: string | null;
@@ -403,8 +404,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         ? 'swiss'
         : 'round_robin'
     );
-    setOfficialBo1(evFlags?.competition_format === 'round_robin_bo1_top4');
-    setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin');
+    // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
+    // competition_format='round_robin' + top_size=4 — "todos contra todos con top4" ya no es
+    // un competition_format aparte.
+    const isRoundRobinWithTop4 = evFlags?.competition_format === 'round_robin' && evFlags?.top_size === 4;
+    setOfficialBo1(isRoundRobinWithTop4);
+    setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin' && evFlags?.top_size == null);
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
       csr == null
@@ -557,7 +562,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const historyTopcutOrigin =
       evFlags?.competition_format === 'swiss'
         ? 'swiss_topcut'
-        : evFlags?.competition_format === 'round_robin_bo1_top4'
+        : isRoundRobinWithTop4
           ? 'round_robin_topcut'
           : null;
     if (!hadSwissTopcutBracketPairing && historyTopcutOrigin != null) {

@@ -47,7 +47,8 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled' | 'concluded';
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
-  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | 'round_robin_bo1_top4' | null;
+  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
+  top_size?: number | null;
   giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
@@ -207,7 +208,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -310,7 +311,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const seen = new Set<string>();
     setParticipants(p.filter((ep) => (seen.has(ep.id) ? false : (seen.add(ep.id), true))));
 
-    if (e.status === 'playing' && e.competition_format === 'round_robin_bo1_top4') {
+    if (e.status === 'playing' && e.competition_format === 'round_robin' && e.top_size === 4) {
       const rrPairingsRes = await supabase
         .from('pairings')
         .select('participant_a_id, participant_b_id, official_winner_participant_id')
@@ -400,13 +401,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       }
     }
 
-    // round_robin BO3 clásico: desempate de 1er puesto (0075). compute_event_champion detecta
-    // el empate (2+ líderes en winrate) y solo marca final_pending=true — el cliente arma acá
-    // el grupo con la cascada completa de tanda1/tanda2 de podium.ts (head-to-head → calidad de
-    // rivales → hash), igual patrón que round_robin_bo1_top4 usa arriba para el 4to puesto.
+    // round_robin BO3 clásico (top_size null, sin top4): desempate de 1er puesto (0075).
+    // compute_event_champion detecta el empate (2+ líderes en winrate) y solo marca
+    // final_pending=true — el cliente arma acá el grupo con la cascada completa de
+    // tanda1/tanda2 de podium.ts (head-to-head → calidad de rivales → hash), igual patrón que
+    // round_robin + top_size=4 usa arriba para el 4to puesto. Requiere top_size==null: un evento
+    // con top_size=4 resuelve el campeón vía el bracket de arriba, no por esta vía.
     if (
       e.status === 'playing' &&
       e.competition_format === 'round_robin' &&
+      e.top_size == null &&
       e.final_pending === true &&
       !e.champion_user_id
     ) {
@@ -1832,6 +1836,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {isOrganizer &&
        event.competition_format === 'round_robin' &&
+       event.top_size == null &&
        event.status === 'playing' &&
        Date.now() >= new Date(event.scheduled_for).getTime() + 7 * 24 * 60 * 60 * 1000 ? (
         <View style={styles.block}>
