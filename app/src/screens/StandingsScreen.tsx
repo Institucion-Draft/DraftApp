@@ -819,7 +819,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const fmt = rawFmt === 'swiss' || rawFmt === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
     setIsSwissBo2(rawFmt === 'swiss_bo2');
-    setIsRoundRobinBo1(hasTop4);
+    // EG/EC son redundantes con PG/PJ cuando match_format='bo1' (cada enfrentamiento ES una sola
+    // partida) — aplica igual con o sin top4, son ejes independientes (antes solo miraba
+    // top_size=4, ocultando EG/EC de más para BO2/BO3+top4 y de menos para BO1 sin top).
+    setIsRoundRobinBo1(rawFmt === 'round_robin' && rawMatchFormat === 'bo1');
     setIsRoundRobinBo2(rawFmt === 'round_robin' && rawMatchFormat === 'bo2');
 
     // round_robin con top_size=4 (4to puesto real) O round_robin sin top (1er puesto, 0075):

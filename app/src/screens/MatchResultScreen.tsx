@@ -259,7 +259,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setCompetitionFormat(fmt);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4.
-    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4);
+    setOfficialBo1(
+      eventFlags?.competition_format === 'round_robin' &&
+        eventFlags?.top_size === 4 &&
+        eventFlags?.match_format === 'bo1'
+    );
     const csrRaw = eventFlags?.current_swiss_round;
     const csrNum = csrRaw != null && csrRaw !== '' ? Number(csrRaw) : null;
     setCurrentSwissRound(csrNum != null && Number.isFinite(csrNum) ? csrNum : null);

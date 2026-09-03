@@ -72,10 +72,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Solo round_robin: ON = top_size 4 (antes competition_format='round_robin_bo1_top4'). */
   const [top4, setTop4] = useState(false);
-  /**
-   * Solo round_robin sin top4: BO1/BO2/BO3 de la fase regular (match_format). Con top4 activo
-   * este valor se ignora — match_format sigue forzado a 'bo1' (ver onCreate).
-   */
+  /** Solo round_robin (con o sin top4): BO1/BO2/BO3 de la fase regular (match_format). */
   const [regularMatchFormat, setRegularMatchFormat] = useState<RegularMatchFormat>('bo3');
   /** Suizo o round_robin+top4: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
@@ -176,11 +173,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       // Antes competition_format='round_robin_bo1_top4'; ahora round_robin + top_size=4 (0076).
       insertRow.top_size = 4;
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
-      // Con top4 la fase regular sigue fija en BO1 (comportamiento validado) — el selector de
-      // BO1/BO2/BO3 solo aplica sin top4, ver más abajo.
-      insertRow.match_format = 'bo1';
     }
-    if (competitionFormat === 'round_robin' && !top4) {
+    if (competitionFormat === 'round_robin') {
+      // BO1/BO2/BO3 de la fase regular, independiente de si hay top4 o no.
       insertRow.match_format = regularMatchFormat;
     }
     if (eventType === 'two_headed_giant') {
@@ -296,7 +291,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      {competitionFormat === 'round_robin' && !top4 ? (
+      {competitionFormat === 'round_robin' ? (
         <>
           <Text style={styles.label}>Formato de partidas (fase regular)</Text>
           <View style={styles.segmented}>
