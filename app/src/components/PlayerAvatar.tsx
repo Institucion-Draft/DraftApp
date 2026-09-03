@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   shinyBurstLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'visible',
     zIndex: 999,
   },

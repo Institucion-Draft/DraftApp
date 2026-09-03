@@ -31,6 +31,14 @@ const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] 
   { value: 'swiss_bo2', label: 'Suizo BO2' },
 ];
 
+type RegularMatchFormat = 'bo1' | 'bo2' | 'bo3';
+
+const REGULAR_MATCH_FORMAT_OPTIONS: { value: RegularMatchFormat; label: string }[] = [
+  { value: 'bo1', label: 'BO1' },
+  { value: 'bo2', label: 'BO2' },
+  { value: 'bo3', label: 'BO3' },
+];
+
 const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
@@ -64,6 +72,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Solo round_robin: ON = top_size 4 (antes competition_format='round_robin_bo1_top4'). */
   const [top4, setTop4] = useState(false);
+  /**
+   * Solo round_robin sin top4: BO1/BO2/BO3 de la fase regular (match_format). Con top4 activo
+   * este valor se ignora — match_format sigue forzado a 'bo1' (ver onCreate).
+   */
+  const [regularMatchFormat, setRegularMatchFormat] = useState<RegularMatchFormat>('bo3');
   /** Suizo o round_robin+top4: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
   /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
@@ -163,9 +176,12 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       // Antes competition_format='round_robin_bo1_top4'; ahora round_robin + top_size=4 (0076).
       insertRow.top_size = 4;
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
-      // El oficial es a una sola partida: el trigger update_pairing_official_result
-      // resuelve el pairing con el primer match 'draft' completado.
+      // Con top4 la fase regular sigue fija en BO1 (comportamiento validado) — el selector de
+      // BO1/BO2/BO3 solo aplica sin top4, ver más abajo.
       insertRow.match_format = 'bo1';
+    }
+    if (competitionFormat === 'round_robin' && !top4) {
+      insertRow.match_format = regularMatchFormat;
     }
     if (eventType === 'two_headed_giant') {
       insertRow.giant_randomization_done = false;
@@ -279,6 +295,26 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
         </TouchableOpacity>
       )}
+
+      {competitionFormat === 'round_robin' && !top4 ? (
+        <>
+          <Text style={styles.label}>Formato de partidas (fase regular)</Text>
+          <View style={styles.segmented}>
+            {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
+              const selected = regularMatchFormat === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.segment, selected && styles.segmentSelected]}
+                  onPress={() => setRegularMatchFormat(opt.value)}
+                >
+                  <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
 
       {competitionFormat === 'round_robin' ? (
         <View style={styles.switchRow}>

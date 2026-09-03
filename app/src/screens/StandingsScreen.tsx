@@ -64,6 +64,12 @@ type RowView = {
   eg: number;
   /** Enfrentamientos con BO3 cerrado (ganados o perdidos). */
   ec: number;
+  /** round_robin BO2: enfrentamientos empatados (official_draw=true). */
+  ee: number;
+  /** round_robin BO2: enfrentamientos perdidos. */
+  ep: number;
+  /** round_robin BO2: puntos acumulados (3 por ganado, 1 por empatado, 0 por perdido). */
+  pts: number;
   /** swiss_bo2: partidas individuales finalizadas (match_type='draft', status='completed'). */
   pf: number;
   /** Diferencial medio de vida (sin tracking de turnos); null si no aplica o sin datos. */
@@ -614,7 +620,7 @@ function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
           <Svg
             width={totalW}
             height={cardH}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             pointerEvents="none"
           >
             <Path d={dLeftTop} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
@@ -662,6 +668,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
+  /** True cuando es round_robin con match_format='bo2': tabla con PTS/EG/EE/EP en vez de PG/PJ, sin DMVT ni % E_2-0/E_2-1. */
+  const [isRoundRobinBo2, setIsRoundRobinBo2] = useState(false);
   /** round_robin con top_size=4: participantIds que disputaron el desempate por el 4to puesto (si lo hubo). */
   const [fourthPlaceDisputantIds, setFourthPlaceDisputantIds] = useState<Set<string>>(new Set());
   /** Subconjunto de fourthPlaceDisputantIds que ya perdió su partido dentro de ese desempate. */
@@ -719,7 +727,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, event_type'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -804,6 +812,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     // competition_format='round_robin' + top_size=4. "Todos contra todos con top4" ya no es
     // un competition_format aparte — se distingue leyendo esta columna.
     const rawTopSize = (eventRes.data as { top_size?: number | null } | null)?.top_size ?? null;
+    const rawMatchFormat = (eventRes.data as { match_format?: string | null } | null)?.match_format;
     const hasTop4 = rawFmt === 'round_robin' && rawTopSize === 4;
     // swiss_bo2 se muestra igual que swiss (Pts / OMW% / GW%, top cut, campeón).
     // Los puntos ya vienen calculados por swiss_bo2_points_of en la columna swiss_points.
@@ -811,6 +820,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setCompetitionFormat(fmt);
     setIsSwissBo2(rawFmt === 'swiss_bo2');
     setIsRoundRobinBo1(hasTop4);
+    setIsRoundRobinBo2(rawFmt === 'round_robin' && rawMatchFormat === 'bo2');
 
     // round_robin con top_size=4 (4to puesto real) O round_robin sin top (1er puesto, 0075):
     // resaltar en la tabla a quienes disputaron el desempate (si el evento tuvo uno). Query
@@ -973,7 +983,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     setEventChampionIsShiny(!!championPart?.is_shiny);
     const totalPairings = pairings.length;
     const resolvedPairings = pairings.filter(
-      (pr: any) => pr.official_winner_participant_id != null
+      (pr: any) => pr.official_winner_participant_id != null || pr.official_draw === true
     ).length;
     let torneoLine: string | null = null;
     if (
@@ -984,35 +994,40 @@ export default function StandingsScreen({ route, navigation }: Props) {
       torneoLine = `Completitud: ${formatPctOneDecimal(frac)} (${resolvedPairings}/${totalPairings})`;
     }
 
-    let bo3TwoZero = 0;
-    let bo3TwoOne = 0;
-    for (const pr of pairings as { id: string; official_winner_participant_id: string | null }[]) {
-      if (pr.official_winner_participant_id == null) continue;
-      const officialCompleted = matches.filter(
-        (m: any) =>
-          m.pairing_id === pr.id &&
-          m.status === 'completed' &&
-          (m.match_type === 'draft' || m.match_type === 'final')
-      ).length;
-      if (officialCompleted === 2) bo3TwoZero += 1;
-      else if (officialCompleted === 3) bo3TwoOne += 1;
-    }
-    const bo3ClosedTotal = bo3TwoZero + bo3TwoOne;
+    // % E_2-0/E_2-1 es específico de BO3 (partidas individuales por pairing): en BO2 un
+    // pairing siempre cierra con exactamente 2 partidas jugadas (gane o empate), así que estos
+    // porcentajes no tienen sentido — se omiten para match_format='bo2'.
     let bo3Footer: Bo3Footer | null = null;
-    if (bo3ClosedTotal > 0) {
-      const pct20 = formatPctOneDecimal(bo3TwoZero / bo3ClosedTotal);
-      const pct21 = formatPctOneDecimal(bo3TwoOne / bo3ClosedTotal);
-      let bold20 = false;
-      let bold21 = false;
-      if (bo3TwoZero === bo3TwoOne) {
-        bold20 = true;
-        bold21 = true;
-      } else if (bo3TwoZero > bo3TwoOne) {
-        bold20 = true;
-      } else {
-        bold21 = true;
+    if (rawMatchFormat !== 'bo2') {
+      let bo3TwoZero = 0;
+      let bo3TwoOne = 0;
+      for (const pr of pairings as { id: string; official_winner_participant_id: string | null }[]) {
+        if (pr.official_winner_participant_id == null) continue;
+        const officialCompleted = matches.filter(
+          (m: any) =>
+            m.pairing_id === pr.id &&
+            m.status === 'completed' &&
+            (m.match_type === 'draft' || m.match_type === 'final')
+        ).length;
+        if (officialCompleted === 2) bo3TwoZero += 1;
+        else if (officialCompleted === 3) bo3TwoOne += 1;
       }
-      bo3Footer = { pct20, pct21, bold20, bold21 };
+      const bo3ClosedTotal = bo3TwoZero + bo3TwoOne;
+      if (bo3ClosedTotal > 0) {
+        const pct20 = formatPctOneDecimal(bo3TwoZero / bo3ClosedTotal);
+        const pct21 = formatPctOneDecimal(bo3TwoOne / bo3ClosedTotal);
+        let bold20 = false;
+        let bold21 = false;
+        if (bo3TwoZero === bo3TwoOne) {
+          bold20 = true;
+          bold21 = true;
+        } else if (bo3TwoZero > bo3TwoOne) {
+          bold20 = true;
+        } else {
+          bold21 = true;
+        }
+        bo3Footer = { pct20, pct21, bold20, bold21 };
+      }
     }
     setEventFooter({ torneo: torneoLine, bo3: bo3Footer });
 
@@ -1034,7 +1049,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const pgOff = officialDone.filter((m: any) => m.winner_participant_id === pid).length;
       const pjOff = officialDone.length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
-      const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
+      const ec = playerPairings.filter(
+        (pr: any) => pr.official_winner_participant_id != null || pr.official_draw === true
+      ).length;
       return {
         participantId: pid,
         userId,
@@ -1051,7 +1068,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     });
 
     const pairingRemain = (pairings as any[])
-      .filter((pr) => pr.official_winner_participant_id == null)
+      .filter((pr) => pr.official_winner_participant_id == null && pr.official_draw !== true)
       .map((pr: any) => ({
         participantAId: String(pr.participant_a_id),
         participantBId: String(pr.participant_b_id),
@@ -1216,7 +1233,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
         (m: any) => m.match_type === 'draft' && m.status === 'completed'
       ).length;
       const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
-      const ec = playerPairings.filter((pr: any) => pr.official_winner_participant_id != null).length;
+      const ec = playerPairings.filter(
+        (pr: any) => pr.official_winner_participant_id != null || pr.official_draw === true
+      ).length;
+      // round_robin BO2: enfrentamientos empatados/perdidos y puntos (3/1/0).
+      const ee = playerPairings.filter((pr: any) => pr.official_draw === true).length;
+      const ep = playerPairings.filter(
+        (pr: any) => pr.official_winner_participant_id != null && pr.official_winner_participant_id !== pid
+      ).length;
+      const pts = eg * 3 + ee;
       const inProgress = playerMatches.some(
         (m: any) =>
           m.status === 'in_progress' && (m.match_type === 'draft' || m.match_type === 'final')
@@ -1288,6 +1313,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
         pj,
         eg,
         ec,
+        ee,
+        ep,
+        pts,
         pf,
         dmv,
         dmvt,
@@ -1334,17 +1362,44 @@ export default function StandingsScreen({ route, navigation }: Props) {
       // cutoffPosition=0 para el caso sin top (frontera = 1er puesto); con top_size=4 no
       // importa el valor acá — solo se usa `standings`, no `cutoffTieGroup` (el cutoff real de
       // top4 lo calcula EventDetailScreen aparte).
+      // BO1/BO3 = 1 punto por pairing ganado (r.eg); BO2 = 3 por ganado, 1 por empate
+      // (official_draw=true) — ver pointsAwardedTo en podium.ts.
+      const isBo2 = rawMatchFormat === 'bo2';
+      const pointsByParticipant = new Map<string, number>();
+      for (const r of rowsBuilt) pointsByParticipant.set(r.participantId, isBo2 ? 0 : r.eg);
+      if (isBo2) {
+        for (const pr of pairings as any[]) {
+          const w = pr.official_winner_participant_id as string | null;
+          if (w != null) {
+            pointsByParticipant.set(w, (pointsByParticipant.get(w) ?? 0) + 3);
+          } else if (pr.official_draw) {
+            const a = String(pr.participant_a_id);
+            const b = String(pr.participant_b_id);
+            pointsByParticipant.set(a, (pointsByParticipant.get(a) ?? 0) + 1);
+            pointsByParticipant.set(b, (pointsByParticipant.get(b) ?? 0) + 1);
+          }
+        }
+      }
       const standingInputs: RoundRobinStandingInput[] = rowsBuilt.map((r) => ({
         participantId: r.participantId,
-        points: r.eg,
+        points: pointsByParticipant.get(r.participantId) ?? 0,
         leftEventAt: r.leftEventAt,
       }));
-      const pairingResultsForRanking: RoundRobinPairingResult[] = (pairings as any[]).map((pr) => ({
-        participantAId: String(pr.participant_a_id),
-        participantBId: String(pr.participant_b_id),
-        winnerParticipantId:
-          pr.official_winner_participant_id != null ? String(pr.official_winner_participant_id) : null,
-      }));
+      const pairingResultsForRanking: RoundRobinPairingResult[] = (pairings as any[]).map((pr) => {
+        const winnerParticipantId =
+          pr.official_winner_participant_id != null ? String(pr.official_winner_participant_id) : null;
+        const isDraw = winnerParticipantId == null && !!pr.official_draw;
+        const winnerIsA = winnerParticipantId === String(pr.participant_a_id);
+        const winnerIsB = winnerParticipantId === String(pr.participant_b_id);
+        return {
+          participantAId: String(pr.participant_a_id),
+          participantBId: String(pr.participant_b_id),
+          winnerParticipantId,
+          isDraw,
+          pointsA: isBo2 ? (winnerIsA ? 3 : isDraw ? 1 : 0) : winnerIsA ? 1 : 0,
+          pointsB: isBo2 ? (winnerIsB ? 3 : isDraw ? 1 : 0) : winnerIsB ? 1 : 0,
+        };
+      });
       const { standings } = computeFinalStandingsWithTiebreakSplit(
         standingInputs,
         pairingResultsForRanking,
@@ -1710,6 +1765,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   <Text style={[styles.cell, styles.statCol]}>PF</Text>
                 ) : null}
               </>
+            ) : isRoundRobinBo2 ? (
+              <>
+                <Text style={[styles.cell, styles.statCol]}>Pts</Text>
+                <Text style={[styles.cell, styles.statCol]}>EG</Text>
+                <Text style={[styles.cell, styles.statCol]}>EE</Text>
+                <Text style={[styles.cell, styles.statCol]}>EP</Text>
+              </>
             ) : (
               <>
                 <Text style={[styles.cell, styles.statCol]}>PG</Text>
@@ -1722,7 +1784,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 ) : null}
               </>
             )}
-            {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
+            {!isSwissBo2 && !isRoundRobinBo2 && eventTypeStored !== 'two_headed_giant' ? (
               <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
             ) : null}
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
@@ -1811,6 +1873,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
                     <Text style={[styles.cell, styles.statCol]}>{r.pf}</Text>
                   ) : null}
                 </>
+              ) : isRoundRobinBo2 ? (
+                <>
+                  <Text style={[styles.cell, styles.statCol]}>{r.pts}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.eg}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.ee}</Text>
+                  <Text style={[styles.cell, styles.statCol]}>{r.ep}</Text>
+                </>
               ) : (
                 <>
                   <Text style={[styles.cell, styles.statCol]}>{r.pg}</Text>
@@ -1823,7 +1892,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   ) : null}
                 </>
               )}
-              {!isSwissBo2 && eventTypeStored !== 'two_headed_giant' ? (
+              {!isSwissBo2 && !isRoundRobinBo2 && eventTypeStored !== 'two_headed_giant' ? (
                 <Text
                   style={[
                     styles.cell,
@@ -1931,7 +2000,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
                       ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
                       : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
                   ).split(' · ')
-              : [
+              : isRoundRobinBo2
+                ? 'Pts: Puntos (victoria=3, empate=1, derrota=0) · EG: Enfrentamientos Ganados · EE: Enfrentamientos Empatados · EP: Enfrentamientos Perdidos · TMP: Tiempo Medio por Partida'.split(
+                    ' · '
+                  )
+                : [
                   ...(
                     turnTrackingEnabled
                       ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
@@ -1953,7 +2026,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             <View style={styles.legendWrap}>
               {segments.map((segment, i) => (
                 <Text key={i} style={styles.legendSegment}>
-                  {tab === 'official' && competitionFormat === 'swiss'
+                  {tab === 'official' && (competitionFormat === 'swiss' || isRoundRobinBo2)
                     ? `· ${segment}`
                     : i > 0
                       ? `· ${segment}`
@@ -1983,7 +2056,7 @@ const styles = StyleSheet.create({
   },
   swissChampionBannerText: { fontSize: 17, fontWeight: '800', color: '#111827', textAlign: 'center' },
   confettiOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 40,
     elevation: 12,
   },

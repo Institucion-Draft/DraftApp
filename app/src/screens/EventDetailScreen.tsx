@@ -49,6 +49,7 @@ type EventRow = {
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
   competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
   top_size?: number | null;
+  match_format?: 'bo1' | 'bo2' | 'bo3' | null;
   giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
@@ -208,7 +209,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -314,36 +315,55 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     if (e.status === 'playing' && e.competition_format === 'round_robin' && e.top_size === 4) {
       const rrPairingsRes = await supabase
         .from('pairings')
-        .select('participant_a_id, participant_b_id, official_winner_participant_id')
+        .select('participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
         .eq('event_id', e.id);
       if (!rrPairingsRes.error && rrPairingsRes.data) {
         const rrPairings = rrPairingsRes.data as {
           participant_a_id: string;
           participant_b_id: string;
           official_winner_participant_id: string | null;
+          official_draw: boolean;
         }[];
-        // Disparador único: fase regular 100% resuelta (0 pairings sin ganador).
+        const isBo2 = e.match_format === 'bo2';
+        // Disparador único: fase regular 100% resuelta (0 pairings sin ganador ni empate).
         // Sin proyecciones de "quién puede llegar todavía" — solo se arma con el torneo
         // terminado. Los RPCs son idempotentes (no crean un segundo grupo/bracket si ya existe).
         const allResolved =
-          rrPairings.length > 0 && rrPairings.every((pr) => pr.official_winner_participant_id != null);
+          rrPairings.length > 0 &&
+          rrPairings.every((pr) => pr.official_winner_participant_id != null || pr.official_draw);
         if (allResolved) {
-          const winsByParticipant: Record<string, number> = {};
-          for (const part of p) winsByParticipant[part.id] = 0;
+          // BO1/BO3 = 1 punto por pairing ganado; BO2 = 3 por ganado, 1 por empate.
+          const pointsByParticipant: Record<string, number> = {};
+          for (const part of p) pointsByParticipant[part.id] = 0;
           for (const pr of rrPairings) {
             const w = pr.official_winner_participant_id;
-            if (w != null) winsByParticipant[w] = (winsByParticipant[w] ?? 0) + 1;
+            if (w != null) {
+              pointsByParticipant[w] = (pointsByParticipant[w] ?? 0) + (isBo2 ? 3 : 1);
+            } else if (isBo2 && pr.official_draw) {
+              pointsByParticipant[pr.participant_a_id] = (pointsByParticipant[pr.participant_a_id] ?? 0) + 1;
+              pointsByParticipant[pr.participant_b_id] = (pointsByParticipant[pr.participant_b_id] ?? 0) + 1;
+            }
           }
           const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
             participantId: part.id,
-            points: winsByParticipant[part.id] ?? 0,
+            points: pointsByParticipant[part.id] ?? 0,
             leftEventAt: part.left_event_at,
           }));
-          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
-            participantAId: pr.participant_a_id,
-            participantBId: pr.participant_b_id,
-            winnerParticipantId: pr.official_winner_participant_id,
-          }));
+          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => {
+            const isDraw = pr.official_winner_participant_id == null && pr.official_draw;
+            const winnerIsA = pr.official_winner_participant_id === pr.participant_a_id;
+            const winnerIsB = pr.official_winner_participant_id === pr.participant_b_id;
+            const pointsA = isBo2 ? (winnerIsA ? 3 : isDraw ? 1 : 0) : winnerIsA ? 1 : 0;
+            const pointsB = isBo2 ? (winnerIsB ? 3 : isDraw ? 1 : 0) : winnerIsB ? 1 : 0;
+            return {
+              participantAId: pr.participant_a_id,
+              participantBId: pr.participant_b_id,
+              winnerParticipantId: pr.official_winner_participant_id,
+              isDraw,
+              pointsA,
+              pointsB,
+            };
+          });
           const { standings, fourthPlaceTieGroup } = computeFinalStandingsWithTiebreakSplit(
             standingInputs,
             pairingResults
@@ -414,58 +434,94 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       e.final_pending === true &&
       !e.champion_user_id
     ) {
+      console.log('[BO2_DEBUG] bloque 1er puesto: condición cumplida', {
+        eventId: e.id,
+        matchFormat: e.match_format,
+        finalPending: e.final_pending,
+        championUserId: e.champion_user_id,
+      });
       const existingFirstPlaceGroupRes = await supabase
         .from('event_tiebreak_groups')
         .select('id')
         .eq('event_id', e.id)
         .eq('group_origin', 'round_robin_first_place')
         .maybeSingle();
+      console.log('[BO2_DEBUG] existingFirstPlaceGroupRes', existingFirstPlaceGroupRes);
       if (!existingFirstPlaceGroupRes.error && !existingFirstPlaceGroupRes.data) {
         const rrPairingsRes = await supabase
           .from('pairings')
-          .select('participant_a_id, participant_b_id, official_winner_participant_id')
+          .select('participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
           .eq('event_id', e.id);
+        console.log('[BO2_DEBUG] rrPairingsRes', rrPairingsRes);
         if (!rrPairingsRes.error && rrPairingsRes.data) {
           const rrPairings = rrPairingsRes.data as {
             participant_a_id: string;
             participant_b_id: string;
             official_winner_participant_id: string | null;
+            official_draw: boolean;
           }[];
-          const winsByParticipant: Record<string, number> = {};
-          for (const part of p) winsByParticipant[part.id] = 0;
+          const isBo2 = e.match_format === 'bo2';
+          console.log('[BO2_DEBUG] isBo2', isBo2, 'e.match_format', e.match_format);
+          const pointsByParticipant: Record<string, number> = {};
+          for (const part of p) pointsByParticipant[part.id] = 0;
           for (const pr of rrPairings) {
             const w = pr.official_winner_participant_id;
-            if (w != null) winsByParticipant[w] = (winsByParticipant[w] ?? 0) + 1;
+            if (w != null) {
+              pointsByParticipant[w] = (pointsByParticipant[w] ?? 0) + (isBo2 ? 3 : 1);
+            } else if (isBo2 && pr.official_draw) {
+              pointsByParticipant[pr.participant_a_id] = (pointsByParticipant[pr.participant_a_id] ?? 0) + 1;
+              pointsByParticipant[pr.participant_b_id] = (pointsByParticipant[pr.participant_b_id] ?? 0) + 1;
+            }
           }
+          console.log('[BO2_DEBUG] pointsByParticipant', pointsByParticipant);
           const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
             participantId: part.id,
-            points: winsByParticipant[part.id] ?? 0,
+            points: pointsByParticipant[part.id] ?? 0,
             leftEventAt: part.left_event_at,
           }));
-          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => ({
-            participantAId: pr.participant_a_id,
-            participantBId: pr.participant_b_id,
-            winnerParticipantId: pr.official_winner_participant_id,
-          }));
+          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => {
+            const isDraw = pr.official_winner_participant_id == null && pr.official_draw;
+            const winnerIsA = pr.official_winner_participant_id === pr.participant_a_id;
+            const winnerIsB = pr.official_winner_participant_id === pr.participant_b_id;
+            const pointsA = isBo2 ? (winnerIsA ? 3 : isDraw ? 1 : 0) : winnerIsA ? 1 : 0;
+            const pointsB = isBo2 ? (winnerIsB ? 3 : isDraw ? 1 : 0) : winnerIsB ? 1 : 0;
+            return {
+              participantAId: pr.participant_a_id,
+              participantBId: pr.participant_b_id,
+              winnerParticipantId: pr.official_winner_participant_id,
+              isDraw,
+              pointsA,
+              pointsB,
+            };
+          });
+          console.log('[BO2_DEBUG] standingInputs', standingInputs);
+          console.log('[BO2_DEBUG] pairingResults', pairingResults);
           // cutoffPosition=0: la frontera es el 1er puesto (índice 0-based), no el 4to.
           const { cutoffTieGroup } = computeFinalStandingsWithTiebreakSplit(
             standingInputs,
             pairingResults,
             0
           );
+          console.log('[BO2_DEBUG] cutoffTieGroup', cutoffTieGroup);
           if (cutoffTieGroup.length > 1) {
             // computeFourthPlaceTiebreakBracket soporta grupos de 2/3/4; con 5+ recorta a los 4
             // mejor ordenados por tanda1 antes de armar los partidos (cutoffTieGroup ya viene en
             // ese orden — es un subarray de `standings`).
             const tied = cutoffTieGroup.length > 4 ? cutoffTieGroup.slice(0, 4) : cutoffTieGroup;
             const { matches } = computeFourthPlaceTiebreakBracket(tied, pairingResults);
+            console.log('[BO2_DEBUG] tied', tied, 'matches', matches);
             if (matches.length > 0) {
-              await supabase.rpc('create_round_robin_first_place_tiebreak_group', {
+              const rpcRes = await supabase.rpc('create_round_robin_first_place_tiebreak_group', {
                 p_event_id: e.id,
                 p_matches: matches,
                 p_tied_participants_ordered: tied,
               });
+              console.log('[BO2_DEBUG] create_round_robin_first_place_tiebreak_group RPC result', rpcRes);
+            } else {
+              console.log('[BO2_DEBUG] matches.length === 0, no se llama al RPC');
             }
+          } else {
+            console.log('[BO2_DEBUG] cutoffTieGroup.length <= 1, no hay empate detectado en el cliente');
           }
         }
       }
@@ -682,11 +738,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     ) {
       const prRes = await supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
         .eq('event_id', e.id);
       if (!prRes.error && prRes.data) {
         const playerIds = p.map((x) => x.id);
-        const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, prRes.data as PairingSummary[]);
+        const isBo2 = e.competition_format === 'round_robin' && e.match_format === 'bo2';
+        const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, prRes.data as PairingSummary[], isBo2);
         if (leaders) {
           const row = prRes.data.find((pr) =>
             pairingIsBetweenParticipants(pr as PairingSummary, leaders[0], leaders[1])
