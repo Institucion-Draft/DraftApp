@@ -660,9 +660,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   /** True cuando el formato real es swiss_bo2 (mapeado a 'swiss' para comportamiento, separado para display). */
   const [isSwissBo2, setIsSwissBo2] = useState(false);
-  /** True cuando el formato real es round_robin_bo1_top4: sin EG/EC (no hay BO3 en fase regular). */
+  /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
-  /** round_robin_bo1_top4: participantIds que disputaron el desempate por el 4to puesto (si lo hubo). */
+  /** round_robin con top_size=4: participantIds que disputaron el desempate por el 4to puesto (si lo hubo). */
   const [fourthPlaceDisputantIds, setFourthPlaceDisputantIds] = useState<Set<string>>(new Set());
   /** Subconjunto de fourthPlaceDisputantIds que ya perdió su partido dentro de ese desempate. */
   const [fourthPlaceEliminatedIds, setFourthPlaceEliminatedIds] = useState<Set<string>>(new Set());
@@ -719,7 +719,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, event_type'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, event_type'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -800,21 +800,26 @@ export default function StandingsScreen({ route, navigation }: Props) {
     )?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
     const rawFmt = (eventRes.data as { competition_format?: string | null } | null)?.competition_format;
+    // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
+    // competition_format='round_robin' + top_size=4. "Todos contra todos con top4" ya no es
+    // un competition_format aparte — se distingue leyendo esta columna.
+    const rawTopSize = (eventRes.data as { top_size?: number | null } | null)?.top_size ?? null;
+    const hasTop4 = rawFmt === 'round_robin' && rawTopSize === 4;
     // swiss_bo2 se muestra igual que swiss (Pts / OMW% / GW%, top cut, campeón).
     // Los puntos ya vienen calculados por swiss_bo2_points_of en la columna swiss_points.
     const fmt = rawFmt === 'swiss' || rawFmt === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
     setIsSwissBo2(rawFmt === 'swiss_bo2');
-    setIsRoundRobinBo1(rawFmt === 'round_robin_bo1_top4');
+    setIsRoundRobinBo1(hasTop4);
 
-    // round_robin_bo1_top4 (4to puesto real) O round_robin BO3 clásico (1er puesto, 0075):
+    // round_robin con top_size=4 (4to puesto real) O round_robin sin top (1er puesto, 0075):
     // resaltar en la tabla a quienes disputaron el desempate (si el evento tuvo uno). Query
-    // dedicada e independiente de tiebreakGroupRes de arriba: para round_robin_bo1_top4 ese
-    // trae "el" grupo más reciente por event_id (limit 1), que una vez resuelto el desempate
-    // de 4to puesto queda reemplazado por el bracket real de top4 recién creado — este
-    // resaltado necesita el grupo fourth_place puntualmente, exista o no todavía uno más nuevo
-    // (round_robin clásico no tiene ese problema — nunca hay un grupo posterior — pero usamos
-    // la misma query dedicada por consistencia).
+    // dedicada e independiente de tiebreakGroupRes de arriba: con top_size=4 ese trae "el"
+    // grupo más reciente por event_id (limit 1), que una vez resuelto el desempate de 4to
+    // puesto queda reemplazado por el bracket real de top4 recién creado — este resaltado
+    // necesita el grupo fourth_place puntualmente, exista o no todavía uno más nuevo (sin top
+    // no tiene ese problema — nunca hay un grupo posterior — pero usamos la misma query
+    // dedicada por consistencia).
     // Los eliminados salen de event_tiebreak_bracket_matches (filas ya jugables/resueltas), pero
     // los disputantes NO: esa tabla no tiene fila para quien tiene bye hasta que se resuelve el
     // primer partido (el patrón de "insertar recién cuando la dependencia está lista", ver
@@ -827,9 +832,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const newFourthPlaceDisputantIds = new Set<string>();
     const newFourthPlaceEliminatedIds = new Set<string>();
     const tiebreakDisputeGroupOrigin =
-      rawFmt === 'round_robin_bo1_top4'
+      hasTop4
         ? 'round_robin_fourth_place'
-        : rawFmt === 'round_robin'
+        : rawFmt === 'round_robin' && rawTopSize == null
           ? 'round_robin_first_place'
           : null;
     if (tiebreakDisputeGroupOrigin) {
@@ -1152,7 +1157,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         polemicaWinners,
         recognitionWinners,
         podiumBracketMatches,
-        rawFmt
+        rawFmt,
+        rawTopSize
       )
     );
 
@@ -1317,17 +1323,17 @@ export default function StandingsScreen({ route, navigation }: Props) {
         // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
         return a.userId.localeCompare(b.userId);
       });
-    } else if (rawFmt === 'round_robin_bo1_top4' || rawFmt === 'round_robin') {
-      // Mismo orden que decide el desempate jugable de este modo (round_robin_bo1_top4: el
-      // bracket de top4, ver EventDetailScreen; round_robin BO3 clásico: el desempate de 1er
-      // puesto, ver 0075): desempate olímpico (head-to-head) → calidad de rivales → hash
-      // determinístico. El sort de winrate+DMV de abajo NO es equivalente acá: en ambos formatos
-      // eg/ec y pg/pj pueden coincidir o casi coincidir entre empatados, así que el desempate
-      // real terminaba siendo winrate de partidas individuales o DMV — sin relación con el
-      // criterio que realmente decide el desempate/bracket, dando un orden distinto en empates
-      // (ver bug reportado). cutoffPosition=0 para round_robin (frontera = 1er puesto); para
-      // round_robin_bo1_top4 no importa el valor acá — solo se usa `standings`, no
-      // `cutoffTieGroup` (el cutoff real de top4 lo calcula EventDetailScreen aparte).
+    } else if (rawFmt === 'round_robin') {
+      // Mismo orden que decide el desempate jugable de este modo (con top_size=4: el bracket de
+      // top4, ver EventDetailScreen; sin top: el desempate de 1er puesto, ver 0075): desempate
+      // olímpico (head-to-head) → calidad de rivales → hash determinístico. El sort de
+      // winrate+DMV de abajo NO es equivalente acá: en ambos casos eg/ec y pg/pj pueden
+      // coincidir o casi coincidir entre empatados, así que el desempate real terminaba siendo
+      // winrate de partidas individuales o DMV — sin relación con el criterio que realmente
+      // decide el desempate/bracket, dando un orden distinto en empates (ver bug reportado).
+      // cutoffPosition=0 para el caso sin top (frontera = 1er puesto); con top_size=4 no
+      // importa el valor acá — solo se usa `standings`, no `cutoffTieGroup` (el cutoff real de
+      // top4 lo calcula EventDetailScreen aparte).
       const standingInputs: RoundRobinStandingInput[] = rowsBuilt.map((r) => ({
         participantId: r.participantId,
         points: r.eg,
@@ -1933,7 +1939,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   ).split(' · '),
                   'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
                   'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
-                  // round_robin_bo1_top4: sin métricas de BO3 en la fase regular.
+                  // round_robin con top_size=4: sin métricas de BO3 en la fase regular.
                 ].filter(
                   (s) =>
                     !isRoundRobinBo1 ||

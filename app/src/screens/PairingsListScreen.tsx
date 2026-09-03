@@ -322,7 +322,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('status, competition_format, current_swiss_round, event_type')
+        .select('status, competition_format, top_size, current_swiss_round, event_type')
         .eq('id', eventId)
         .maybeSingle(),
       supabase
@@ -367,6 +367,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const eventStatus = eventRes.data?.status as string | undefined;
     const eventFlags = eventRes.data as {
       competition_format?: string | null;
+      top_size?: number | null;
       current_swiss_round?: number | null;
       event_type?: string | null;
     } | null;
@@ -377,7 +378,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         ? 'swiss'
         : 'round_robin';
     setCompetitionFormat(competitionFormat);
-    setOfficialBo1(eventFlags?.competition_format === 'round_robin_bo1_top4');
+    // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
+    // competition_format='round_robin' + top_size=4.
+    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4);
     const csrRaw = eventFlags?.current_swiss_round;
     const currentSwissRound: number | null =
       csrRaw == null

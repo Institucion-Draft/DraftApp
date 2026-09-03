@@ -954,12 +954,14 @@ export function computePodium(
   polemicaWinners?: string[] | null,
   recognitionWinners?: string[] | null,
   bracketMatches?: BracketMatchPodiumInput[] | null,
-  competitionFormat?: string | null
+  competitionFormat?: string | null,
+  topSize?: number | null
 ): PodiumState {
-  // round_robin_bo1_top4: el único podio válido sale del bracket (podiumBracketFinalMode).
-  // Sin bracket creado todavía, podio vacío — nunca proyectar desde la tabla BO1 (ni
-  // podiumPendingMode, podiumSettledMode, ni campeón declarado aplican a este formato).
-  if (competitionFormat === 'round_robin_bo1_top4' && activeTiebreakGroup == null) {
+  // round_robin + top_size=4 (antes 'round_robin_bo1_top4', ver 0076): el único podio válido
+  // sale del bracket (podiumBracketFinalMode). Sin bracket creado todavía, podio vacío — nunca
+  // proyectar desde la tabla BO1 (ni podiumPendingMode, podiumSettledMode, ni campeón declarado
+  // aplican a este formato).
+  if (competitionFormat === 'round_robin' && topSize === 4 && activeTiebreakGroup == null) {
     return {
       steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
       spectators: participants,

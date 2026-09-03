@@ -22,15 +22,16 @@ import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2' | 'round_robin_bo1_top4';
+type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
 
 const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
-function getCompetitionFormatLabel(f: CompetitionFormat): string {
+function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null): string {
   if (f === 'swiss') return 'Suizo';
   if (f === 'swiss_bo2') return 'Suizo BO2';
-  if (f === 'round_robin_bo1_top4') return 'Todos vs todos + Top 4';
+  // round_robin + top_size=4: antes competition_format='round_robin_bo1_top4' (0076).
+  if (f === 'round_robin' && topSize === 4) return 'Todos vs todos + Top 4';
   return 'Todos contra todos';
 }
 
@@ -73,6 +74,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
+  /** Solo round_robin; read-only, igual que competitionFormat. */
+  const [topSize, setTopSize] = useState<number | null>(null);
   const [eventType, setEventType] = useState<EventType>('draft');
   const [status, setStatus] = useState<EventStatus>('scheduled');
   const [scheduledFor, setScheduledFor] = useState(new Date());
@@ -107,7 +110,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const { data, error } = await supabase
         .from('draft_events')
         .select(
-          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, topcut_format, swiss_rounds_manual, starting_life'
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, top_size, topcut_format, swiss_rounds_manual, starting_life'
         )
         .eq('id', eventId)
         .maybeSingle();
@@ -122,13 +125,12 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const row = data as any;
       setWorkspaceId(row.workspace_id);
       setName(row.name);
-      const rawCf = (row.competition_format as CompetitionFormat | null | undefined) ?? 'round_robin';
-      const cf: CompetitionFormat =
-        rawCf === 'swiss' ? 'swiss'
-        : rawCf === 'swiss_bo2' ? 'swiss_bo2'
-        : rawCf === 'round_robin_bo1_top4' ? 'round_robin_bo1_top4'
-        : 'round_robin';
+      const rawCf = (row.competition_format as string | null | undefined) ?? 'round_robin';
+      const cf: CompetitionFormat = rawCf === 'swiss' ? 'swiss' : rawCf === 'swiss_bo2' ? 'swiss_bo2' : 'round_robin';
       setCompetitionFormat(cf);
+      const ts = typeof row.top_size === 'number' ? row.top_size : null;
+      setTopSize(ts);
+      const isTop4 = cf === 'round_robin' && ts === 4;
       const roundsManual =
         typeof row.swiss_rounds_manual === 'number' && row.swiss_rounds_manual >= 3 && row.swiss_rounds_manual <= 5
           ? row.swiss_rounds_manual
@@ -154,8 +156,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setStartingLife(sl);
 
       let swissTopcutBracketLocked = false;
-      if (cf === 'swiss' || cf === 'swiss_bo2' || cf === 'round_robin_bo1_top4') {
-        const bracketOrigin = cf === 'round_robin_bo1_top4' ? 'round_robin_topcut' : 'swiss_topcut';
+      if (cf === 'swiss' || cf === 'swiss_bo2' || isTop4) {
+        const bracketOrigin = isTop4 ? 'round_robin_topcut' : 'swiss_topcut';
         const grpRes = await supabase
           .from('event_tiebreak_groups')
           .select('id')
@@ -332,7 +334,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
       patch.venue_id = venueId;
     }
     if (
-      (competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || competitionFormat === 'round_robin_bo1_top4') &&
+      (competitionFormat === 'swiss' ||
+        competitionFormat === 'swiss_bo2' ||
+        (competitionFormat === 'round_robin' && topSize === 4)) &&
       !topcutFormatLocked
     ) {
       patch.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
@@ -405,11 +409,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
       <Text style={styles.label}>Formato de competición</Text>
       <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
-        <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getCompetitionFormatLabel(competitionFormat)}</Text>
+        <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getCompetitionFormatLabel(competitionFormat, topSize)}</Text>
       </View>
       <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
 
-      {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || competitionFormat === 'round_robin_bo1_top4' ? (
+      {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>
           <View style={styles.turnTrackingRow}>
             <Text style={styles.turnTrackingLabel}>Eliminatorias BO3</Text>

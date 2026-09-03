@@ -23,11 +23,10 @@ import { getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2' | 'round_robin_bo1_top4';
+type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
-  { value: 'round_robin_bo1_top4', label: 'Todos vs todos + Top 4' },
   { value: 'swiss', label: 'Suizo' },
   { value: 'swiss_bo2', label: 'Suizo BO2' },
 ];
@@ -63,7 +62,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [name, setName] = useState('');
   const [eventType, setEventType] = useState<EventType>('draft');
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
-  /** Solo suizo: ON = topcut_format bo3, OFF = bo1. */
+  /** Solo round_robin: ON = top_size 4 (antes competition_format='round_robin_bo1_top4'). */
+  const [top4, setTop4] = useState(false);
+  /** Suizo o round_robin+top4: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
   /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
@@ -85,6 +86,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (eventType === 'two_headed_giant') {
       setCompetitionFormat('round_robin');
+      setTop4(false);
       setStartingLife(30);
     } else {
       setStartingLife(20);
@@ -157,7 +159,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
       insertRow.swiss_rounds_manual = swissRoundsManual;
     }
-    if (competitionFormat === 'round_robin_bo1_top4') {
+    if (competitionFormat === 'round_robin' && top4) {
+      // Antes competition_format='round_robin_bo1_top4'; ahora round_robin + top_size=4 (0076).
+      insertRow.top_size = 4;
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
       // El oficial es a una sola partida: el trigger update_pairing_official_result
       // resuelve el pairing con el primer match 'draft' completado.
@@ -276,7 +280,14 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      {competitionFormat === 'swiss' || competitionFormat === 'round_robin_bo1_top4' ? (
+      {competitionFormat === 'round_robin' ? (
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>Top 4</Text>
+          <Switch value={top4} onValueChange={setTop4} />
+        </View>
+      ) : null}
+
+      {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4) ? (
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
           <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />

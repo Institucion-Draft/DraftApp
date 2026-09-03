@@ -244,7 +244,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const { data: evRow } = await supabase
       .from('draft_events')
-      .select('workspace_id, competition_format, event_type')
+      .select('workspace_id, competition_format, top_size, event_type')
       .eq('id', eventId)
       .maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
@@ -527,11 +527,14 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       return a.opponentName.localeCompare(b.opponentName, 'es');
     });
     const rawCompetitionFormat = (evRow as { competition_format?: string | null } | null)?.competition_format;
+    const rawTopSize = (evRow as { top_size?: number | null } | null)?.top_size ?? null;
     // swiss_bo2 se muestra igual que swiss en el perfil del jugador.
     const competitionFormat =
       rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setEventCompetitionFormat(competitionFormat);
-    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin_bo1_top4');
+    // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
+    // competition_format='round_robin' + top_size=4.
+    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin' && rawTopSize === 4);
     const officialH2hFiltered =
       competitionFormat === 'swiss'
         ? officialRows.filter((row) => {

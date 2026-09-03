@@ -191,7 +191,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled, topcut_format, competition_format, current_swiss_round, event_type')
+        .select('turn_tracking_enabled, topcut_format, competition_format, top_size, current_swiss_round, event_type')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -241,6 +241,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       turn_tracking_enabled?: boolean | null;
       topcut_format?: string | null;
       competition_format?: string | null;
+      top_size?: number | null;
       current_swiss_round?: number | string | null;
       event_type?: string | null;
     } | null;
@@ -251,7 +252,9 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         ? 'swiss'
         : 'round_robin';
     setCompetitionFormat(fmt);
-    setOfficialBo1(eventFlags?.competition_format === 'round_robin_bo1_top4');
+    // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
+    // competition_format='round_robin' + top_size=4.
+    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4);
     const csrRaw = eventFlags?.current_swiss_round;
     const csrNum = csrRaw != null && csrRaw !== '' ? Number(csrRaw) : null;
     setCurrentSwissRound(csrNum != null && Number.isFinite(csrNum) ? csrNum : null);
