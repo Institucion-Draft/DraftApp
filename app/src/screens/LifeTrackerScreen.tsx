@@ -2371,7 +2371,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               {specialEmoji != null && specialType != null && attackingFrom === t ? (
                 <Animated.View
                   pointerEvents="none"
-                  style={[StyleSheet.absoluteFillObject, styles.specialPreLayer]}
+                  style={[StyleSheet.absoluteFill, styles.specialPreLayer]}
                 >
                   <Animated.View
                     style={[

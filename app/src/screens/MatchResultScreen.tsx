@@ -26,6 +26,7 @@ type PairingRow = {
   participant_b_id: string;
   swiss_round: number | null;
   official_winner_participant_id: string | null;
+  official_draw: boolean;
   tiebreak_winner_participant_id: string | null;
   super_cup_winner_participant_id: string | null;
   super_cup_resolved_at: string | null;
@@ -89,6 +90,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
   /** round_robin_bo1_top4: el oficial es a una sola partida. */
   const [officialBo1, setOfficialBo1] = useState(false);
+  /** match_format del evento ('bo1'/'bo2'/'bo3'): usado para detectar el empate BO2 de round_robin. */
+  const [matchFormat, setMatchFormat] = useState<string | null>(null);
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   /** Solo mata-mata suizo bracket: victorias necesarias en la llave; null si no aplica. */
   const [bracketTiebreakWinsNeeded, setBracketTiebreakWinsNeeded] = useState<number | null>(null);
@@ -112,7 +115,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const pRes = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, swiss_round, official_winner_participant_id, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, swiss_round, official_winner_participant_id, official_draw, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
       )
       .eq('id', m.pairing_id)
       .maybeSingle();
@@ -191,7 +194,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled, topcut_format, competition_format, top_size, current_swiss_round, event_type')
+        .select('turn_tracking_enabled, topcut_format, competition_format, top_size, match_format, current_swiss_round, event_type')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -242,11 +245,13 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       topcut_format?: string | null;
       competition_format?: string | null;
       top_size?: number | null;
+      match_format?: string | null;
       current_swiss_round?: number | string | null;
       event_type?: string | null;
     } | null;
     setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
     setIsGiantEvent(eventFlags?.event_type === 'two_headed_giant');
+    setMatchFormat(eventFlags?.match_format ?? null);
     const fmt =
       eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
         ? 'swiss'
@@ -364,7 +369,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : 'Jugar la vuelta'
       : match.match_type === 'revenge'
         ? 'Otra venganza'
-        : (pairing.official_winner_participant_id != null || officialResolvedByBo1) &&
+        : (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw) &&
             competitionFormat === 'round_robin'
           ? 'Iniciar venganza'
           : completedPairingMatchCount >= 2
@@ -384,6 +389,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     winsB < 2 &&
     // En swiss (incluye swiss_bo2) un 1-1 ya es empate resuelto automáticamente; no hay "bueno".
     !(competitionFormat === 'swiss' && winsA >= 1 && winsB >= 1) &&
+    // round_robin BO2: un 1-1 ya quedó resuelto como empate (official_draw); no hay "bueno".
+    !(competitionFormat === 'round_robin' && matchFormat === 'bo2' && pairing.official_draw === true) &&
     // En round_robin_bo1_top4 el oficial se cierra con la primera partida ganada.
     !officialResolvedByBo1;
   const bracketTiebreakSeriesStillOpen =
@@ -396,7 +403,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       match.match_type === 'revenge' ||
       officialBo3StillOpen ||
       (competitionFormat === 'round_robin' &&
-        (pairing.official_winner_participant_id != null || officialResolvedByBo1))
+        (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw))
     ));
 
   const officialWinsNeeded = officialBo1 ? 1 : 2;

@@ -36,6 +36,7 @@ type PairingInfo = {
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
+  official_draw: boolean;
   swiss_round: number | null;
   tiebreak_winner_participant_id: string | null;
   tiebreak_resolved_at: string | null;
@@ -267,6 +268,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [officialBo1, setOfficialBo1] = useState(false);
   /** round_robin BO3 clásico (todos contra todos, sin fase mata-mata separada). */
   const [isRoundRobinClassic, setIsRoundRobinClassic] = useState(false);
+  /** match_format del evento ('bo1'/'bo2'/'bo3'): usado para detectar el empate BO2 de round_robin. */
+  const [matchFormat, setMatchFormat] = useState<string | null>(null);
   const [currentSwissRound, setCurrentSwissRound] = useState<number | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [eventStartingLife, setEventStartingLife] = useState(20);
@@ -279,7 +282,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const { data: pData, error: pErr } = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, swiss_round, tiebreak_winner_participant_id, tiebreak_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, tiebreak_winner_participant_id, tiebreak_resolved_at'
       )
       .eq('id', pairingId)
       .maybeSingle();
@@ -308,7 +311,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, top_size, current_swiss_round, topcut_format, event_type, starting_life'
+          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, top_size, match_format, current_swiss_round, topcut_format, event_type, starting_life'
         )
         .eq('id', p.event_id)
         .maybeSingle(),
@@ -340,7 +343,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase.from('event_participants').select('id').eq('event_id', p.event_id).eq('role', 'player'),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
         .eq('event_id', p.event_id),
       supabase
         .from('event_tiebreak_groups')
@@ -387,12 +390,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       turn_tracking_enabled?: boolean | null;
       competition_format?: string | null;
       top_size?: number | null;
+      match_format?: string | null;
       current_swiss_round?: number | null;
       topcut_format?: string | null;
       event_type?: string | null;
       starting_life?: number | null;
     } | null;
     setIsGiantEvent(evFlags?.event_type === 'two_headed_giant');
+    setMatchFormat(evFlags?.match_format ?? null);
     setEventStartingLife(typeof evFlags?.starting_life === 'number' ? evFlags.starting_life : 20);
     const tf = evFlags?.topcut_format;
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
@@ -607,11 +612,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     ) {
       const playerIds = (allPlayersRes.data as { id: string }[]).map((x) => x.id);
       const pairSumm = allPairingsRes.data as PairingSummary[];
-      const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, pairSumm);
+      const isBo2 = evFlags?.competition_format === 'round_robin' && evFlags?.match_format === 'bo2';
+      const leaders = getTwoWayTieFirstPlaceParticipantIds(playerIds, pairSumm, isBo2);
       if (
         leaders &&
         pairingIsBetweenParticipants(p, leaders[0], leaders[1]) &&
-        p.official_winner_participant_id != null &&
+        (p.official_winner_participant_id != null || p.official_draw === true) &&
         p.tiebreak_winner_participant_id == null
       ) {
         tiebreakHere = true;
@@ -644,7 +650,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
     const inProg = matchRows.some((m) => m.status === 'in_progress');
     if (inProg) setStatus('in_progress');
-    else if (p.official_winner_participant_id) setStatus('completed');
+    else if (p.official_winner_participant_id || p.official_draw) setStatus('completed');
     else setStatus('scheduled');
 
   }, [pairingId, bracketMatchId]);
@@ -988,9 +994,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id
   ).length;
   // round_robin_bo1_top4: oficial resuelto = official_winner seteado o 1 partida oficial ganada
-  // (cubre el caso donde el trigger todavía no reflejó el ganador en el pairing).
+  // (cubre el caso donde el trigger todavía no reflejó el ganador en el pairing). round_robin
+  // BO2: oficial resuelto también con official_draw=true (1-1, sin ganador).
   const officialResolved =
     pairing.official_winner_participant_id != null ||
+    (competitionFormat === 'round_robin' && matchFormat === 'bo2' && pairing.official_draw === true) ||
     (officialBo1 && (winsA >= 1 || winsB >= 1));
   const revengeCompleted = revengeMs.filter((m) => m.status === 'completed');
   const revengeWinsA = revengeCompleted.filter(
