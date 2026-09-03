@@ -287,8 +287,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
   const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
-  /** round_robin_bo1_top4: el oficial es a una sola partida (una píldora por jugador). */
+  /** round_robin + top_size=4 con match_format='bo1': el oficial es a una sola partida (una
+   * píldora por jugador). Distinto de isRoundRobinTop4 (título "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
+  /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
+  const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   const [eventType, setEventType] = useState<string | null>(null);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
   const [tiebreakOfficialSections, setTiebreakOfficialSections] = useState<TiebreakOfficialSection[]>([]);
@@ -322,7 +325,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('status, competition_format, top_size, current_swiss_round, event_type')
+        .select('status, competition_format, top_size, match_format, current_swiss_round, event_type')
         .eq('id', eventId)
         .maybeSingle(),
       supabase
@@ -368,6 +371,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const eventFlags = eventRes.data as {
       competition_format?: string | null;
       top_size?: number | null;
+      match_format?: string | null;
       current_swiss_round?: number | null;
       event_type?: string | null;
     } | null;
@@ -379,8 +383,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         : 'round_robin';
     setCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
-    // competition_format='round_robin' + top_size=4.
-    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4);
+    // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título "Fase todos contra
+    // todos") es solo top_size=4. officialBo1 (1 sola píldora / oficial resuelto con 1 partida)
+    // depende únicamente de match_format='bo1' — aplica igual con o sin top4, son ejes
+    // independientes (antes solo miraba top_size=4, dejando BO1 sin top con 2 píldoras por error).
+    const isTop4 = eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4;
+    setIsRoundRobinTop4(isTop4);
+    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.match_format === 'bo1');
     const csrRaw = eventFlags?.current_swiss_round;
     const currentSwissRound: number | null =
       csrRaw == null
@@ -1689,7 +1698,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 ))}
                 {!isSwissOfficialSectioned ? (
                   <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>
-                    {officialBo1 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+                    {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
                   </Text>
                 ) : null}
               </View>

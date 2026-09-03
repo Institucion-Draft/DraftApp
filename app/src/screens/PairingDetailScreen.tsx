@@ -264,8 +264,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
-  /** round_robin_bo1_top4: el oficial es a una sola partida. */
+  /** round_robin + top_size=4 con match_format='bo1': el oficial es a una sola partida (1 sola
+   * píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
+  /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
+  const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   /** round_robin BO3 clásico (todos contra todos, sin fase mata-mata separada). */
   const [isRoundRobinClassic, setIsRoundRobinClassic] = useState(false);
   /** match_format del evento ('bo1'/'bo2'/'bo3'): usado para detectar el empate BO2 de round_robin. */
@@ -413,7 +416,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     // competition_format='round_robin' + top_size=4 — "todos contra todos con top4" ya no es
     // un competition_format aparte.
     const isRoundRobinWithTop4 = evFlags?.competition_format === 'round_robin' && evFlags?.top_size === 4;
-    setOfficialBo1(isRoundRobinWithTop4);
+    setIsRoundRobinTop4(isRoundRobinWithTop4);
+    // El oficial de la fase regular se resuelve con 1 sola partida cuando match_format es 'bo1' —
+    // aplica igual con o sin top4, son ejes independientes (antes solo miraba top_size=4, dejando
+    // BO1 sin top con 2 píldoras por error).
+    setOfficialBo1(evFlags?.competition_format === 'round_robin' && evFlags?.match_format === 'bo1');
     setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin' && evFlags?.top_size == null);
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
@@ -1463,7 +1470,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               {officialMs.length > 0 ? (
                 <View style={styles.subAccBlue}>
                   <Text style={styles.subTitleSwissBlue}>
-                    {officialBo1 ? 'Fase todos contra todos' : 'Ronda suiza'}
+                    {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Ronda suiza'}
                   </Text>
                   {officialMs.map(renderDraftRow)}
                 </View>
@@ -1516,7 +1523,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           </>
         ) : (
           <>
-            {officialBo1 ? (
+            {isRoundRobinTop4 ? (
               <View style={styles.subAccBlue}>
                 <Text style={styles.subTitleSwissBlue}>Fase todos contra todos</Text>
                 {officialMs.length === 0 ? (

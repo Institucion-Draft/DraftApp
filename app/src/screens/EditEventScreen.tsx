@@ -35,6 +35,13 @@ function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null)
   return 'Todos contra todos';
 }
 
+function getMatchFormatLabel(mf: string | null): string {
+  if (mf === 'bo1') return 'BO1';
+  if (mf === 'bo2') return 'BO2';
+  if (mf === 'bo3') return 'BO3';
+  return 'Sin definir';
+}
+
 type FormBaseline = {
   name: string;
   eventType: EventType;
@@ -76,6 +83,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Solo round_robin; read-only, igual que competitionFormat. */
   const [topSize, setTopSize] = useState<number | null>(null);
+  /** Solo round_robin (con o sin top4); read-only, igual que topSize. */
+  const [matchFormat, setMatchFormat] = useState<string | null>(null);
   const [eventType, setEventType] = useState<EventType>('draft');
   const [status, setStatus] = useState<EventStatus>('scheduled');
   const [scheduledFor, setScheduledFor] = useState(new Date());
@@ -110,7 +119,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const { data, error } = await supabase
         .from('draft_events')
         .select(
-          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, top_size, topcut_format, swiss_rounds_manual, starting_life'
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, top_size, match_format, topcut_format, swiss_rounds_manual, starting_life'
         )
         .eq('id', eventId)
         .maybeSingle();
@@ -130,6 +139,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setCompetitionFormat(cf);
       const ts = typeof row.top_size === 'number' ? row.top_size : null;
       setTopSize(ts);
+      setMatchFormat((row.match_format as string | null | undefined) ?? null);
       const isTop4 = cf === 'round_robin' && ts === 4;
       const roundsManual =
         typeof row.swiss_rounds_manual === 'number' && row.swiss_rounds_manual >= 3 && row.swiss_rounds_manual <= 5
@@ -412,6 +422,16 @@ export default function EditEventScreen({ route, navigation }: Props) {
         <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getCompetitionFormatLabel(competitionFormat, topSize)}</Text>
       </View>
       <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
+
+      {competitionFormat === 'round_robin' ? (
+        <>
+          <Text style={styles.label}>Formato de partidas (fase regular)</Text>
+          <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
+            <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getMatchFormatLabel(matchFormat)}</Text>
+          </View>
+          <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
+        </>
+      ) : null}
 
       {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>

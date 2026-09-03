@@ -534,11 +534,17 @@ function podiumFirstPlaceTiebreakResolvedMode(
   // Grupo de 2 (sin fase 'semi'): el 3er puesto no lo decide este grupo — se completa con el
   // mismo criterio genérico que un campeón declarado sin desempate (mejor WR BO3 del resto).
   if (s2.length === 0 || s3.length === 0) {
+    // podiumNextTwoStepsFromPool asume que el pool arranca en el 2do puesto (su propio s2 =
+    // 1ra tanda del pool). Si el 2do puesto YA está resuelto (grupo de 2: final sin semis), el
+    // pool en realidad arranca en el 3er puesto — la 1ra tanda del pool (filled.s2) es el 3er
+    // puesto real, no filled.s3 (que sería un 4to escalón que este podio de 3 pasos no representa).
+    const s2AlreadyDecided = s2.length > 0;
     const poolRest = participants.filter((p) => !decidedPids.has(p.participantId));
     const filled = podiumNextTwoStepsFromPool(poolRest);
     if (s2.length === 0) s2 = filled.s2;
     if (s3.length === 0) {
-      s3 = filled.s3.filter((p) => !s2.some((x) => x.participantId === p.participantId));
+      const thirdPlaceTier = s2AlreadyDecided ? filled.s2 : filled.s3;
+      s3 = thirdPlaceTier.filter((p) => !s2.some((x) => x.participantId === p.participantId));
     }
   }
 

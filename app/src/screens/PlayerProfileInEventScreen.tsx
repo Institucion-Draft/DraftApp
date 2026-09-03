@@ -189,8 +189,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
   const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
-  /** round_robin_bo1_top4: el oficial de la fase regular es a una sola partida. */
+  /** round_robin + top_size=4 con match_format='bo1': el oficial de la fase regular es a una
+   * sola partida (1 sola píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
+  /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
+  const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
   const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
   /** Participó en el desempate group_type='fourth_place' (4to puesto real de
@@ -244,7 +247,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const { data: evRow } = await supabase
       .from('draft_events')
-      .select('workspace_id, competition_format, top_size, event_type')
+      .select('workspace_id, competition_format, top_size, match_format, event_type')
       .eq('id', eventId)
       .maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
@@ -528,13 +531,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     });
     const rawCompetitionFormat = (evRow as { competition_format?: string | null } | null)?.competition_format;
     const rawTopSize = (evRow as { top_size?: number | null } | null)?.top_size ?? null;
+    const rawMatchFormat = (evRow as { match_format?: string | null } | null)?.match_format;
     // swiss_bo2 se muestra igual que swiss en el perfil del jugador.
     const competitionFormat =
       rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
     setEventCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
-    // competition_format='round_robin' + top_size=4.
-    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin' && rawTopSize === 4);
+    // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título/tratamiento
+    // visual "Fase todos contra todos") es solo top_size=4. isRoundRobinBo1 (1 sola píldora /
+    // oficial resuelto con 1 partida) depende únicamente de match_format='bo1' — aplica igual
+    // con o sin top4, son ejes independientes.
+    const isTop4 = rawCompetitionFormat === 'round_robin' && rawTopSize === 4;
+    setIsRoundRobinTop4(isTop4);
+    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin' && rawMatchFormat === 'bo1');
     const officialH2hFiltered =
       competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
@@ -1235,7 +1244,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {fourthPlaceMataSection()}
             {tiebreakRoundRobinCards()}
             <Text style={styles.sectionTitle}>
-              {isRoundRobinBo1 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+              {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
             </Text>
             {officialH2h.map((row) => officialPairingCard(row, 'blue'))}
           </>
