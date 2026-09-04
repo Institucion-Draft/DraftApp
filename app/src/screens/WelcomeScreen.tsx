@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableWithoutFeedback,
   useWindowDimensions,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -33,11 +34,19 @@ export default function WelcomeScreen({ navigation }: Props) {
   const captionPullUp = Math.round(logoBase * 0.14);
   const captionMarginTop = captionGap - captionPullUp;
   const [showTapHint, setShowTapHint] = useState(false);
+  const hintOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowTapHint(true), 2000);
+    const timer = setTimeout(() => {
+      setShowTapHint(true);
+      Animated.timing(hintOpacity, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }).start();
+    }, 2000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [hintOpacity]);
 
   const handlePress = () => {
     if (!showTapHint) return;
@@ -87,11 +96,9 @@ export default function WelcomeScreen({ navigation }: Props) {
             </View>
           </View>
         </View>
-        {showTapHint ? (
-          <Text style={styles.hint}>Tocá en cualquier lugar para arrancar a draftear</Text>
-        ) : (
-          <View style={styles.hintPlaceholder} />
-        )}
+        <Animated.Text style={[styles.hint, { opacity: hintOpacity }]}>
+          Tocá en cualquier lugar para arrancar a draftear
+        </Animated.Text>
       </View>
     </TouchableWithoutFeedback>
   );
@@ -149,10 +156,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     paddingHorizontal: 32,
-    marginBottom: 48,
-  },
-  hintPlaceholder: {
-    height: 48,
     marginBottom: 48,
   },
 });
