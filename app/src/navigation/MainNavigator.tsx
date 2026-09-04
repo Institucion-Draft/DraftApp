@@ -21,6 +21,7 @@ import CreateVenueScreen from '../screens/CreateVenueScreen';
 import EditVenueScreen from '../screens/EditVenueScreen';
 import EventsListScreen from '../screens/EventsListScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
+import CompetitionRulesScreen from '../screens/CompetitionRulesScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import EventDiaryScreen from '../screens/EventDiaryScreen';
 import ProDeCScreen from '../screens/ProDeCScreen';
@@ -153,6 +154,11 @@ export default function MainStackNavigator() {
         <Stack.Screen name="EditVenue" component={EditVenueScreen} options={{ title: 'Editar sede', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: 'Eventos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CreateEvent" component={CreateEventScreen} options={{ title: 'Nuevo evento', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen
+          name="CompetitionRules"
+          component={CompetitionRulesScreen}
+          options={{ title: 'Reglamento', headerBackTitle: 'Atrás' }}
+        />
         <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventDiary" component={EventDiaryScreen} options={{ title: 'Bitácora', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ProDeC" component={ProDeCScreen} options={{ title: 'ProDeC', headerBackTitle: 'Atrás' }} />

@@ -19,6 +19,8 @@ import type { EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventTypeLabel } from '../lib/labels';
+import InfoTooltip from '../components/InfoTooltip';
+import Card from '../components/Card';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
@@ -48,6 +50,16 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'pepidraft', label: getEventTypeLabel('pepidraft') },
   { value: 'two_headed_giant', label: getEventTypeLabel('two_headed_giant') },
 ];
+
+function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
+  if (format === 'round_robin') {
+    return 'Todos los jugadores se enfrentan entre sí. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.';
+  }
+  if (format === 'swiss') {
+    return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado.';
+  }
+  return 'Formato suizo BO2: igual que el suizo, pero cada enfrentamiento de la fase regular se juega a mejor de 2 partidas.';
+}
 
 function pickFromOptions(
   title: string,
@@ -194,7 +206,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       Alert.alert('Error', error?.message ?? 'No se pudo crear el evento.');
       return;
     }
-    navigation.replace('EventDetail', { eventId: data.id as string });
+    navigation.replace('EventDetail', { eventId: data.id as string, workspaceId });
   };
 
   const openEventTypePicker = () =>
@@ -269,6 +281,10 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <View style={styles.sandboxRow}>
         <Text style={styles.sandboxLabel}>Modo sandbox</Text>
+        <InfoTooltip
+          title="Modo sandbox"
+          body="Los eventos sandbox no afectan las estadísticas ni el historial de los jugadores. Ideal para pruebas."
+        />
         <Switch value={!isOfficial} onValueChange={(v) => setIsOfficial(!v)} />
       </View>
 
@@ -280,83 +296,112 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         <Text style={styles.pickerTxt}>{typeLabel}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.label}>Formato de competición</Text>
-      {eventType === 'two_headed_giant' ? (
-        <View style={[styles.pickerBtn, { opacity: 0.5 }]}>
-          <Text style={styles.pickerTxt}>Todos contra todos (forzado)</Text>
+      <Text style={styles.sectionHeader}>¿Cómo se juega?</Text>
+      <Card style={styles.formatCard}>
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, styles.labelInline]}>Formato de competición</Text>
+          <InfoTooltip title="Formato de competición" body={getCompetitionFormatTooltipBody(competitionFormat)} />
         </View>
-      ) : (
-        <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
-          <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
-        </TouchableOpacity>
-      )}
-
-      {competitionFormat === 'round_robin' ? (
-        <>
-          <Text style={styles.label}>Formato de partidas (fase regular)</Text>
-          <View style={styles.segmented}>
-            {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
-              const selected = regularMatchFormat === opt.value;
-              return (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[styles.segment, selected && styles.segmentSelected]}
-                  onPress={() => setRegularMatchFormat(opt.value)}
-                >
-                  <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
+        {eventType === 'two_headed_giant' ? (
+          <View style={[styles.pickerBtn, { opacity: 0.5 }]}>
+            <Text style={styles.pickerTxt}>Todos contra todos (forzado)</Text>
           </View>
-        </>
-      ) : null}
+        ) : (
+          <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
+            <Text style={styles.pickerTxt}>{competitionFormatLabel}</Text>
+          </TouchableOpacity>
+        )}
 
-      {competitionFormat === 'round_robin' ? (
-        <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Top 4</Text>
-          <Switch value={top4} onValueChange={setTop4} />
-        </View>
-      ) : null}
+        {competitionFormat === 'round_robin' ? (
+          <>
+            <Text style={styles.label}>Formato de partidas (fase liga)</Text>
+            <View style={styles.segmented}>
+              {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
+                const selected = regularMatchFormat === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.segment, selected && styles.segmentSelected]}
+                    onPress={() => setRegularMatchFormat(opt.value)}
+                  >
+                    <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
 
-      {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4) ? (
-        <View style={styles.switchRow}>
-          <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
-          <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />
-        </View>
-      ) : null}
-
-      {competitionFormat === 'swiss_bo2' ? (
-        <>
+        {competitionFormat === 'round_robin' ? (
           <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Eliminatorias BO3</Text>
+            <View style={styles.switchLabelRow}>
+              <Text style={styles.switchLabelInline}>¿Agregar fase mata-mata?</Text>
+              <InfoTooltip
+                title="Fase mata-mata"
+                body="Si está activado, los mejores 4 de la fase liga pasan a jugar semifinales."
+              />
+            </View>
+            <Switch value={top4} onValueChange={setTop4} />
+          </View>
+        ) : null}
+
+        {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || (competitionFormat === 'round_robin' && top4) ? (
+          <View style={styles.switchRow}>
+            <View style={styles.switchLabelRow}>
+              <Text style={styles.switchLabelInline}>Eliminatorias BO3</Text>
+              <InfoTooltip
+                title="Eliminatorias BO3"
+                body="Los partidos de la fase mata-mata pueden jugarse al mejor de 3 (BO3) o a partido único (BO1). Podés cambiar esta opción hasta que arranque el primer partido de desempate o de la fase mata-mata."
+              />
+            </View>
             <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />
           </View>
+        ) : null}
 
-          <Text style={styles.label}>Rondas suizas</Text>
-          <View style={styles.segmented}>
-            {SWISS_BO2_ROUNDS_OPTIONS.map((n) => {
-              const selected = swissRoundsManual === n;
-              return (
-                <TouchableOpacity
-                  key={n}
-                  style={[styles.segment, selected && styles.segmentSelected]}
-                  onPress={() => setSwissRoundsManual(n)}
-                >
-                  <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{n}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </>
-      ) : null}
+        {competitionFormat === 'swiss_bo2' ? (
+          <>
+            <Text style={styles.label}>Rondas suizas</Text>
+            <View style={styles.segmented}>
+              {SWISS_BO2_ROUNDS_OPTIONS.map((n) => {
+                const selected = swissRoundsManual === n;
+                return (
+                  <TouchableOpacity
+                    key={n}
+                    style={[styles.segment, selected && styles.segmentSelected]}
+                    onPress={() => setSwissRoundsManual(n)}
+                  >
+                    <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{n}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        <TouchableOpacity style={styles.reglamentoBtn} onPress={() => navigation.navigate('CompetitionRules')}>
+          <Text style={styles.reglamentoBtnTxt}>📖 Ver reglamento completo</Text>
+        </TouchableOpacity>
+      </Card>
 
       <View style={styles.switchRow}>
-        <Text style={styles.switchLabel}>Sistema de turnos con animaciones</Text>
+        <View style={styles.switchLabelRow}>
+          <Text style={styles.switchLabelInline}>Sistema de turnos con animaciones</Text>
+          <InfoTooltip
+            title="Sistema de turnos con animaciones"
+            body="Si está activado, se habilita el botón de pasar el turno durante las partidas, para generar estadísticas de mayor resolución."
+          />
+        </View>
         <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
       </View>
 
       <View style={styles.switchRow}>
-        <Text style={styles.switchLabel}>Draft cronometrado</Text>
+        <View style={styles.switchLabelRow}>
+          <Text style={styles.switchLabelInline}>Draft cronometrado</Text>
+          <InfoTooltip
+            title="Draft cronometrado"
+            body="Si está activado, se habilita la configuración de un timer dinámico que cronometra el tiempo de cada ronda durante el draft."
+          />
+        </View>
         <Switch value={isTimedDraft} onValueChange={setIsTimedDraft} />
       </View>
 
@@ -474,7 +519,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingVertical: 4,
   },
-  switchLabel: { flex: 1, fontSize: 15, color: '#111', fontWeight: '500', marginRight: 12 },
+  switchLabelRow: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 6 },
+  switchLabelInline: { fontSize: 15, color: '#111', fontWeight: '500' },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  labelInline: { marginBottom: 0 },
+  sectionHeader: { fontSize: 16, fontWeight: '700', color: '#111', marginTop: 4, marginBottom: 10 },
+  formatCard: { marginBottom: 16 },
+  reglamentoBtn: { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
+  reglamentoBtnTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 14 },
   segmented: {
     flexDirection: 'row',
     borderWidth: 1,

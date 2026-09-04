@@ -19,7 +19,13 @@ export type MainStackParamList = {
   EditVenue: { venueId: string };
   EventsList: { workspaceId: string };
   CreateEvent: { workspaceId: string };
-  EventDetail: { eventId: string };
+  CompetitionRules: undefined;
+  /**
+   * workspaceId es opcional: solo sirve como fallback para poder navegar a EventsList si el
+   * evento no llega a cargar (borrado, error de red, etc.) — cuando se conoce en el caller, hay
+   * que pasarlo. event?.workspace_id (una vez cargado) sigue siendo la fuente de verdad normal.
+   */
+  EventDetail: { eventId: string; workspaceId?: string };
   EventDiary: { eventId: string };
   ProDeC: { eventId: string };
   EditEvent: { eventId: string };
