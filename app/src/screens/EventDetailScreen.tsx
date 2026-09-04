@@ -173,7 +173,7 @@ function isBuenosAiresSameCalendarDay(scheduledFor: string, when: Date = new Dat
 export default function EventDetailScreen({ route, navigation }: Props) {
   const isFocused = useIsFocused();
   const [participantColors, setParticipantColors] = useState<Record<string, MtgColor[]>>({});
-  const { eventId } = route.params;
+  const { eventId, workspaceId: routeWorkspaceId } = route.params;
   const [event, setEvent] = useState<EventRow | null>(null);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -838,14 +838,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   }, [event?.draft_started_at, event?.draft_ended_at, isFocused]);
 
   useLayoutEffect(() => {
-    const wsId = event?.workspace_id;
+    // event?.workspace_id es la fuente de verdad una vez cargado; routeWorkspaceId (si el
+    // caller lo pasó) es el fallback para que el back del header siga funcionando incluso si el
+    // evento no llega a cargar (borrado, error de red, etc.).
+    const wsId = event?.workspace_id ?? routeWorkspaceId;
     navigation.setOptions({
       title: event?.name ?? 'Evento',
       headerLeft: wsId
         ? hierarchicalHeaderBack(navigation, 'EventsList', { workspaceId: wsId })
         : undefined,
     });
-  }, [event?.name, event?.workspace_id, navigation]);
+  }, [event?.name, event?.workspace_id, routeWorkspaceId, navigation]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1203,6 +1206,23 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     return (
       <View style={styles.centered}>
         <Text style={styles.muted}>No se encontró el evento.</Text>
+        <TouchableOpacity
+          style={[styles.primaryBtn, styles.notFoundBtn]}
+          onPress={() => {
+            // reset() en vez de navigate(): si se llegó acá por un link/pantalla vieja a un
+            // evento borrado, no queremos dejar esa cadena de pantallas rotas atrás en el stack.
+            if (routeWorkspaceId) {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'EventsList', params: { workspaceId: routeWorkspaceId } }],
+              });
+            } else {
+              navigation.goBack();
+            }
+          }}
+        >
+          <Text style={styles.primaryBtnTxt}>Volver a eventos</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -1978,6 +1998,7 @@ const styles = StyleSheet.create({
   blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 10 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginBottom: 10 },
   primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  notFoundBtn: { paddingHorizontal: 24, marginTop: 16, marginBottom: 0 },
   secondaryBtn: {
     backgroundColor: '#EFF6FF',
     borderWidth: 1,

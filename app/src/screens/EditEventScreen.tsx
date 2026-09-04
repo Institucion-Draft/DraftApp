@@ -52,7 +52,6 @@ type FormBaseline = {
   notes: string;
   forceEditOverride: boolean;
   turnTrackingEnabled: boolean;
-  isOfficial: boolean;
   eliminatoriasBo3: boolean;
   swissRoundsManual: number;
   startingLife: number;
@@ -228,7 +227,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
         notes: row.notes ?? '',
         forceEditOverride: false,
         turnTrackingEnabled: tt,
-        isOfficial: io,
         eliminatoriasBo3: elimBo3,
         swissRoundsManual: roundsManual,
         startingLife: sl,
@@ -260,7 +258,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
       (notes.trim() || '') !== (baseline.notes.trim() || '') ||
       forceEditOverride !== baseline.forceEditOverride ||
       turnTrackingEnabled !== baseline.turnTrackingEnabled ||
-      isOfficial !== baseline.isOfficial ||
       eliminatoriasBo3 !== baseline.eliminatoriasBo3 ||
       swissRoundsManual !== baseline.swissRoundsManual ||
       startingLife !== baseline.startingLife
@@ -276,7 +273,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
     notes,
     forceEditOverride,
     turnTrackingEnabled,
-    isOfficial,
     eliminatoriasBo3,
     swissRoundsManual,
     startingLife,
@@ -367,7 +363,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
       }
     }
     patch.starting_life = startingLife;
-    patch.is_official = isOfficial;
     const { error } = await supabase.from('draft_events').update(patch).eq('id', eventId);
     setSubmitting(false);
     if (error) return Alert.alert('Error', error.message ?? 'No se pudo guardar el evento.');
@@ -388,8 +383,15 @@ export default function EditEventScreen({ route, navigation }: Props) {
             .eq('id', eventId);
           setSubmitting(false);
           if (error) return Alert.alert('Error', error.message ?? 'No se pudo borrar el evento.');
-          if (workspaceId) navigation.replace('EventsList', { workspaceId });
-          else navigation.goBack();
+          // reset() en vez de replace(): replace() solo reemplaza esta pantalla, dejando la
+          // instancia de EventDetailScreen (con el evento ya borrado) enterrada más abajo en el
+          // stack — al volver atrás desde ahí en algún momento posterior, el usuario cae en esa
+          // pantalla zombie. reset() limpia todo el stack hasta EventsList, sin nada debajo.
+          if (workspaceId) {
+            navigation.reset({ index: 0, routes: [{ name: 'EventsList', params: { workspaceId } }] });
+          } else {
+            navigation.goBack();
+          }
         },
       },
     ]);
@@ -405,14 +407,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      <View style={styles.sandboxRow}>
-        <Text style={styles.sandboxLabel}>Modo sandbox</Text>
-        <Switch
-          value={!isOfficial}
-          onValueChange={(v) => setIsOfficial(!v)}
-          disabled={loadedStatus === 'playing' || loadedStatus === 'completed'}
-        />
-      </View>
+      {!isOfficial ? (
+        <View style={styles.sandboxRow}>
+          <Text style={styles.sandboxLabel}>Evento sandbox (no editable)</Text>
+        </View>
+      ) : null}
 
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />

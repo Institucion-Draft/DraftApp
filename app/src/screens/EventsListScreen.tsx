@@ -349,7 +349,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
           const showShinyCup =
             (item.status === 'completed' || item.status === 'concluded') && item.has_shiny_participant && !!champUri;
           return (
-            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('EventDetail', { eventId: item.id, workspaceId })}>
               <View style={styles.row}>
                 {avatar ? (
                   <Image source={{ uri: avatar }} style={styles.avatar} />

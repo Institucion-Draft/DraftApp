@@ -28,11 +28,6 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 
 export default function CubeRouletteScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
-    });
-  }, [navigation, eventId]);
   const [loading, setLoading] = useState(true);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [cubes, setCubes] = useState<CubeRow[]>([]);
@@ -43,7 +38,17 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const [resultCubeName, setResultCubeName] = useState<string | null>(null);
   const [manualCubePickerForUserId, setManualCubePickerForUserId] = useState<string | null>(null);
   const [selectedCubeId, setSelectedCubeId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const pulse = useRef(new Animated.Value(1)).current;
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', {
+        eventId,
+        workspaceId: workspaceId ?? undefined,
+      }),
+    });
+  }, [navigation, eventId, workspaceId]);
 
   const load = useCallback(async () => {
     const [eventRes, meRes] = await Promise.all([
@@ -55,6 +60,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       return;
     }
     const wsId = eventRes.data.workspace_id as string;
+    setWorkspaceId(wsId);
     const currentUserId = meRes.data.user?.id ?? null;
 
     const [roleRes, cubesRes, playersRes] = await Promise.all([
@@ -285,7 +291,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
           <Text style={styles.result}>Cubo seleccionado: {resultCubeName}</Text>
           <TouchableOpacity
             style={styles.spinBtn}
-            onPress={() => navigation.navigate('EventDetail', { eventId })}
+            onPress={() => navigation.navigate('EventDetail', { eventId, workspaceId: workspaceId ?? undefined })}
           >
             <Text style={styles.spinTxt}>Volver al evento</Text>
           </TouchableOpacity>
@@ -341,7 +347,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       ) : null}
 
       {!resultCubeName ? (
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('EventDetail', { eventId })}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('EventDetail', { eventId, workspaceId: workspaceId ?? undefined })}>
           <Text style={styles.backTxt}>Volver</Text>
         </TouchableOpacity>
       ) : null}
