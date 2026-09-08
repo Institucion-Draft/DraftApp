@@ -118,6 +118,17 @@ function findPairingBetween(pairings: PairingRow[], pid: string, oid: string): P
   );
 }
 
+/** Alineado con `public.topcut_wins_needed` (migración 0039) y con PairingDetailScreen.tsx. */
+function topcutWinsNeededClient(
+  format: string | null | undefined,
+  phase: 'semi' | 'final' | 'third_place'
+): number {
+  const f = format ?? 'bo3';
+  if (f === 'bo1') return 1;
+  if (f === 'sf_bo1_f_bo3') return phase === 'semi' ? 1 : 2;
+  return 2;
+}
+
 function formatWinRate(wins: number, total: number): string {
   if (total <= 0) return '-';
   const pct = (wins / total) * 100;
@@ -192,6 +203,10 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   /** round_robin + top_size=4 con match_format='bo1': el oficial de la fase regular es a una
    * sola partida (1 sola píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
+  /** Formato de eliminatorias del bracket real (semis/final/3er-4to de swiss_topcut o
+   * round_robin_topcut): 'bo1' | 'bo3' | 'sf_bo1_f_bo3'. Decide cuántas píldoras (1 o 2)
+   * muestra la fila verde de swissMataBracketSection, vía topcutWinsNeededClient. */
+  const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
   const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
@@ -247,7 +262,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const { data: evRow } = await supabase
       .from('draft_events')
-      .select('workspace_id, competition_format, top_size, match_format, event_type')
+      .select('workspace_id, competition_format, top_size, match_format, event_type, topcut_format')
       .eq('id', eventId)
       .maybeSingle();
     const wsId = evRow?.workspace_id as string | undefined;
@@ -544,6 +559,12 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const isTop4 = rawCompetitionFormat === 'round_robin' && rawTopSize === 4;
     setIsRoundRobinTop4(isTop4);
     setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin' && rawMatchFormat === 'bo1');
+    const rawTopcutFormat = (evRow as { topcut_format?: string | null } | null)?.topcut_format;
+    setTopcutFormat(
+      rawTopcutFormat === 'bo1' || rawTopcutFormat === 'sf_bo1_f_bo3' || rawTopcutFormat === 'bo3'
+        ? rawTopcutFormat
+        : 'bo3'
+    );
     const officialH2hFiltered =
       competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
@@ -901,11 +922,13 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       const filled =
         tint === 'blue' ? styles.bo3FilledBlue : tint === 'orange' ? styles.bo3FilledOrange : styles.bo3FilledGreen;
       // round_robin_bo1_top4: el oficial de la fase regular (tint 'blue') es a una sola
-      // partida — una sola píldora. El bracket (tint 'green') sigue siendo BO3/lo que
-      // diga topcut_format y mantiene sus 2 píldoras. El desempate (tint 'orange') NO es
-      // single siempre: el 4to puesto real (round_robin_fourth_place) sí lo es, pero el de
-      // 1er puesto (round_robin_first_place) es BO1 en semi y BO3 en la final — cada caller
-      // de tint='orange' decide vía forceSingle según fase/origin (ver fourthPlaceMataSection).
+      // partida — una sola píldora. El bracket (tint 'green') depende de topcut_format y de
+      // la fase (semi/final/third_place) vía topcutWinsNeededClient — cada caller de
+      // tint='green' pasa forceSingle según corresponda (ver swissMataBracketSection). El
+      // desempate (tint 'orange') NO es single siempre: el 4to puesto real
+      // (round_robin_fourth_place) sí lo es, pero el de 1er puesto (round_robin_first_place)
+      // es BO1 en semi y BO3 en la final — cada caller de tint='orange' decide vía forceSingle
+      // según fase/origin (ver fourthPlaceMataSection).
       const singlePill = (tint === 'blue' && isRoundRobinBo1) || !!forceSingle;
       return (
         <View style={styles.h2hBo3Outer}>
@@ -1144,19 +1167,25 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               {profileMataByPhase.semi.length > 0 ? (
                 <>
                   <Text style={styles.profilePhaseSubtitle}>Semifinal</Text>
-                  {profileMataByPhase.semi.map((row) => officialPairingCard(row, 'green'))}
+                  {profileMataByPhase.semi.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'semi') < 2)
+                  )}
                 </>
               ) : null}
               {profileMataByPhase.final.length > 0 ? (
                 <>
                   <Text style={styles.profilePhaseSubtitle}>Final</Text>
-                  {profileMataByPhase.final.map((row) => officialPairingCard(row, 'green'))}
+                  {profileMataByPhase.final.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'final') < 2)
+                  )}
                 </>
               ) : null}
               {profileMataByPhase.third.length > 0 ? (
                 <>
                   <Text style={styles.profilePhaseSubtitle}>3er y 4to puesto</Text>
-                  {profileMataByPhase.third.map((row) => officialPairingCard(row, 'green'))}
+                  {profileMataByPhase.third.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'third_place') < 2)
+                  )}
                 </>
               ) : null}
             </>
