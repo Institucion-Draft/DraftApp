@@ -1387,7 +1387,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroGreenRow ? (
               <View style={[styles.heroBo3RowLeft, styles.heroBo3RowGreen]}>
                 <View style={[styles.heroBo3Box, dispTieLeft >= 1 && styles.heroBo3FilledGreen]} />
-                <View style={[styles.heroBo3Box, dispTieLeft >= 2 && styles.heroBo3FilledGreen]} />
+                {bracketLegWinsNeeded >= 2 ? (
+                  <View style={[styles.heroBo3Box, dispTieLeft >= 2 && styles.heroBo3FilledGreen]} />
+                ) : null}
               </View>
             ) : null}
             {showHeroOrangeRow ? (
@@ -1432,7 +1434,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             {showHeroGreenRow ? (
               <View style={[styles.heroBo3RowRight, styles.heroBo3RowGreen]}>
                 <View style={[styles.heroBo3Box, dispTieRight >= 1 && styles.heroBo3FilledGreen]} />
-                <View style={[styles.heroBo3Box, dispTieRight >= 2 && styles.heroBo3FilledGreen]} />
+                {bracketLegWinsNeeded >= 2 ? (
+                  <View style={[styles.heroBo3Box, dispTieRight >= 2 && styles.heroBo3FilledGreen]} />
+                ) : null}
               </View>
             ) : null}
             {showHeroOrangeRow ? (
