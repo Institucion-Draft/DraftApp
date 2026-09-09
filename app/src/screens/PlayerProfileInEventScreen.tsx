@@ -16,6 +16,7 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerProfileInEvent'>;
 
@@ -962,6 +963,125 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             Alert.alert('Error', walkoverRes.error.message ?? 'No se pudieron resolver los enfrentamientos pendientes.');
             return;
           }
+
+          // Fase 3 — ventana de recálculo del desempate de 1er puesto (round_robin BO3 clásico,
+          // group_origin='round_robin_first_place'). Si esta persona integra un grupo activo de
+          // ese tipo: ninguna pierna arrancó todavía → se recalcula el grupo en disputa desde
+          // cero, sin ella (1 solo restante = campeón directo; 2+ = se recrea el desempate). Ya
+          // arrancó alguna pierna → solo walkover puntual de sus piernas pendientes, nunca un
+          // recálculo — misma regla para cualquier fase/instancia futura (semis, final, 4to
+          // puesto), no es específica de este group_origin.
+          const firstPlaceGroupRes = await supabase
+            .from('event_tiebreak_groups')
+            .select('id')
+            .eq('event_id', eventId)
+            .eq('group_type', 'fourth_place')
+            .eq('group_origin', 'round_robin_first_place')
+            .eq('status', 'active')
+            .maybeSingle();
+          if (firstPlaceGroupRes.error) {
+            Alert.alert('Error', firstPlaceGroupRes.error.message ?? 'No se pudo verificar el desempate.');
+            return;
+          }
+          const firstPlaceGroupId = firstPlaceGroupRes.data?.id ?? null;
+          if (firstPlaceGroupId) {
+            const membershipRes = await supabase
+              .from('event_tiebreak_group_participants')
+              .select('participant_id')
+              .eq('group_id', firstPlaceGroupId)
+              .eq('participant_id', participantId)
+              .maybeSingle();
+            if (membershipRes.error) {
+              Alert.alert('Error', membershipRes.error.message ?? 'No se pudo verificar el desempate.');
+              return;
+            }
+            if (membershipRes.data) {
+              const bmRes = await supabase
+                .from('event_tiebreak_bracket_matches')
+                .select('pairing_id')
+                .eq('group_id', firstPlaceGroupId);
+              if (bmRes.error) {
+                Alert.alert('Error', bmRes.error.message ?? 'No se pudo verificar el desempate.');
+                return;
+              }
+              const legPairingIds = (bmRes.data ?? [])
+                .map((row: { pairing_id: string | null }) => row.pairing_id)
+                .filter((pid): pid is string => pid != null);
+              let anyLegStarted = false;
+              if (legPairingIds.length > 0) {
+                const startedRes = await supabase
+                  .from('matches')
+                  .select('id')
+                  .in('pairing_id', legPairingIds)
+                  .eq('match_type', 'tiebreak')
+                  .in('status', ['in_progress', 'completed'])
+                  .limit(1)
+                  .maybeSingle();
+                if (startedRes.error) {
+                  Alert.alert('Error', startedRes.error.message ?? 'No se pudo verificar el desempate.');
+                  return;
+                }
+                anyLegStarted = !!startedRes.data;
+              }
+
+              if (anyLegStarted) {
+                const legWalkoverRes = await supabase.rpc('apply_walkover_for_tiebreak_leg', {
+                  p_participant_id: participantId,
+                });
+                if (legWalkoverRes.error) {
+                  Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el desempate por abandono.');
+                  return;
+                }
+              } else {
+                // Cierra el grupo viejo (status='resolved') en vez de borrarlo — preserva la
+                // evidencia de que hubo una disputa real para el resaltado de StandingsScreen.
+                const closeRes = await supabase.rpc('close_active_round_robin_first_place_group', {
+                  p_event_id: eventId,
+                });
+                if (closeRes.error) {
+                  Alert.alert('Error', closeRes.error.message ?? 'No se pudo recalcular el desempate.');
+                  return;
+                }
+                if (closeRes.data === true) {
+                  const [eventRowRes, playersRes] = await Promise.all([
+                    supabase.from('draft_events').select('match_format').eq('id', eventId).maybeSingle(),
+                    supabase
+                      .from('event_participants')
+                      .select('id, left_event_at')
+                      .eq('event_id', eventId)
+                      .eq('role', 'player'),
+                  ]);
+                  const isBo2 =
+                    (eventRowRes.data as { match_format?: string | null } | null)?.match_format === 'bo2';
+                  const recalcParticipants = (playersRes.data ?? []) as {
+                    id: string;
+                    left_event_at: string | null;
+                  }[];
+                  const outcome = await computeAndCreateFirstPlaceTiebreakGroup(
+                    eventId,
+                    isBo2,
+                    recalcParticipants
+                  );
+                  if (outcome.kind === 'error') {
+                    Alert.alert('Error', outcome.message);
+                    return;
+                  }
+                } else {
+                  // Alguna pierna arrancó justo entre el chequeo y el borrado (carrera) — cae a
+                  // walkover puntual como fallback seguro, nunca a recalcular sobre un grupo que
+                  // ya tiene actividad real.
+                  const legWalkoverRes = await supabase.rpc('apply_walkover_for_tiebreak_leg', {
+                    p_participant_id: participantId,
+                  });
+                  if (legWalkoverRes.error) {
+                    Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el desempate por abandono.');
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
           await supabase.rpc('compute_event_champion', { p_event_id: eventId });
           await load();
         },

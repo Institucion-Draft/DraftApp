@@ -26,6 +26,7 @@ import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   computePodium,
   computeFinalStandingsWithTiebreakSplit,
+  rankRoundRobinBo1Standings,
   type PodiumState,
   type ActiveTiebreakGroupPodiumInput,
   type TiebreakMatchPodiumInput,
@@ -846,25 +847,33 @@ export default function StandingsScreen({ route, navigation }: Props) {
           ? 'round_robin_first_place'
           : null;
     if (tiebreakDisputeGroupOrigin) {
+      // Puede haber más de una fila con este group_origin para el mismo evento: desde la Fase 3
+      // del walkover, un recálculo de 1er puesto tras un abandono CIERRA (no borra) el grupo
+      // viejo para preservar la evidencia de la disputa, y arma uno nuevo si el conjunto
+      // recalculado sigue en empate — así que se agrega sobre TODAS las filas encontradas, no
+      // solo "la" fila (round_robin_fourth_place, en cambio, sigue siendo a lo sumo una).
       const fpGroupRes = await supabase
         .from('event_tiebreak_groups')
         .select('id, pending_bracket_matches')
         .eq('event_id', eventId)
-        .eq('group_origin', tiebreakDisputeGroupOrigin)
-        .maybeSingle();
-      if (!fpGroupRes.error && fpGroupRes.data?.id) {
-        const pending = (fpGroupRes.data as { pending_bracket_matches?: unknown }).pending_bracket_matches as
-          | { a?: { participantId?: string }; b?: { participantId?: string } }[]
-          | null;
-        for (const m of pending ?? []) {
-          if (m.a?.participantId) newFourthPlaceDisputantIds.add(m.a.participantId);
-          if (m.b?.participantId) newFourthPlaceDisputantIds.add(m.b.participantId);
+        .eq('group_origin', tiebreakDisputeGroupOrigin);
+      if (!fpGroupRes.error && fpGroupRes.data && fpGroupRes.data.length > 0) {
+        const groupIds: string[] = [];
+        for (const g of fpGroupRes.data as { id: string; pending_bracket_matches?: unknown }[]) {
+          groupIds.push(g.id);
+          const pending = g.pending_bracket_matches as
+            | { a?: { participantId?: string }; b?: { participantId?: string } }[]
+            | null;
+          for (const m of pending ?? []) {
+            if (m.a?.participantId) newFourthPlaceDisputantIds.add(m.a.participantId);
+            if (m.b?.participantId) newFourthPlaceDisputantIds.add(m.b.participantId);
+          }
         }
 
         const fpBmRes = await supabase
           .from('event_tiebreak_bracket_matches')
           .select('participant_a_id, participant_b_id, winner_participant_id')
-          .eq('group_id', fpGroupRes.data.id);
+          .in('group_id', groupIds);
         if (!fpBmRes.error && fpBmRes.data) {
           for (const bm of fpBmRes.data as {
             participant_a_id: string;
@@ -1404,21 +1413,19 @@ export default function StandingsScreen({ route, navigation }: Props) {
           pointsB: isBo2 ? (winnerIsB ? 3 : isDraw ? 1 : 0) : winnerIsB ? 1 : 0,
         };
       });
-      const { standings } = computeFinalStandingsWithTiebreakSplit(
-        standingInputs,
-        pairingResultsForRanking,
-        0
-      );
-      const orderIndex = new Map(standings.map((pid, idx) => [pid, idx]));
+      // Orden de mérito real (head-to-head → calidad de rivales → hash), con TODOS los
+      // participantes — irse no recalcula el desempate de los demás, y la propia posición de
+      // quien se fue debe reflejar su mérito real, no quedar forzada al final de su propio
+      // empate (confirmado en el diseño de Fase 3: el "seat" se libera, el resultado no se
+      // borra). computeFinalStandingsWithTiebreakSplit no sirve para esto: filtra a quienes
+      // tienen left_event_at ANTES de resolver el empate (correcto para decidir quién compite
+      // por la disputa, ver EventDetailScreen/roundRobinFirstPlaceTiebreak.ts), lo que además
+      // cambiaba la calidad de rivales de los que quedan activos. rankRoundRobinBo1Standings no
+      // filtra por left_event_at — misma cascada de desempate, orden total, sin exclusiones.
+      const standings = rankRoundRobinBo1Standings(standingInputs, pairingResultsForRanking);
       const rowsById = new Map(rowsBuilt.map((r) => [r.participantId, r]));
-      // computeFinalStandingsWithTiebreakSplit excluye a quienes tienen left_event_at (no
-      // compiten por el top4/1er puesto); igual deben seguir viendo su fila en la tabla, así que
-      // los participantes excluidos del cálculo se agregan al final en su propio orden simple.
-      const ranked = standings.map((pid) => rowsById.get(pid)).filter((r): r is RowView => r != null);
-      const leftOut = rowsBuilt.filter((r) => !orderIndex.has(r.participantId));
-      leftOut.sort((a, b) => (b.eg !== a.eg ? b.eg - a.eg : b.pg - a.pg));
       rowsBuilt.length = 0;
-      rowsBuilt.push(...ranked, ...leftOut);
+      rowsBuilt.push(...standings.map((pid) => rowsById.get(pid)).filter((r): r is RowView => r != null));
     } else {
       const winrateBO3 = (r: RowView) => (r.ec > 0 ? r.eg / r.ec : 0);
       const winrateMatches = (r: RowView) => (r.pj > 0 ? r.pg / r.pj : 0);

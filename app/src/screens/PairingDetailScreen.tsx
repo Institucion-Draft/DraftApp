@@ -1064,6 +1064,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const dispLiveL = inProgressLives ? (swapSides ? inProgressLives.b : inProgressLives.a) : 0;
   const dispLiveR = inProgressLives ? (swapSides ? inProgressLives.a : inProgressLives.b) : 0;
   const eventIsCancelled = draftEventStatus === 'cancelled';
+  // Mismo criterio que el guard de startMatch() (Fase 1): si alguno de los dos lados se fue,
+  // el botón no debe ni mostrarse habilitado — antes solo el handler bloqueaba, dejando el
+  // botón visualmente tappeable aunque no pudiera crear nada.
+  const startBlockedByLeftEvent = Boolean(a?.left_event_at || b?.left_event_at);
+  const startDisabled = eventIsCancelled || startBlockedByLeftEvent;
 
   const swissOfficialPendingThisRound =
     competitionFormat === 'swiss' &&
@@ -1510,9 +1515,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                         style={[
                           styles.primaryBtn,
                           showResumeStyle ? styles.resumeBtn : null,
-                          eventIsCancelled ? styles.primaryBtnDisabled : null,
+                          startDisabled ? styles.primaryBtnDisabled : null,
                         ]}
-                        disabled={eventIsCancelled}
+                        disabled={startDisabled}
                         onPress={() => void startMatch()}
                       >
                         <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>
@@ -1534,9 +1539,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                   style={[
                     styles.primaryBtn,
                     showResumeStyle ? styles.resumeBtn : null,
-                    eventIsCancelled ? styles.primaryBtnDisabled : null,
+                    startDisabled ? styles.primaryBtnDisabled : null,
                   ]}
-                  disabled={eventIsCancelled}
+                  disabled={startDisabled}
                   onPress={() => void startMatch()}
                 >
                   <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>
@@ -1623,9 +1628,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                   style={[
                     styles.primaryBtn,
                     showResumeStyle ? styles.resumeBtn : null,
-                    eventIsCancelled ? styles.primaryBtnDisabled : null,
+                    startDisabled ? styles.primaryBtnDisabled : null,
                   ]}
-                  disabled={eventIsCancelled}
+                  disabled={startDisabled}
                   onPress={() => void startMatch()}
                 >
                   <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>
@@ -1748,9 +1753,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             style={[
               styles.primaryBtn,
               showResumeStyle ? styles.resumeBtn : null,
-              eventIsCancelled ? styles.primaryBtnDisabled : null,
+              startDisabled ? styles.primaryBtnDisabled : null,
             ]}
-            disabled={eventIsCancelled}
+            disabled={startDisabled}
             onPress={() => void startMatch()}
           >
             <Text style={[styles.primaryBtnTxt, showResumeStyle ? styles.resumeBtnTxt : null]}>{startButtonLabel}</Text>
