@@ -404,13 +404,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     bracketTiebreakWinsNeeded != null &&
     Math.max(tiebreakWinsA, tiebreakWinsB) < bracketTiebreakWinsNeeded;
   const showRematchBtn =
-    bracketTiebreakSeriesStillOpen ||
-    (match.match_type !== 'tiebreak' && (
-      match.match_type === 'revenge' ||
-      officialBo3StillOpen ||
-      (competitionFormat === 'round_robin' &&
-        (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw))
-    ));
+    !(pa?.left_event_at || pb?.left_event_at) &&
+    (bracketTiebreakSeriesStillOpen ||
+      (match.match_type !== 'tiebreak' && (
+        match.match_type === 'revenge' ||
+        officialBo3StillOpen ||
+        (competitionFormat === 'round_robin' &&
+          (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw))
+      )));
 
   const officialWinsNeeded = officialBo1 ? 1 : 2;
   const isOfficialOpen =
