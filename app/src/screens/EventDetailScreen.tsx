@@ -328,6 +328,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         // Disparador único: fase regular 100% resuelta (0 pairings sin ganador ni empate).
         // Sin proyecciones de "quién puede llegar todavía" — solo se arma con el torneo
         // terminado. Los RPCs son idempotentes (no crean un segundo grupo/bracket si ya existe).
+        //
+        // Fase 2 del walkover (0082/0083): esta condición YA incluye a propósito los pairings
+        // resueltos por abandono — apply_walkover_for_participant inserta matches que disparan
+        // el mismo update_pairing_official_result que resuelve cualquier partida real, así que
+        // official_winner_participant_id queda seteado sin que este chequeo necesite saber nada
+        // de is_walkover. Si alguien se fue con pendientes contra rivales activos, el walkover
+        // los resuelve y allResolved pasa a true solo. Si AMBOS lados de un pairing se fueron
+        // (sin "el que se queda" a quien darle la victoria — ver apply_walkover_for_participant),
+        // ese pairing nunca gana official_winner_participant_id y allResolved se queda en false
+        // para siempre: el bracket de top4 no se arma hasta que alguien lo resuelva a mano —
+        // mismo criterio que adoptó compute_event_champion en 0083 (nada de "bloqueado", solo
+        // "genuinamente resuelto").
         const allResolved =
           rrPairings.length > 0 &&
           rrPairings.every((pr) => pr.official_winner_participant_id != null || pr.official_draw);
