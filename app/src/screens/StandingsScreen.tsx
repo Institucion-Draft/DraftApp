@@ -766,11 +766,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
     }
     const participantIds = participants.map((p) => p.id as string);
 
-    const leftAtByParticipant = new Map<string, string | null>();
-    for (const p of participants as { id: string; left_event_at?: string | null }[]) {
-      leftAtByParticipant.set(String(p.id), (p.left_event_at as string | null) ?? null);
-    }
-
     const colorsRes =
       participantIds.length > 0
         ? await supabase
@@ -896,7 +891,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? await supabase
             .from('matches')
-            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at, match_type, tiebreak_round')
+            .select('id, pairing_id, winner_participant_id, status, started_at, ended_at, match_type, tiebreak_round, is_walkover')
             .in('pairing_id', pairingIds)
         : { data: [], error: null };
 
@@ -1070,14 +1065,18 @@ export default function StandingsScreen({ route, navigation }: Props) {
       };
     });
 
+    // isBlocked ya no distingue "alguien de este pairing se fue": con el walkover (0082) un
+    // pairing pendiente contra alguien que se fue se resuelve solo (gana el que se queda) en
+    // cuanto corre apply_walkover_for_participant — mientras siga sin official_winner_
+    // participant_id acá es porque genuinamente todavía no se resolvió (por ejemplo, un pairing
+    // linkeado a un bracket real de desempate, o donde ambos lados se fueron) y el podio debe
+    // seguir tratándolo como incertidumbre real, igual que compute_event_champion (0083).
     const pairingRemain = (pairings as any[])
       .filter((pr) => pr.official_winner_participant_id == null && pr.official_draw !== true)
       .map((pr: any) => ({
         participantAId: String(pr.participant_a_id),
         participantBId: String(pr.participant_b_id),
-        isBlocked: !!(
-          leftAtByParticipant.get(String(pr.participant_a_id)) || leftAtByParticipant.get(String(pr.participant_b_id))
-        ),
+        isBlocked: false,
       }));
 
     let podiumTiebreakGroup: ActiveTiebreakGroupPodiumInput | null = null;
@@ -1300,8 +1299,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
           ? matchDmvts.reduce((a, b) => a + b, 0) / matchDmvts.length
           : null;
 
+      // TMP: excluye walkover — started_at/ended_at de esas matches no representan tiempo de
+      // juego real (se insertan en el mismo instante), así que arrastrarían el promedio a ~0.
       const durations = completedMatches
-        .filter((m: any) => m.ended_at)
+        .filter((m: any) => m.ended_at && !m.is_walkover)
         .map((m: any) => (new Date(m.ended_at as string).getTime() - new Date(m.started_at as string).getTime()) / 1000);
       const tmp =
         durations.length > 0 ? durations.reduce((a: number, b: number) => a + b, 0) / durations.length : null;

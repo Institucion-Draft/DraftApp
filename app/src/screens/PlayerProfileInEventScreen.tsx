@@ -46,6 +46,7 @@ type MatchRow = {
   winner_participant_id: string | null;
   ended_at: string | null;
   tiebreak_round: number | null;
+  is_walkover: boolean;
 };
 
 type EventPlayer = {
@@ -53,6 +54,7 @@ type EventPlayer = {
   userId: string;
   displayName: string;
   giantName?: string | null;
+  leftEventAt: string | null;
 };
 
 type OfficialH2HRow = {
@@ -65,6 +67,15 @@ type OfficialH2HRow = {
   isDraw: boolean;
   /** Solo presente en filas de fase mata-mata: identifica el cruce del bracket. */
   bracketMatchId?: string | null;
+  /** true si ESTE pairing tiene alguna match walkover ganada por el dueño del perfil — el
+   * oponente fue quien se fue, el badge "Se fue" va junto al nombre del oponente. No basta con
+   * que el oponente tenga left_event_at seteado en general: tiene que haber sido walkover EN
+   * este enfrentamiento puntual (podría haberse ido antes de jugar cualquier cosa acá, o el
+   * pairing podría estar excluido del walkover — ej. linkeado a un bracket, caso G). */
+  opponentIsWalkoverLoser: boolean;
+  /** Mismo criterio, del otro lado: alguna match walkover en este pairing ganada por el
+   * oponente — el dueño del perfil fue quien se fue, el badge va junto al nombre propio. */
+  selfIsWalkoverLoser: boolean;
 };
 
 type RevengeH2HRow = {
@@ -373,6 +384,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                     .in('pairing_id', pairingIds)
                     .in('match_type', ['draft', 'final', 'tiebreak'])
                     .eq('status', 'completed')
+                    .eq('is_walkover', false)
                     .not('winner_participant_id', 'is', null)
                     .order('ended_at', { ascending: false })
                     .limit(50)
@@ -411,6 +423,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           id,
           user_id,
           giant_name,
+          left_event_at,
           users!event_participants_user_id_fkey (
             display_name,
             username
@@ -446,7 +459,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       pairingIds.length > 0
         ? await supabase
             .from('matches')
-            .select('id, pairing_id, match_type, status, winner_participant_id, ended_at, tiebreak_round')
+            .select('id, pairing_id, match_type, status, winner_participant_id, ended_at, tiebreak_round, is_walkover')
             .in('pairing_id', pairingIds)
         : { data: [], error: null };
 
@@ -505,6 +518,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         userId: row.user_id as string,
         displayName: isGiant && giantName ? giantName : individualName,
         giantName,
+        leftEventAt: (row.left_event_at as string | null) ?? null,
       };
     });
 
@@ -516,6 +530,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       let profileWins = 0;
       let opponentWins = 0;
       let sortTier: 0 | 1 | 2 = 2;
+      let opponentIsWalkoverLoser = false;
+      let selfIsWalkoverLoser = false;
       const isDraw = pairing?.official_draw === true;
       if (pairing) {
         const pm = matches.filter(
@@ -524,8 +540,17 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             (m.match_type === 'draft' || m.match_type === 'final') &&
             m.status === 'completed'
         );
-        profileWins = pm.filter((m) => m.winner_participant_id === participantId).length;
-        opponentWins = pm.filter((m) => m.winner_participant_id === opp.id).length;
+        // Las píldoras del marcador de este pairing puntual muestran solo juego real — walkover
+        // sigue contando para el resultado oficial (pairing.official_winner_participant_id) y
+        // para PG/PJ/EG/EC de tabla/perfil, pero no infla el marcador visual acá.
+        const pmReal = pm.filter((m) => !m.is_walkover);
+        profileWins = pmReal.filter((m) => m.winner_participant_id === participantId).length;
+        opponentWins = pmReal.filter((m) => m.winner_participant_id === opp.id).length;
+        // Badge "Se fue": solo si HAY walkover en este pairing puntual, no por left_event_at
+        // general — alguien puede haberse ido sin que este enfrentamiento en particular haya
+        // sido tocado por el walkover (ej. caso G, excluido por estar linkeado a un bracket).
+        opponentIsWalkoverLoser = pm.some((m) => m.is_walkover && m.winner_participant_id === participantId);
+        selfIsWalkoverLoser = pm.some((m) => m.is_walkover && m.winner_participant_id === opp.id);
         if (pairing.official_winner_participant_id != null || isDraw) sortTier = 0;
         else if (pm.length > 0) sortTier = 1;
         else sortTier = 2;
@@ -538,6 +563,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         opponentWins,
         sortTier,
         isDraw,
+        opponentIsWalkoverLoser,
+        selfIsWalkoverLoser,
       };
     });
     officialRows.sort((a, b) => {
@@ -701,6 +728,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               sortTier: 0,
               isDraw: false,
               bracketMatchId: bm.id,
+              opponentIsWalkoverLoser: false,
+              selfIsWalkoverLoser: false,
             };
             (phase === 'semi' ? semiRows : phase === 'final' ? finalRows : thirdRows).push(row);
           }
@@ -835,6 +864,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             sortTier: 0,
             isDraw: false,
             bracketMatchId: bm.id,
+            opponentIsWalkoverLoser: false,
+            selfIsWalkoverLoser: false,
           };
           (phase === 'semi' ? semiRows : finalRows).push(row);
         }
@@ -868,6 +899,43 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const markAsLeft = async (isSelfAction: boolean) => {
     if (!myUserId) return;
     const actorName = displayName || 'este jugador';
+
+    // Bloqueo transversal: no se puede marcar como ido con una partida in_progress — el walkover
+    // solo resuelve pairings pendientes SIN partida en curso (ver 0082); dejar avanzar acá
+    // dejaría una partida en vivo huérfana conviviendo con un pairing ya resuelto por abandono.
+    const ownPairingsRes = await supabase
+      .from('pairings')
+      .select('id')
+      .eq('event_id', eventId)
+      .or(`participant_a_id.eq.${participantId},participant_b_id.eq.${participantId}`);
+    if (ownPairingsRes.error) {
+      Alert.alert('Error', ownPairingsRes.error.message ?? 'No se pudo verificar el estado de las partidas.');
+      return;
+    }
+    const ownPairingIds = (ownPairingsRes.data ?? []).map((row: { id: string }) => row.id);
+    if (ownPairingIds.length > 0) {
+      const inProgressRes = await supabase
+        .from('matches')
+        .select('id')
+        .in('pairing_id', ownPairingIds)
+        .eq('status', 'in_progress')
+        .limit(1)
+        .maybeSingle();
+      if (inProgressRes.error) {
+        Alert.alert('Error', inProgressRes.error.message ?? 'No se pudo verificar el estado de las partidas.');
+        return;
+      }
+      if (inProgressRes.data) {
+        Alert.alert(
+          'No se puede marcar como ido',
+          isSelfAction
+            ? 'No podés marcarte como ido: tenés una partida en curso. Terminala primero.'
+            : `No se puede marcar a ${actorName} como ${leftWord}: tiene una partida en curso. Termínenla primero.`
+        );
+        return;
+      }
+    }
+
     const confirmation = isSelfAction
       ? `Si te marcás como ${leftWord}, no vas a poder revertirlo vos mismo (solo el organizer puede). Tus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`
       : `Vas a marcar a ${actorName} como ${leftWord} del evento. Sus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`;
@@ -884,6 +952,16 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             Alert.alert('Error', error.message ?? 'No se pudo marcar como ido.');
             return;
           }
+          // Resuelve por abandono los pairings de fase regular todavía pendientes de esta
+          // persona (walkover) ANTES de recalcular el campeón, para que
+          // compute_event_champion ya vea esos pairings resueltos, no bloqueados.
+          const walkoverRes = await supabase.rpc('apply_walkover_for_participant', {
+            p_participant_id: participantId,
+          });
+          if (walkoverRes.error) {
+            Alert.alert('Error', walkoverRes.error.message ?? 'No se pudieron resolver los enfrentamientos pendientes.');
+            return;
+          }
           await supabase.rpc('compute_event_champion', { p_event_id: eventId });
           await load();
         },
@@ -898,6 +976,15 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       .eq('id', participantId);
     if (error) {
       Alert.alert('Error', error.message ?? 'No se pudo revertir el estado.');
+      return;
+    }
+    // Deshace las matches walkover generadas por la salida de esta persona y resetea el
+    // resultado oficial de los pairings que quedaron resueltos por abandono.
+    const revertWalkoverRes = await supabase.rpc('revert_walkover_for_participant', {
+      p_participant_id: participantId,
+    });
+    if (revertWalkoverRes.error) {
+      Alert.alert('Error', revertWalkoverRes.error.message ?? 'No se pudo revertir el walkover.');
       return;
     }
     await supabase.rpc('compute_event_champion', { p_event_id: eventId });
@@ -969,13 +1056,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         }}
       >
         <View style={styles.h2hNamesRow}>
-          <Text style={styles.h2hNameSide} numberOfLines={1}>
-            {isGiantEvent ? (giantName ?? displayName) : displayName}
-          </Text>
+          <View style={styles.h2hNameSideWrap}>
+            <Text style={[styles.h2hNameSide, styles.h2hNameSideInWrap]} numberOfLines={1}>
+              {isGiantEvent ? (giantName ?? displayName) : displayName}
+            </Text>
+            {row.selfIsWalkoverLoser ? <Text style={styles.h2hLeftBadge}>Se fue</Text> : null}
+          </View>
           <Text style={styles.h2hVs}>vs</Text>
-          <Text style={[styles.h2hNameSide, styles.h2hNameSideRight]} numberOfLines={1}>
-            {row.opponentName}
-          </Text>
+          <View style={[styles.h2hNameSideWrap, styles.h2hNameSideWrapRight]}>
+            {row.opponentIsWalkoverLoser ? <Text style={styles.h2hLeftBadge}>Se fue</Text> : null}
+            <Text style={[styles.h2hNameSide, styles.h2hNameSideRight, styles.h2hNameSideInWrap]} numberOfLines={1}>
+              {row.opponentName}
+            </Text>
+          </View>
         </View>
         {bo3Pills(row.profileWins, row.opponentWins, tint, forceSinglePill)}
       </TouchableOpacity>
@@ -1666,6 +1759,21 @@ const styles = StyleSheet.create({
   },
   h2hNameSide: { flex: 1, fontSize: 13, fontWeight: '700', color: '#111827' },
   h2hNameSideRight: { textAlign: 'right' },
+  h2hNameSideWrap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  h2hNameSideWrapRight: { justifyContent: 'flex-end' },
+  // Anula el flex:1 de h2hNameSide dentro del wrap: sin esto el texto se estira hasta el borde
+  // del wrap y el badge queda pegado a ese borde (cerca del "vs"), no al nombre.
+  h2hNameSideInWrap: { flex: 0, flexShrink: 1 },
+  h2hLeftBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#92400E',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 5,
+    marginHorizontal: 4,
+  },
   h2hVs: { fontSize: 12, fontWeight: '700', color: '#6B7280', flexShrink: 0 },
   tiebreakVsRow: {
     flexDirection: 'row',

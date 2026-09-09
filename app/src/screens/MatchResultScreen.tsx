@@ -39,6 +39,7 @@ type ParticipantRow = {
   user_id: string;
   giant_name: string | null;
   member_b_user_id: string | null;
+  left_event_at: string | null;
   users:
     | {
         username: string;
@@ -139,6 +140,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           user_id,
           giant_name,
           member_b_user_id,
+          left_event_at,
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -441,6 +443,15 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   }
 
   const createRematch = async () => {
+    // Nadie puede iniciar una partida nueva (revancha/tiebreak/lo que sea) en un pairing donde
+    // alguno de los dos lados se marcó como left_event_at — está fuera del evento.
+    if (pa?.left_event_at || pb?.left_event_at) {
+      Alert.alert(
+        'No se puede iniciar',
+        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas en este enfrentamiento.'
+      );
+      return;
+    }
     const countRes = await supabase
       .from('matches')
       .select('id', { count: 'exact', head: true })
