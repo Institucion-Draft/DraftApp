@@ -55,6 +55,8 @@ type MatchRow = {
   ended_at: string | null;
   abort_requested_by: string | null;
   abort_requested_at: string | null;
+  /** Partida resuelta por abandono (walkover) — ver 0082. No cuenta para rachas ni H2H. */
+  is_walkover: boolean;
 };
 
 type MatchTurnTimeRow = {
@@ -86,6 +88,7 @@ type ParticipantRow = {
   user_id: string;
   member_b_user_id?: string | null;
   giant_name?: string | null;
+  left_event_at?: string | null;
   participant_colors?: { color: string; member?: string | null }[] | { color: string; member?: string | null } | null;
   users:
     | {
@@ -326,6 +329,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           user_id,
           member_b_user_id,
           giant_name,
+          left_event_at,
           participant_colors (color, member),
           users!event_participants_user_id_fkey (
             username,
@@ -339,7 +343,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('matches')
         .select(
-          'id, match_number, match_type, tiebreak_round, status, winner_participant_id, who_started_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at'
+          'id, match_number, match_type, tiebreak_round, status, winner_participant_id, who_started_participant_id, ended_by_surrender, started_at, ended_at, abort_requested_by, abort_requested_at, is_walkover'
         )
         .eq('pairing_id', p.id)
         .order('match_number', { ascending: true }),
@@ -386,6 +390,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       ...(row as MatchRow),
       tiebreak_round: (row as MatchRow).tiebreak_round ?? null,
       who_started_participant_id: (row as MatchRow).who_started_participant_id ?? null,
+      is_walkover: (row as MatchRow).is_walkover ?? false,
     })) as MatchRow[];
     setMatches(matchRows);
 
@@ -994,11 +999,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (wa >= 1 && wb >= 1) return 'Jugar el bueno';
     return bracketIniciarPhrase(phase);
   })();
+  // Las píldoras del hero muestran solo juego real — walkover cuenta para el resultado oficial
+  // del pairing (pairing.official_winner_participant_id) y para PG/PJ/EG/EC de tabla/perfil,
+  // pero no se refleja en el marcador visual de este pairing puntual.
   const winsA = officialMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id && !m.is_walkover
   ).length;
   const winsB = officialMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id && !m.is_walkover
   ).length;
   // round_robin_bo1_top4: oficial resuelto = official_winner seteado o 1 partida oficial ganada
   // (cubre el caso donde el trigger todavía no reflejó el ganador en el pairing). round_robin
@@ -1093,6 +1101,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (!pairing) return;
     if (eventIsCancelled) {
       Alert.alert('Evento cancelado', 'No se pueden iniciar partidas en un evento cancelado.');
+      return;
+    }
+    // Nadie puede iniciar una partida nueva (oficial, venganza o cualquier otra) en un pairing
+    // donde alguno de los dos lados se marcó como left_event_at — está fuera del evento. Sin
+    // excepción todavía para pairings linkeados a un bracket real (Fase 1).
+    if (a?.left_event_at || b?.left_event_at) {
+      Alert.alert(
+        'No se puede iniciar',
+        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas en este enfrentamiento.'
+      );
       return;
     }
     const details = await findConcurrentInProgressDetailsForPairParticipants({
@@ -1244,6 +1262,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
               #{displayNum} · {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
             </Text>
+            {m.is_walkover ? (
+              <Text style={[styles.abortBadge, styles.walkoverBadge]}>Por abandono</Text>
+            ) : null}
             {starterName ? <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text> : null}
           </View>
           {showLive ? (
@@ -1846,6 +1867,7 @@ const styles = StyleSheet.create({
   },
   abortBadgeMuted: { backgroundColor: '#E5E7EB', color: '#6B7280' },
   abortBadgeAlert: { backgroundColor: '#FEE2E2', color: '#DC2626' },
+  walkoverBadge: { backgroundColor: '#FEF3C7', color: '#92400E', marginLeft: 6 },
   matchRowLive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
   matchLiveTxt: { color: '#1D4ED8', fontWeight: '700' },
   matchLiveScore: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 4 },

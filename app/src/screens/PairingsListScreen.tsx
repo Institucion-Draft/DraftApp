@@ -85,6 +85,7 @@ type DbMatchRow = {
   match_number: number | null;
   started_at: string | null;
   tiebreak_round: number | null;
+  is_walkover: boolean | null;
 };
 
 type BracketPhase = 'semi' | 'final' | 'third_place';
@@ -414,7 +415,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       pairingIds.length > 0
         ? supabase
             .from('matches')
-            .select('id, pairing_id, status, winner_participant_id, match_type, match_number, started_at, tiebreak_round')
+            .select('id, pairing_id, status, winner_participant_id, match_type, match_number, started_at, tiebreak_round, is_walkover')
             .in('pairing_id', pairingIds)
         : Promise.resolve({ data: [], error: null } as any)
     );
@@ -450,7 +451,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           inProgressMatchByPairing.set(pid, m.id);
         }
       }
-      if (m.status === 'completed' && m.winner_participant_id) {
+      // Las píldoras muestran solo juego real, no walkover (ver PairingDetailScreen.tsx /
+      // PlayerProfileInEventScreen.tsx) — walkover sigue contando para el resultado oficial del
+      // pairing, pero no se refleja en este marcador visual.
+      if (m.status === 'completed' && m.winner_participant_id && !m.is_walkover) {
         const key = `${pid}:${m.winner_participant_id}`;
         completedWinsByPairingParticipant.set(
           key,
