@@ -1195,6 +1195,139 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             }
           }
 
+          // Fase 5 — mismo principio que las anteriores, aplicado a la disputa por el último
+          // cupo del top4 (group_type='fourth_place', group_origin='round_robin_fourth_place',
+          // 0071/0072/0091). A diferencia de las ramas de arriba, la membership NO puede
+          // chequearse contra event_tiebreak_group_participants (esa tabla también tiene al
+          // top3 YA resuelto, que no está en disputa) — se usa pending_bracket_matches, el
+          // jsonb con TODOS los participantIds concretos en disputa (mismo criterio que ya usa
+          // StandingsScreen para "quién disputa").
+          const fourthPlaceGroupRes = await supabase
+            .from('event_tiebreak_groups')
+            .select('id, pending_bracket_matches')
+            .eq('event_id', eventId)
+            .eq('group_type', 'fourth_place')
+            .eq('group_origin', 'round_robin_fourth_place')
+            .eq('status', 'active')
+            .maybeSingle();
+          if (fourthPlaceGroupRes.error) {
+            Alert.alert(
+              'Error',
+              fourthPlaceGroupRes.error.message ?? 'No se pudo verificar la disputa por el 4to puesto.'
+            );
+            return;
+          }
+          const fourthPlaceGroupId = fourthPlaceGroupRes.data?.id ?? null;
+          if (fourthPlaceGroupId) {
+            const pending = (fourthPlaceGroupRes.data?.pending_bracket_matches ?? null) as
+              | { a?: { participantId?: string }; b?: { participantId?: string } }[]
+              | null;
+            const disputedIds = new Set<string>();
+            for (const m of pending ?? []) {
+              if (m.a?.participantId) disputedIds.add(m.a.participantId);
+              if (m.b?.participantId) disputedIds.add(m.b.participantId);
+            }
+            if (disputedIds.has(participantId)) {
+              const fourthPlaceBmRes = await supabase
+                .from('event_tiebreak_bracket_matches')
+                .select('pairing_id')
+                .eq('group_id', fourthPlaceGroupId);
+              if (fourthPlaceBmRes.error) {
+                Alert.alert(
+                  'Error',
+                  fourthPlaceBmRes.error.message ?? 'No se pudo verificar la disputa por el 4to puesto.'
+                );
+                return;
+              }
+              const fourthPlaceLegPairingIds = (fourthPlaceBmRes.data ?? [])
+                .map((row: { pairing_id: string | null }) => row.pairing_id)
+                .filter((pid): pid is string => pid != null);
+              let anyFourthPlaceLegStarted = false;
+              if (fourthPlaceLegPairingIds.length > 0) {
+                const startedRes = await supabase
+                  .from('matches')
+                  .select('id')
+                  .in('pairing_id', fourthPlaceLegPairingIds)
+                  .eq('match_type', 'tiebreak')
+                  .in('status', ['in_progress', 'completed'])
+                  .limit(1)
+                  .maybeSingle();
+                if (startedRes.error) {
+                  Alert.alert(
+                    'Error',
+                    startedRes.error.message ?? 'No se pudo verificar la disputa por el 4to puesto.'
+                  );
+                  return;
+                }
+                anyFourthPlaceLegStarted = !!startedRes.data;
+              }
+
+              if (anyFourthPlaceLegStarted) {
+                const legWalkoverRes = await supabase.rpc('apply_walkover_for_tiebreak_leg', {
+                  p_participant_id: participantId,
+                });
+                if (legWalkoverRes.error) {
+                  Alert.alert(
+                    'Error',
+                    legWalkoverRes.error.message ?? 'No se pudo resolver la disputa por abandono.'
+                  );
+                  return;
+                }
+              } else {
+                // Cierra el grupo viejo (status='resolved') en vez de borrarlo — preserva la
+                // evidencia de la disputa.
+                const closeRes = await supabase.rpc('close_active_round_robin_fourth_place_group', {
+                  p_event_id: eventId,
+                });
+                if (closeRes.error) {
+                  Alert.alert('Error', closeRes.error.message ?? 'No se pudo recalcular la disputa.');
+                  return;
+                }
+                if (closeRes.data === true) {
+                  const [eventRowRes, playersRes] = await Promise.all([
+                    supabase.from('draft_events').select('match_format').eq('id', eventId).maybeSingle(),
+                    supabase
+                      .from('event_participants')
+                      .select('id, left_event_at')
+                      .eq('event_id', eventId)
+                      .eq('role', 'player'),
+                  ]);
+                  const isBo2 =
+                    (eventRowRes.data as { match_format?: string | null } | null)?.match_format === 'bo2';
+                  const recalcParticipants = (playersRes.data ?? []) as {
+                    id: string;
+                    left_event_at: string | null;
+                  }[];
+                  // minDisputeSize = tamaño de la disputa ANTES de esta salida (disputedIds ya
+                  // incluye a quien se va, todavía no se excluyó de pending_bracket_matches) —
+                  // completa el grupo empatado recalculado hasta ese tamaño en vez de dejarlo
+                  // reducido en uno (confirmado: nunca se achica, se reemplaza en cascada).
+                  const outcome = await computeAndCreateTop4Bracket(eventId, isBo2, recalcParticipants, {
+                    minDisputeSize: disputedIds.size,
+                  });
+                  if (outcome.kind === 'error') {
+                    Alert.alert('Error', outcome.message);
+                    return;
+                  }
+                } else {
+                  // Alguna pierna arrancó justo entre el chequeo y el cierre (carrera) — cae a
+                  // walkover puntual como fallback seguro, nunca a recalcular sobre una disputa
+                  // que ya tiene actividad real.
+                  const legWalkoverRes = await supabase.rpc('apply_walkover_for_tiebreak_leg', {
+                    p_participant_id: participantId,
+                  });
+                  if (legWalkoverRes.error) {
+                    Alert.alert(
+                      'Error',
+                      legWalkoverRes.error.message ?? 'No se pudo resolver la disputa por abandono.'
+                    );
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
           await supabase.rpc('compute_event_champion', { p_event_id: eventId });
           await load();
         },

@@ -949,6 +949,65 @@ export function computeFourthPlaceTiebreakBracket(
   return { fourthPlaceParticipantId: null, matches };
 }
 
+/**
+ * Orden REAL de resolución de un desempate de 4to/1er puesto ya jugado (event_tiebreak_
+ * bracket_matches de un grupo group_type='fourth_place'), de mejor a peor: ganador de la final
+ * (el 4to seed real), perdedor de la final, perdedor(es) de semi. Con 2 semis (grupo de 4), los
+ * perdedores nunca jugaron entre sí — mismo desempate de siempre (h2h → calidad de rivales →
+ * hash) aplicado solo a ese par, para dar un orden determinístico incluso ahí.
+ *
+ * Devuelve `null` si la final todavía no tiene ganador (grupo 'superseded' sin haber jugado
+ * nada — no hay orden real que extraer, cae al fallback de standings del caller).
+ *
+ * Usada por computeAndCreateTop4Bracket (Fase 4) para completar un corrimiento con el orden REAL
+ * de una disputa ya resuelta en vez de recalcular desde la tabla general de puntos — irrelevante
+ * ahí, todos comparten los mismos puntos, por eso hubo disputa en primer lugar.
+ */
+export function resolveFourthPlaceDisputeOrder(
+  bracketMatches: BracketMatchPodiumInput[],
+  pairings: RoundRobinPairingResult[]
+): string[] | null {
+  const finalRow = bracketMatches.find((m) => m.bracket_phase === 'final');
+  if (!finalRow || !finalRow.winner_participant_id) return null;
+
+  const finalWinner = finalRow.winner_participant_id;
+  const finalLoser =
+    finalWinner === finalRow.participant_a_id ? finalRow.participant_b_id : finalRow.participant_a_id;
+  const order = [finalWinner, finalLoser];
+
+  const semiRows = bracketMatches.filter((m) => m.bracket_phase === 'semi');
+  if (semiRows.length === 1) {
+    const semi = semiRows[0]!;
+    if (semi.winner_participant_id) {
+      const loser =
+        semi.winner_participant_id === semi.participant_a_id ? semi.participant_b_id : semi.participant_a_id;
+      order.push(loser);
+    }
+  } else if (semiRows.length === 2) {
+    const losers = semiRows
+      .filter((m) => m.winner_participant_id != null)
+      .map((m) => (m.winner_participant_id === m.participant_a_id ? m.participant_b_id : m.participant_a_id));
+    if (losers.length === 2) {
+      const totalPointsMap = new Map<string, number>();
+      for (const pr of pairings) {
+        totalPointsMap.set(
+          pr.participantAId,
+          (totalPointsMap.get(pr.participantAId) ?? 0) + pointsAwardedTo(pr, pr.participantAId)
+        );
+        totalPointsMap.set(
+          pr.participantBId,
+          (totalPointsMap.get(pr.participantBId) ?? 0) + pointsAwardedTo(pr, pr.participantBId)
+        );
+      }
+      order.push(...resolveTieGroup(losers, pairings, totalPointsMap).order);
+    } else {
+      order.push(...losers);
+    }
+  }
+
+  return order;
+}
+
 export function computePodium(
   participants: PodiumPlayer[],
   pairingsRemaining: PairingRemain[],
