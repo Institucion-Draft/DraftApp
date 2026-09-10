@@ -28,14 +28,9 @@ import {
   pairingIsBetweenParticipants,
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
-import {
-  computeFinalStandingsWithTiebreakSplit,
-  computeFourthPlaceTiebreakBracket,
-  type RoundRobinStandingInput,
-  type RoundRobinPairingResult,
-} from '../lib/podium';
 import { generateEventPairings } from '../lib/generateEventPairings';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
+import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
 
@@ -345,91 +340,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           rrPairings.length > 0 &&
           rrPairings.every((pr) => pr.official_winner_participant_id != null || pr.official_draw);
         if (allResolved) {
-          // BO1/BO3 = 1 punto por pairing ganado; BO2 = 3 por ganado, 1 por empate.
-          const pointsByParticipant: Record<string, number> = {};
-          for (const part of p) pointsByParticipant[part.id] = 0;
-          for (const pr of rrPairings) {
-            const w = pr.official_winner_participant_id;
-            if (w != null) {
-              pointsByParticipant[w] = (pointsByParticipant[w] ?? 0) + (isBo2 ? 3 : 1);
-            } else if (isBo2 && pr.official_draw) {
-              pointsByParticipant[pr.participant_a_id] = (pointsByParticipant[pr.participant_a_id] ?? 0) + 1;
-              pointsByParticipant[pr.participant_b_id] = (pointsByParticipant[pr.participant_b_id] ?? 0) + 1;
-            }
-          }
-          const standingInputs: RoundRobinStandingInput[] = p.map((part) => ({
-            participantId: part.id,
-            points: pointsByParticipant[part.id] ?? 0,
-            leftEventAt: part.left_event_at,
-          }));
-          const pairingResults: RoundRobinPairingResult[] = rrPairings.map((pr) => {
-            const isDraw = pr.official_winner_participant_id == null && pr.official_draw;
-            const winnerIsA = pr.official_winner_participant_id === pr.participant_a_id;
-            const winnerIsB = pr.official_winner_participant_id === pr.participant_b_id;
-            const pointsA = isBo2 ? (winnerIsA ? 3 : isDraw ? 1 : 0) : winnerIsA ? 1 : 0;
-            const pointsB = isBo2 ? (winnerIsB ? 3 : isDraw ? 1 : 0) : winnerIsB ? 1 : 0;
-            return {
-              participantAId: pr.participant_a_id,
-              participantBId: pr.participant_b_id,
-              winnerParticipantId: pr.official_winner_participant_id,
-              isDraw,
-              pointsA,
-              pointsB,
-            };
-          });
-          const { standings, fourthPlaceTieGroup } = computeFinalStandingsWithTiebreakSplit(
-            standingInputs,
-            pairingResults
+          await computeAndCreateTop4Bracket(
+            e.id,
+            isBo2,
+            p.map((part) => ({ id: part.id, left_event_at: part.left_event_at }))
           );
-
-          if (fourthPlaceTieGroup.length === 0) {
-            // Sin empate en el corte del 4to puesto: top4 directo, comportamiento sin cambios.
-            if (standings.length >= 4) {
-              await supabase.rpc('create_round_robin_top4_bracket', {
-                p_event_id: e.id,
-                p_top4_ordered: standings.slice(0, 4),
-              });
-            }
-          } else {
-            // Los 3 lugares NO en disputa: quienes no están en fourthPlaceTieGroup. Un integrante
-            // del grupo puede haber quedado en posición 1-3 en tanda 1 solo si fue resuelto
-            // arbitrariamente (ver computeFinalStandingsWithTiebreakSplit) — por eso no alcanza
-            // con tomar standings[0:3] tal cual, hay que filtrar el grupo en disputa primero.
-            const top3 = standings.filter((pid) => !fourthPlaceTieGroup.includes(pid)).slice(0, 3);
-            const { fourthPlaceParticipantId, matches } = computeFourthPlaceTiebreakBracket(
-              fourthPlaceTieGroup,
-              pairingResults
-            );
-
-            if (matches.length === 0 && fourthPlaceParticipantId != null) {
-              // Grupo de 5+: el mejor ordenado del grupo entra directo como 4to puesto, sin
-              // partidos extra.
-              if (top3.length === 3) {
-                await supabase.rpc('create_round_robin_top4_bracket', {
-                  p_event_id: e.id,
-                  p_top4_ordered: [...top3, fourthPlaceParticipantId],
-                });
-              }
-            } else if (matches.length > 0 && top3.length === 3) {
-              // 2, 3 o 4 en disputa: armar el grupo de desempate si todavía no existe. El
-              // bracket real de top4 se dispara recién cuando ese desempate se resuelva (el
-              // trigger de avance en 0072 arma [top3, ganador] y llama a
-              // create_round_robin_top4_bracket) — acá NO se llama a ese RPC.
-              const existingGroupRes = await supabase
-                .from('event_tiebreak_groups')
-                .select('id')
-                .eq('event_id', e.id)
-                .eq('group_type', 'fourth_place')
-                .maybeSingle();
-              if (!existingGroupRes.error && !existingGroupRes.data) {
-                await supabase.rpc('create_fourth_place_tiebreak_group', {
-                  p_event_id: e.id,
-                  p_matches: matches,
-                  p_top3_ordered: top3,
-                });
-              }
-            }
-          }
         }
       }
     }

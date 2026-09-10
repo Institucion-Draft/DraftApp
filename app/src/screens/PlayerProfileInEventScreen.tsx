@@ -17,6 +17,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
+import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerProfileInEvent'>;
 
@@ -1075,6 +1076,118 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                   });
                   if (legWalkoverRes.error) {
                     Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el desempate por abandono.');
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
+          // Fase 4 — mismo principio que la Fase 3 de arriba, aplicado al bracket REAL de top4
+          // de round_robin_bo1_top4 (group_type='bracket', group_origin='round_robin_topcut',
+          // 0089): ninguna semi arrancó todavía → recalcular el top4 completo (el siguiente en
+          // mérito general sube a la seed vacante, cascada automática de
+          // computeFinalStandingsWithTiebreakSplit — confirmado A2/B). Alguna semi ya tiene
+          // actividad → walkover puntual de la fila pendiente vinculada a esta persona, sin
+          // importar si ESA fila tuvo actividad propia (mismo criterio ya validado en 0088).
+          const topcutGroupRes = await supabase
+            .from('event_tiebreak_groups')
+            .select('id')
+            .eq('event_id', eventId)
+            .eq('group_type', 'bracket')
+            .eq('group_origin', 'round_robin_topcut')
+            .eq('status', 'active')
+            .maybeSingle();
+          if (topcutGroupRes.error) {
+            Alert.alert('Error', topcutGroupRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+            return;
+          }
+          const topcutGroupId = topcutGroupRes.data?.id ?? null;
+          if (topcutGroupId) {
+            const topcutMembershipRes = await supabase
+              .from('event_tiebreak_group_participants')
+              .select('participant_id')
+              .eq('group_id', topcutGroupId)
+              .eq('participant_id', participantId)
+              .maybeSingle();
+            if (topcutMembershipRes.error) {
+              Alert.alert('Error', topcutMembershipRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+              return;
+            }
+            if (topcutMembershipRes.data) {
+              const topcutBmRes = await supabase
+                .from('event_tiebreak_bracket_matches')
+                .select('pairing_id')
+                .eq('group_id', topcutGroupId);
+              if (topcutBmRes.error) {
+                Alert.alert('Error', topcutBmRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+                return;
+              }
+              const topcutLegPairingIds = (topcutBmRes.data ?? [])
+                .map((row: { pairing_id: string | null }) => row.pairing_id)
+                .filter((pid): pid is string => pid != null);
+              let anyTopcutLegStarted = false;
+              if (topcutLegPairingIds.length > 0) {
+                const startedRes = await supabase
+                  .from('matches')
+                  .select('id')
+                  .in('pairing_id', topcutLegPairingIds)
+                  .eq('match_type', 'tiebreak')
+                  .in('status', ['in_progress', 'completed'])
+                  .limit(1)
+                  .maybeSingle();
+                if (startedRes.error) {
+                  Alert.alert('Error', startedRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+                  return;
+                }
+                anyTopcutLegStarted = !!startedRes.data;
+              }
+
+              if (anyTopcutLegStarted) {
+                const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
+                  p_participant_id: participantId,
+                });
+                if (legWalkoverRes.error) {
+                  Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
+                  return;
+                }
+              } else {
+                const closeRes = await supabase.rpc('close_active_round_robin_topcut_bracket_group', {
+                  p_event_id: eventId,
+                });
+                if (closeRes.error) {
+                  Alert.alert('Error', closeRes.error.message ?? 'No se pudo recalcular el top4.');
+                  return;
+                }
+                if (closeRes.data === true) {
+                  const [eventRowRes, playersRes] = await Promise.all([
+                    supabase.from('draft_events').select('match_format').eq('id', eventId).maybeSingle(),
+                    supabase
+                      .from('event_participants')
+                      .select('id, left_event_at')
+                      .eq('event_id', eventId)
+                      .eq('role', 'player'),
+                  ]);
+                  const isBo2 =
+                    (eventRowRes.data as { match_format?: string | null } | null)?.match_format === 'bo2';
+                  const recalcParticipants = (playersRes.data ?? []) as {
+                    id: string;
+                    left_event_at: string | null;
+                  }[];
+                  const outcome = await computeAndCreateTop4Bracket(eventId, isBo2, recalcParticipants);
+                  if (outcome.kind === 'error') {
+                    Alert.alert('Error', outcome.message);
+                    return;
+                  }
+                } else {
+                  // Alguna semi arrancó justo entre el chequeo y el cierre (carrera) — cae a
+                  // walkover puntual como fallback seguro, nunca a recalcular sobre un bracket
+                  // que ya tiene actividad real.
+                  const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
+                    p_participant_id: participantId,
+                  });
+                  if (legWalkoverRes.error) {
+                    Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
                     return;
                   }
                 }
