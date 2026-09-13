@@ -29,7 +29,9 @@ const SWISS_ROUNDS_OPTIONS = [3, 4, 5] as const;
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null): string {
-  if (f === 'swiss') return 'Suizo';
+  // Suizo siempre tiene top4 (fijo, Fase 6.6) — topSize===4 debería ser siempre cierto acá,
+  // pero se chequea igual por si un evento viejo no llegó a migrarse.
+  if (f === 'swiss') return topSize === 4 ? 'Suizo + Top 4' : 'Suizo';
   // round_robin + top_size=4: antes competition_format='round_robin_bo1_top4' (0076).
   if (f === 'round_robin' && topSize === 4) return 'Todos vs todos + Top 4';
   return 'Todos contra todos';

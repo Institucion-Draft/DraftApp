@@ -29,7 +29,7 @@ type CompetitionFormat = 'round_robin' | 'swiss';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
-  { value: 'swiss', label: 'Suizo' },
+  { value: 'swiss', label: 'Suizo + Top 4' },
 ];
 
 type RegularMatchFormat = 'bo1' | 'bo2' | 'bo3';
@@ -57,7 +57,7 @@ function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
   if (format === 'round_robin') {
     return 'Todos los jugadores se enfrentan entre sí. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.';
   }
-  return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3).';
+  return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Al terminar todas las rondas, los mejores 4 pasan a jugar semifinales.';
 }
 
 function pickFromOptions(
@@ -178,6 +178,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
       insertRow.match_format = regularMatchFormat;
       insertRow.swiss_rounds_manual = swissRoundsManual;
+      // Suizo siempre tiene top4 (fijo, sin opción de desactivarlo — Fase 6.6).
+      insertRow.top_size = 4;
     }
     if (competitionFormat === 'round_robin' && top4) {
       // Antes competition_format='round_robin_bo1_top4'; ahora round_robin + top_size=4 (0076).
