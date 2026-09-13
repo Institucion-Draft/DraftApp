@@ -240,7 +240,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [b, setB] = useState<ParticipantRow | null>(null);
   /**
    * Participantes reales del cruce de mata-mata (event_tiebreak_bracket_matches).
-   * En swiss_bo2 el pairing puede estar compartido con la ronda suiza, así que la
+   * En swiss BO2 (match_format='bo2') el pairing puede estar compartido con la ronda suiza, así que la
    * sección mata-mata se lee del bracket match, no del pairing.
    */
   const [mataA, setMataA] = useState<ParticipantRow | null>(null);
@@ -267,7 +267,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
-  /** round_robin + top_size=4 con match_format='bo1': el oficial es a una sola partida (1 sola
+  /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (1 sola
    * píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
   /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
@@ -411,21 +411,20 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
     const turnTrackOn = !!evFlags?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
-    // swiss_bo2 se comporta igual que swiss en esta pantalla.
-    setCompetitionFormat(
-      evFlags?.competition_format === 'swiss' || evFlags?.competition_format === 'swiss_bo2'
-        ? 'swiss'
-        : 'round_robin'
-    );
+    setCompetitionFormat(evFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin');
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4 — "todos contra todos con top4" ya no es
     // un competition_format aparte.
     const isRoundRobinWithTop4 = evFlags?.competition_format === 'round_robin' && evFlags?.top_size === 4;
     setIsRoundRobinTop4(isRoundRobinWithTop4);
     // El oficial de la fase regular se resuelve con 1 sola partida cuando match_format es 'bo1' —
-    // aplica igual con o sin top4, son ejes independientes (antes solo miraba top_size=4, dejando
-    // BO1 sin top con 2 píldoras por error).
-    setOfficialBo1(evFlags?.competition_format === 'round_robin' && evFlags?.match_format === 'bo1');
+    // aplica igual con o sin top4, y también para swiss con match_format='bo1' (Fase 6.5: primera
+    // vez que BO1 existe para Suizo), son ejes independientes de competition_format/top_size
+    // (antes solo miraba round_robin, dejando Suizo BO1 con 2 píldoras por error).
+    setOfficialBo1(
+      (evFlags?.competition_format === 'round_robin' || evFlags?.competition_format === 'swiss') &&
+        evFlags?.match_format === 'bo1'
+    );
     setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin' && evFlags?.top_size == null);
     const csr = evFlags?.current_swiss_round;
     setCurrentSwissRound(
@@ -532,7 +531,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setBracketMatchRow(bracketRow);
 
     // Identidad del cruce mata-mata desde el bracket match (no desde el pairing,
-    // que en swiss_bo2 puede estar compartido con la ronda suiza). Si alguno de los
+    // que en swiss BO2 (match_format='bo2') puede estar compartido con la ronda suiza). Si alguno de los
     // participantes del bracket no está entre los del pairing, lo traemos aparte.
     let mA: ParticipantRow | null = null;
     let mB: ParticipantRow | null = null;
@@ -940,7 +939,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       ? bName
       : null;
   // Identidad real del cruce de fase mata-mata: sale del bracket match, no del pairing
-  // (que en swiss_bo2 puede estar compartido con la ronda suiza). Sin bracket match
+  // (que en swiss BO2 (match_format='bo2') puede estar compartido con la ronda suiza). Sin bracket match
   // (ej. desempate round_robin), cae al pairing, así que estos valores son seguros en
   // ambos casos y se usan para la sección/encabezado de mata-mata.
   const mataAId = bracketMatchRow?.participant_a_id ?? pairing.participant_a_id;
@@ -1569,6 +1568,19 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               // round_robin_bo1_top4, pero con su propio título.
               <View style={styles.subAccBlue}>
                 <Text style={styles.subTitleSwissBlue}>Cruces</Text>
+                {officialMs.length === 0 ? (
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                ) : (
+                  officialMs.map(renderDraftRow)
+                )}
+              </View>
+            ) : competitionFormat === 'swiss' ? (
+              // swiss fase regular (todavía sin bracket de topcut vinculado a este pairing, o
+              // sin fase mata-mata en absoluto): mismo tratamiento visual azul que el resto de
+              // "fase antes del mata-mata", con su propio título (no "todos contra todos" —
+              // en suizo no todos juegan contra todos).
+              <View style={styles.subAccBlue}>
+                <Text style={styles.subTitleSwissBlue}>Fase rondas suizas</Text>
                 {officialMs.length === 0 ? (
                   <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
                 ) : (

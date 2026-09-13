@@ -43,7 +43,7 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled' | 'concluded';
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
-  competition_format?: 'round_robin' | 'swiss' | 'swiss_bo2' | null;
+  competition_format?: 'round_robin' | 'swiss' | null;
   top_size?: number | null;
   match_format?: 'bo1' | 'bo2' | 'bo3' | null;
   giant_randomization_done?: boolean | null;
@@ -1107,7 +1107,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
-    event.competition_format !== 'swiss_bo2' &&
+    // Antes event.competition_format !== 'swiss_bo2' (0045): ese valor no existe más desde 0096
+    // (unificado en competition_format='swiss' + match_format). Traducción literal de la misma
+    // exclusión: solo swiss con match_format='bo2' queda afuera de este banner — round_robin BO2
+    // y swiss BO1/BO3 no estaban excluidos antes y siguen sin estarlo.
+    !(event.competition_format === 'swiss' && event.match_format === 'bo2') &&
     activeTiebreakGroup?.group_type !== 'fourth_place' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&

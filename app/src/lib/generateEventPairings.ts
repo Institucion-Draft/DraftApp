@@ -23,7 +23,7 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 export async function generateEventPairings(eventId: string): Promise<GeneratePairingsResult> {
   const evRes = await supabase
     .from('draft_events')
-    .select('competition_format')
+    .select('competition_format, match_format')
     .eq('id', eventId)
     .maybeSingle();
   if (evRes.error || !evRes.data) {
@@ -32,8 +32,9 @@ export async function generateEventPairings(eventId: string): Promise<GeneratePa
     }
     return { ok: false, message: evRes.error?.message ?? 'No se pudo cargar el evento.' };
   }
-  const competitionFormat =
-    (evRes.data as { competition_format?: string | null }).competition_format ?? 'round_robin';
+  const evRow = evRes.data as { competition_format?: string | null; match_format?: string | null };
+  const competitionFormat = evRow.competition_format ?? 'round_robin';
+  const matchFormat = evRow.match_format ?? 'bo3';
 
   const partsRes = await supabase
     .from('event_participants')
@@ -77,11 +78,15 @@ export async function generateEventPairings(eventId: string): Promise<GeneratePa
 
   players.sort((a, b) => a.sortName.localeCompare(b.sortName, 'es', { sensitivity: 'base' }));
 
-  // swiss/swiss_bo2 generan rondas vía RPC; todo otro formato (round_robin,
-  // round_robin_bo1_top4, two_headed_giant) usa el loop i<j de todos contra todos.
-  const usesSwissRounds = competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2';
+  // swiss genera rondas vía RPC (BO2 y BO3/BO1 usan RPCs distintas — ver 0096, ambas comparten
+  // ya el motor de puntaje/resolución/avance; no fusionadas todavía como RPC única); todo otro
+  // formato (round_robin, two_headed_giant) usa el loop i<j de todos contra todos.
+  // Antes esto se decidía mirando competition_format==='swiss_bo2' (existía como valor propio);
+  // desde 0096 swiss_bo2 se unificó en competition_format='swiss' + match_format='bo2', así que
+  // el enrutamiento correcto es por match_format, no por competition_format.
+  const usesSwissRounds = competitionFormat === 'swiss';
   if (usesSwissRounds) {
-    const isBo2 = competitionFormat === 'swiss_bo2';
+    const isBo2 = matchFormat === 'bo2';
     const roundRpc = isBo2 ? 'generate_swiss_bo2_round' : 'generate_swiss_round';
     const nPlayers = players.length;
     const swiss_rounds_total = Math.max(1, Math.ceil(Math.log2(Math.max(nPlayers, 2))));

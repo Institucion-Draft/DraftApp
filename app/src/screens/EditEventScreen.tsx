@@ -22,14 +22,14 @@ import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
+type CompetitionFormat = 'round_robin' | 'swiss';
 
-const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
+/** Antes exclusivo de swiss_bo2 (0045), generalizado a cualquier match_format de swiss (0096). */
+const SWISS_ROUNDS_OPTIONS = [3, 4, 5] as const;
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null): string {
   if (f === 'swiss') return 'Suizo';
-  if (f === 'swiss_bo2') return 'Suizo BO2';
   // round_robin + top_size=4: antes competition_format='round_robin_bo1_top4' (0076).
   if (f === 'round_robin' && topSize === 4) return 'Todos vs todos + Top 4';
   return 'Todos contra todos';
@@ -95,10 +95,10 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [isOfficial, setIsOfficial] = useState(true);
   /** Suizo: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
-  /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
+  /** Solo swiss (cualquier BO): cantidad de rondas suizas (3, 4 o 5). */
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
   const [topcutFormatLocked, setTopcutFormatLocked] = useState(false);
-  /** swiss_bo2: selector de rondas bloqueado cuando ya hay al menos 1 partida en el evento. */
+  /** swiss: selector de rondas bloqueado cuando ya hay al menos 1 partida en el evento. */
   const [swissRoundsLocked, setSwissRoundsLocked] = useState(false);
   const [startingLife, setStartingLife] = useState<number>(20);
   const [cubes, setCubes] = useState<SimpleOption[]>([]);
@@ -134,7 +134,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setWorkspaceId(row.workspace_id);
       setName(row.name);
       const rawCf = (row.competition_format as string | null | undefined) ?? 'round_robin';
-      const cf: CompetitionFormat = rawCf === 'swiss' ? 'swiss' : rawCf === 'swiss_bo2' ? 'swiss_bo2' : 'round_robin';
+      const cf: CompetitionFormat = rawCf === 'swiss' ? 'swiss' : 'round_robin';
       setCompetitionFormat(cf);
       const ts = typeof row.top_size === 'number' ? row.top_size : null;
       setTopSize(ts);
@@ -165,7 +165,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setStartingLife(sl);
 
       let swissTopcutBracketLocked = false;
-      if (cf === 'swiss' || cf === 'swiss_bo2' || isTop4) {
+      if (cf === 'swiss' || isTop4) {
         const bracketOrigin = isTop4 ? 'round_robin_topcut' : 'swiss_topcut';
         const grpRes = await supabase
           .from('event_tiebreak_groups')
@@ -197,9 +197,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
       }
       setTopcutFormatLocked(swissTopcutBracketLocked);
 
-      // swiss_bo2: bloquear el selector de rondas en cuanto haya cualquier partida en el evento.
+      // swiss: bloquear el selector de rondas en cuanto haya cualquier partida en el evento.
       let roundsLocked = false;
-      if (cf === 'swiss_bo2') {
+      if (cf === 'swiss') {
         const allPairingsRes = await supabase
           .from('pairings')
           .select('id')
@@ -340,14 +340,12 @@ export default function EditEventScreen({ route, navigation }: Props) {
       patch.venue_id = venueId;
     }
     if (
-      (competitionFormat === 'swiss' ||
-        competitionFormat === 'swiss_bo2' ||
-        (competitionFormat === 'round_robin' && topSize === 4)) &&
+      (competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && topSize === 4)) &&
       !topcutFormatLocked
     ) {
       patch.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
     }
-    if (competitionFormat === 'swiss_bo2' && !topcutFormatLocked && !swissRoundsLocked) {
+    if (competitionFormat === 'swiss' && !topcutFormatLocked && !swissRoundsLocked) {
       patch.swiss_rounds_manual = swissRoundsManual;
     }
     if (!statusPickerLocked && loadedStatus) {
@@ -422,7 +420,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       </View>
       <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
 
-      {competitionFormat === 'round_robin' ? (
+      {competitionFormat === 'round_robin' || competitionFormat === 'swiss' ? (
         <>
           <Text style={styles.label}>Formato de partidas (fase regular)</Text>
           <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
@@ -432,7 +430,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </>
       ) : null}
 
-      {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || (competitionFormat === 'round_robin' && topSize === 4) ? (
+      {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>
           <View style={styles.turnTrackingRow}>
             <Text style={styles.turnTrackingLabel}>Eliminatorias BO3</Text>
@@ -444,11 +442,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </>
       ) : null}
 
-      {competitionFormat === 'swiss_bo2' ? (
+      {competitionFormat === 'swiss' ? (
         <>
           <Text style={[styles.label, swissRoundsLocked && styles.labelMuted]}>Rondas suizas</Text>
           <View style={styles.segmented}>
-            {SWISS_BO2_ROUNDS_OPTIONS.map((n) => {
+            {SWISS_ROUNDS_OPTIONS.map((n) => {
               const selected = swissRoundsManual === n;
               return (
                 <TouchableOpacity

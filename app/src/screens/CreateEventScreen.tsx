@@ -25,12 +25,11 @@ import Card from '../components/Card';
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
 
-type CompetitionFormat = 'round_robin' | 'swiss' | 'swiss_bo2';
+type CompetitionFormat = 'round_robin' | 'swiss';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
   { value: 'swiss', label: 'Suizo' },
-  { value: 'swiss_bo2', label: 'Suizo BO2' },
 ];
 
 type RegularMatchFormat = 'bo1' | 'bo2' | 'bo3';
@@ -41,7 +40,10 @@ const REGULAR_MATCH_FORMAT_OPTIONS: { value: RegularMatchFormat; label: string }
   { value: 'bo3', label: 'BO3' },
 ];
 
-const SWISS_BO2_ROUNDS_OPTIONS = [3, 4, 5] as const;
+/** Suizo: cantidad de rondas suizas configurable manualmente (3, 4 o 5), para
+ *  cualquier match_format (BO1/BO2/BO3) — antes exclusivo de swiss_bo2 (0045),
+ *  generalizado en Fase 6.4. */
+const SWISS_ROUNDS_OPTIONS = [3, 4, 5] as const;
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
@@ -55,10 +57,7 @@ function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
   if (format === 'round_robin') {
     return 'Todos los jugadores se enfrentan entre sí. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.';
   }
-  if (format === 'swiss') {
-    return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado.';
-  }
-  return 'Formato suizo BO2: igual que el suizo, pero cada enfrentamiento de la fase regular se juega a mejor de 2 partidas.';
+  return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3).';
 }
 
 function pickFromOptions(
@@ -84,11 +83,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Solo round_robin: ON = top_size 4 (antes competition_format='round_robin_bo1_top4'). */
   const [top4, setTop4] = useState(false);
-  /** Solo round_robin (con o sin top4): BO1/BO2/BO3 de la fase regular (match_format). */
+  /** round_robin (con o sin top4) y swiss: BO1/BO2/BO3 de la fase regular (match_format). */
   const [regularMatchFormat, setRegularMatchFormat] = useState<RegularMatchFormat>('bo3');
   /** Suizo o round_robin+top4: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
-  /** Solo swiss_bo2: cantidad de rondas suizas (3, 4 o 5). */
+  /** Solo swiss (cualquier BO): cantidad de rondas suizas (3, 4 o 5). */
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
   const [startingLife, setStartingLife] = useState<number>(20);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
@@ -175,10 +174,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       is_official: isOfficial,
     };
     if (competitionFormat === 'swiss') {
+      // Antes competition_format='swiss_bo2' aparte; ahora swiss + match_format (0096).
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
-    }
-    if (competitionFormat === 'swiss_bo2') {
-      insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+      insertRow.match_format = regularMatchFormat;
       insertRow.swiss_rounds_manual = swissRoundsManual;
     }
     if (competitionFormat === 'round_robin' && top4) {
@@ -312,9 +310,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </TouchableOpacity>
         )}
 
-        {competitionFormat === 'round_robin' ? (
+        {competitionFormat === 'round_robin' || competitionFormat === 'swiss' ? (
           <>
-            <Text style={styles.label}>Formato de partidas (fase liga)</Text>
+            <Text style={styles.label}>
+              {competitionFormat === 'round_robin' ? 'Formato de partidas (fase liga)' : 'Formato de partidas (fase regular)'}
+            </Text>
             <View style={styles.segmented}>
               {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
                 const selected = regularMatchFormat === opt.value;
@@ -345,7 +345,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        {competitionFormat === 'swiss' || competitionFormat === 'swiss_bo2' || (competitionFormat === 'round_robin' && top4) ? (
+        {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4) ? (
           <View style={styles.switchRow}>
             <View style={styles.switchLabelRow}>
               <Text style={styles.switchLabelInline}>Eliminatorias BO3</Text>
@@ -358,11 +358,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        {competitionFormat === 'swiss_bo2' ? (
+        {competitionFormat === 'swiss' ? (
           <>
             <Text style={styles.label}>Rondas suizas</Text>
             <View style={styles.segmented}>
-              {SWISS_BO2_ROUNDS_OPTIONS.map((n) => {
+              {SWISS_ROUNDS_OPTIONS.map((n) => {
                 const selected = swissRoundsManual === n;
                 return (
                   <TouchableOpacity

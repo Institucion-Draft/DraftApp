@@ -213,7 +213,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
   const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
-  /** round_robin + top_size=4 con match_format='bo1': el oficial de la fase regular es a una
+  /** round_robin o swiss con match_format='bo1': el oficial de la fase regular es a una
    * sola partida (1 sola píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
   /** Formato de eliminatorias del bracket real (semis/final/3er-4to de swiss_topcut o
@@ -576,18 +576,19 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const rawCompetitionFormat = (evRow as { competition_format?: string | null } | null)?.competition_format;
     const rawTopSize = (evRow as { top_size?: number | null } | null)?.top_size ?? null;
     const rawMatchFormat = (evRow as { match_format?: string | null } | null)?.match_format;
-    // swiss_bo2 se muestra igual que swiss en el perfil del jugador.
-    const competitionFormat =
-      rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'swiss_bo2' ? 'swiss' : 'round_robin';
+    const competitionFormat = rawCompetitionFormat === 'swiss' ? 'swiss' : 'round_robin';
     setEventCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título/tratamiento
     // visual "Fase todos contra todos") es solo top_size=4. isRoundRobinBo1 (1 sola píldora /
     // oficial resuelto con 1 partida) depende únicamente de match_format='bo1' — aplica igual
-    // con o sin top4, son ejes independientes.
+    // con o sin top4, y también para swiss con match_format='bo1' (Fase 6.5: primera vez que BO1
+    // existe para Suizo), son ejes independientes de competition_format/top_size.
     const isTop4 = rawCompetitionFormat === 'round_robin' && rawTopSize === 4;
     setIsRoundRobinTop4(isTop4);
-    setIsRoundRobinBo1(rawCompetitionFormat === 'round_robin' && rawMatchFormat === 'bo1');
+    setIsRoundRobinBo1(
+      (rawCompetitionFormat === 'round_robin' || rawCompetitionFormat === 'swiss') && rawMatchFormat === 'bo1'
+    );
     const rawTopcutFormat = (evRow as { topcut_format?: string | null } | null)?.topcut_format;
     setTopcutFormat(
       rawTopcutFormat === 'bo1' || rawTopcutFormat === 'sf_bo1_f_bo3' || rawTopcutFormat === 'bo3'
@@ -690,7 +691,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
           // Fuente de verdad de la fase mata-mata: event_tiebreak_bracket_matches.
           // El rival, la fase y el resultado salen del bracket match, NO del pairing
-          // (que en swiss_bo2 puede estar compartido con la ronda suiza y apuntar a
+          // (que en swiss BO2 [match_format='bo2'] puede estar compartido con la ronda suiza y apuntar a
           // otro jugador). El pairing solo se usa para contar el marcador parcial.
           const semiRows: OfficialH2HRow[] = [];
           const finalRows: OfficialH2HRow[] = [];
