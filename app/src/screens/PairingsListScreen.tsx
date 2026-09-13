@@ -288,7 +288,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
   const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
-  /** round_robin + top_size=4 con match_format='bo1': el oficial es a una sola partida (una
+  /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (una
    * píldora por jugador). Distinto de isRoundRobinTop4 (título "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
   /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
@@ -377,20 +377,21 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       event_type?: string | null;
     } | null;
     setEventType(eventFlags?.event_type ?? null);
-    // swiss_bo2 se comporta igual que swiss para el render de enfrentamientos.
-    const competitionFormat =
-      eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
-        ? 'swiss'
-        : 'round_robin';
+    const competitionFormat = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
     setCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título "Fase todos contra
     // todos") es solo top_size=4. officialBo1 (1 sola píldora / oficial resuelto con 1 partida)
-    // depende únicamente de match_format='bo1' — aplica igual con o sin top4, son ejes
-    // independientes (antes solo miraba top_size=4, dejando BO1 sin top con 2 píldoras por error).
+    // depende únicamente de match_format='bo1' — aplica igual con o sin top4, y también para
+    // swiss con match_format='bo1' (Fase 6.5: primera vez que BO1 existe para Suizo), son ejes
+    // independientes de competition_format/top_size (antes solo miraba round_robin, dejando
+    // Suizo BO1 con 2 píldoras por error).
     const isTop4 = eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4;
     setIsRoundRobinTop4(isTop4);
-    setOfficialBo1(eventFlags?.competition_format === 'round_robin' && eventFlags?.match_format === 'bo1');
+    setOfficialBo1(
+      (eventFlags?.competition_format === 'round_robin' || eventFlags?.competition_format === 'swiss') &&
+        eventFlags?.match_format === 'bo1'
+    );
     const csrRaw = eventFlags?.current_swiss_round;
     const currentSwissRound: number | null =
       csrRaw == null

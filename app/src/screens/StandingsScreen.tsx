@@ -71,7 +71,7 @@ type RowView = {
   ep: number;
   /** round_robin BO2: puntos acumulados (3 por ganado, 1 por empatado, 0 por perdido). */
   pts: number;
-  /** swiss_bo2: partidas individuales finalizadas (match_type='draft', status='completed'). */
+  /** swiss BO2: partidas individuales finalizadas (match_type='draft', status='completed'). */
   pf: number;
   /** Diferencial medio de vida (sin tracking de turnos); null si no aplica o sin datos. */
   dmv: number | null;
@@ -431,7 +431,7 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
   return Array.isArray(x) ? (x[0] ?? null) : x;
 }
 
-/** Ronda suiza cerrada: todos los pairings de esa ronda tienen ganador oficial o empate (swiss_bo2). */
+/** Ronda suiza cerrada: todos los pairings de esa ronda tienen ganador oficial o empate (match_format='bo2'). */
 function isSwissRoundFullyResolved(
   pairings: {
     swiss_round?: number | string | null;
@@ -665,7 +665,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
-  /** True cuando el formato real es swiss_bo2 (mapeado a 'swiss' para comportamiento, separado para display). */
+  /** True cuando el evento es swiss con match_format='bo2' (competitionFormat ya viene mapeado a 'swiss' para cualquier BO; este flag distingue matices de display). */
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
@@ -810,11 +810,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const rawTopSize = (eventRes.data as { top_size?: number | null } | null)?.top_size ?? null;
     const rawMatchFormat = (eventRes.data as { match_format?: string | null } | null)?.match_format;
     const hasTop4 = rawFmt === 'round_robin' && rawTopSize === 4;
-    // swiss_bo2 se muestra igual que swiss (Pts / OMW% / GW%, top cut, campeón).
-    // Los puntos ya vienen calculados por swiss_bo2_points_of en la columna swiss_points.
-    const fmt = rawFmt === 'swiss' || rawFmt === 'swiss_bo2' ? 'swiss' : 'round_robin';
+    // Los puntos ya vienen calculados por swiss_points_of (unificada en 0094) en la columna
+    // swiss_points, para cualquier match_format de swiss.
+    const fmt = rawFmt === 'swiss' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
-    setIsSwissBo2(rawFmt === 'swiss_bo2');
+    // isSwissBo2: antes derivaba de competition_format='swiss_bo2' (valor propio); desde 0096
+    // swiss_bo2 se unificó en competition_format='swiss' + match_format='bo2'.
+    setIsSwissBo2(rawFmt === 'swiss' && rawMatchFormat === 'bo2');
     // EG/EC son redundantes con PG/PJ cuando match_format='bo1' (cada enfrentamiento ES una sola
     // partida) — aplica igual con o sin top4, son ejes independientes (antes solo miraba
     // top_size=4, ocultando EG/EC de más para BO2/BO3+top4 y de menos para BO1 sin top).
@@ -1239,7 +1241,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       );
       const pg = completedMatches.filter((m: any) => m.winner_participant_id === pid).length;
       const pj = completedMatches.length;
-      // swiss_bo2: partidas finalizadas (sin importar si tienen ganador declarado).
+      // swiss BO2: partidas finalizadas (sin importar si tienen ganador declarado).
       const pf = playerMatches.filter(
         (m: any) => m.match_type === 'draft' && m.status === 'completed'
       ).length;
@@ -1359,7 +1361,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         const wb = b.swissOgw ?? -Infinity;
         if (wb !== wa) return wb - wa;
         // Desempate FINAL determinístico: mismo criterio que el seeding del
-        // bracket de top cut en maybe_advance_swiss_bo2_round (ORDER BY ...,
+        // bracket de top cut en maybe_advance_swiss_round (ORDER BY ...,
         // ep.user_id). Debe ser el MISMO campo y dirección en ambos lados para
         // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
         return a.userId.localeCompare(b.userId);

@@ -254,10 +254,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
     setIsGiantEvent(eventFlags?.event_type === 'two_headed_giant');
     setMatchFormat(eventFlags?.match_format ?? null);
-    const fmt =
-      eventFlags?.competition_format === 'swiss' || eventFlags?.competition_format === 'swiss_bo2'
-        ? 'swiss'
-        : 'round_robin';
+    const fmt = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
     setCompetitionFormat(fmt);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4.
@@ -393,7 +390,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     pairing.official_winner_participant_id == null &&
     winsA < 2 &&
     winsB < 2 &&
-    // En swiss (incluye swiss_bo2) un 1-1 ya es empate resuelto automáticamente; no hay "bueno".
+    // En swiss un 1-1 nunca se muestra como "bueno" (en BO2 ya es empate resuelto automáticamente;
+    // en BO1/BO3 no debería darse este estado intermedio de todos modos).
     !(competitionFormat === 'swiss' && winsA >= 1 && winsB >= 1) &&
     // round_robin BO2: un 1-1 ya quedó resuelto como empate (official_draw); no hay "bueno".
     !(competitionFormat === 'round_robin' && matchFormat === 'bo2' && pairing.official_draw === true) &&
