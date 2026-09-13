@@ -31,6 +31,7 @@ import {
 import { generateEventPairings } from '../lib/generateEventPairings';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
+import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
 
@@ -46,6 +47,9 @@ type EventRow = {
   competition_format?: 'round_robin' | 'swiss' | null;
   top_size?: number | null;
   match_format?: 'bo1' | 'bo2' | 'bo3' | null;
+  current_swiss_round?: number | null;
+  swiss_rounds_total?: number | null;
+  swiss_rounds_manual?: number | null;
   giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
@@ -205,7 +209,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -345,6 +349,36 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             isBo2,
             p.map((part) => ({ id: part.id, left_event_at: part.left_event_at }))
           );
+        }
+      }
+    }
+
+    // Suizo (top_size=4 fijo, Fase 6.6): mismo patrón que round_robin arriba — se re-evalúa
+    // cada vez que alguien abre esta pantalla mientras el evento está playing, sin trigger de
+    // respaldo server-side (create_swiss_top4_bracket es idempotente: no crea un segundo
+    // bracket si ya existe). A diferencia de round_robin, "fase regular 100% resuelta" para
+    // Suizo es "llegamos a la última ronda Y todos sus pairings están resueltos" — no "todos
+    // los pairings del evento", que en Suizo incluye filas swiss_round=null nunca programadas.
+    if (e.status === 'playing' && e.competition_format === 'swiss' && e.top_size === 4) {
+      const totalSwissRounds = e.swiss_rounds_manual ?? e.swiss_rounds_total ?? null;
+      const currentRound = e.current_swiss_round ?? null;
+      if (totalSwissRounds != null && currentRound != null && currentRound >= totalSwissRounds) {
+        const swissPairingsRes = await supabase
+          .from('pairings')
+          .select('official_winner_participant_id, official_draw')
+          .eq('event_id', e.id)
+          .eq('swiss_round', currentRound);
+        if (!swissPairingsRes.error && swissPairingsRes.data) {
+          const swissPairings = swissPairingsRes.data as {
+            official_winner_participant_id: string | null;
+            official_draw: boolean;
+          }[];
+          const lastSwissRoundResolved =
+            swissPairings.length > 0 &&
+            swissPairings.every((pr) => pr.official_winner_participant_id != null || pr.official_draw);
+          if (lastSwissRoundResolved) {
+            await computeAndCreateSwissTop4Bracket(e.id);
+          }
         }
       }
     }

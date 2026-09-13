@@ -390,11 +390,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     pairing.official_winner_participant_id == null &&
     winsA < 2 &&
     winsB < 2 &&
-    // En swiss un 1-1 nunca se muestra como "bueno" (en BO2 ya es empate resuelto automáticamente;
-    // en BO1/BO3 no debería darse este estado intermedio de todos modos).
-    !(competitionFormat === 'swiss' && winsA >= 1 && winsB >= 1) &&
-    // round_robin BO2: un 1-1 ya quedó resuelto como empate (official_draw); no hay "bueno".
-    !(competitionFormat === 'round_robin' && matchFormat === 'bo2' && pairing.official_draw === true) &&
+    // BO2 (round_robin o swiss, match_format es agnóstico de competition_format): un 1-1 ya
+    // quedó resuelto como empate (official_draw) — no hay "bueno" que jugar. BO1/BO3 nunca
+    // resuelven en empate, así que esta exclusión no les aplica nunca.
+    !(matchFormat === 'bo2' && pairing.official_draw === true) &&
     // En round_robin_bo1_top4 el oficial se cierra con la primera partida ganada.
     !officialResolvedByBo1;
   const bracketTiebreakSeriesStillOpen =
