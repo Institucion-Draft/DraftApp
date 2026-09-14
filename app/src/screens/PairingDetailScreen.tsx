@@ -12,6 +12,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -317,7 +318,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, top_size, match_format, current_swiss_round, topcut_format, event_type, starting_life'
+          'workspace_id, status, final_pending, champion_user_id, turn_tracking_enabled, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, topcut_format, event_type, starting_life'
         )
         .eq('id', p.event_id)
         .maybeSingle(),
@@ -350,7 +351,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       supabase.from('event_participants').select('id').eq('event_id', p.event_id).eq('role', 'player'),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round')
         .eq('event_id', p.event_id),
       supabase
         .from('event_tiebreak_groups')
@@ -400,6 +401,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       top_size?: number | null;
       match_format?: string | null;
       current_swiss_round?: number | null;
+      swiss_rounds_total?: number | null;
+      swiss_rounds_manual?: number | null;
       topcut_format?: string | null;
       event_type?: string | null;
       starting_life?: number | null;
@@ -427,14 +430,44 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     );
     setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin' && evFlags?.top_size == null);
     const csr = evFlags?.current_swiss_round;
-    setCurrentSwissRound(
+    const currentSwissRoundValue =
       csr == null
         ? null
         : (() => {
             const n = Number(csr);
             return Number.isFinite(n) ? n : null;
-          })()
-    );
+          })();
+    setCurrentSwissRound(currentSwissRoundValue);
+
+    // Suizo (top_size=4 fijo, Fase 6.6): mismo chequeo oportunista que EventDetailScreen.tsx y
+    // PairingsListScreen.tsx — se re-evalúa cada vez que esta pantalla carga, sin depender de
+    // haber pasado por EventDetailScreen primero (mismo bug encontrado en vivo: la navegación
+    // real después de terminar la última partida vuelve acá o a PairingsList, nunca pasa por
+    // EventDetailScreen en el medio, así que nadie llamaba a computeAndCreateSwissTop4Bracket).
+    let bracketJustCreated = false;
+    if (
+      evFlags?.competition_format === 'swiss' &&
+      evFlags?.top_size === 4 &&
+      eventRes.data &&
+      (eventRes.data as { status?: string | null }).status === 'playing'
+    ) {
+      const totalSwissRounds = evFlags.swiss_rounds_manual ?? evFlags.swiss_rounds_total ?? null;
+      if (totalSwissRounds != null && currentSwissRoundValue != null && currentSwissRoundValue >= totalSwissRounds) {
+        const allSwissPairings = (allPairingsRes.data ?? []) as {
+          swiss_round: number | null;
+          official_winner_participant_id: string | null;
+          official_draw: boolean | null;
+        }[];
+        const lastRoundPairings = allSwissPairings.filter((pr) => pr.swiss_round === currentSwissRoundValue);
+        const lastSwissRoundResolved =
+          lastRoundPairings.length > 0 &&
+          lastRoundPairings.every((pr) => pr.official_winner_participant_id != null || pr.official_draw);
+        if (lastSwissRoundResolved) {
+          const outcome = await computeAndCreateSwissTop4Bracket(p.event_id);
+          bracketJustCreated = outcome.kind === 'bracket_created';
+        }
+      }
+    }
 
     const completedMatchIdsForTurns = matchRows.filter((m) => m.status === 'completed').map((m) => m.id);
 
@@ -457,6 +490,23 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     }
     setMatchTurnsByMatchId(turnsByMatch);
 
+    // Si el bracket de Suizo se acaba de crear más arriba en este mismo load(), tiebreakGroupRes
+    // ya quedó desactualizado (se pidió en paralelo con eventRes, antes de que el bracket
+    // existiera) — se vuelve a pedir para que el resto de este mismo render ya lo vea, sin
+    // esperar un segundo foco de pantalla (mismo criterio que PairingsListScreen.tsx).
+    let tiebreakGroupRows = tiebreakGroupRes.data;
+    if (bracketJustCreated) {
+      const refetchedGroups = await supabase
+        .from('event_tiebreak_groups')
+        .select('id, group_type, round_number, status, champion_user_id, group_origin')
+        .eq('event_id', p.event_id)
+        .in('status', ['active', 'resolved'])
+        .order('created_at', { ascending: false });
+      if (!refetchedGroups.error && refetchedGroups.data) {
+        tiebreakGroupRows = refetchedGroups.data;
+      }
+    }
+
     // round_robin_bo1_top4 puede tener DOS grupos "bracket-ish" vivos a la vez para el mismo
     // evento: el desempate por el 4to puesto (group_type='fourth_place') y, una vez resuelto,
     // el bracket real de top4 (group_type='bracket') recién creado — el de 4to puesto queda
@@ -466,7 +516,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     // event_tiebreak_bracket_matches para este pairing, y solo si ninguno aplica caemos al
     // grupo no-bracket más reciente (desempate clásico de 1er puesto — ahí sí solo existe uno
     // relevante por evento, como antes).
-    const tgRows = (tiebreakGroupRes.data ?? []) as {
+    const tgRows = (tiebreakGroupRows ?? []) as {
       id: string;
       group_type: string;
       round_number: number;
@@ -926,11 +976,13 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const tiebreakMs = matches
     .filter((m) => m.match_type === 'tiebreak' && m.status !== 'aborted')
     .sort((a, b) => a.match_number - b.match_number);
+  // Igual que winsA/winsB (fase regular): las píldoras muestran solo juego real, walkover no
+  // infla el marcador visual del desempate.
   const tiebreakWinsA = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id && !m.is_walkover
   ).length;
   const tiebreakWinsB = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id
+    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id && !m.is_walkover
   ).length;
   const tiebreakWinnerName =
     pairing.tiebreak_winner_participant_id === pairing.participant_a_id
@@ -948,11 +1000,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const mauB = relationOne(mataB?.users);
   const mataAName = mauA?.display_name || mauA?.username || aName;
   const mataBName = mauB?.display_name || mauB?.username || bName;
+  // Mismo criterio que tiebreakWinsA/B: walkover no infla el marcador visual del bracket real.
   const mataTieWinsA = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === mataAId
+    (m) => m.status === 'completed' && m.winner_participant_id === mataAId && !m.is_walkover
   ).length;
   const mataTieWinsB = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === mataBId
+    (m) => m.status === 'completed' && m.winner_participant_id === mataBId && !m.is_walkover
   ).length;
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
@@ -1230,7 +1283,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const showHeroGreenRow =
     (bracketMatchRow != null && !showHeroOrangeRow) ||
     (pairingHadSwissTopcutBracket && hasCompletedBracketLegMatches);
-  const showHeroBlueRow = competitionFormat !== 'swiss' || officialMs.length > 0;
+  // Mismo criterio que showHeroGreenRow (existencia estructural del cruce, no "¿ya se jugó
+  // algo?"): un pairing suizo de fase regular ya asignado a una ronda (swiss_round != null)
+  // debe mostrar sus píldoras vacías desde el primer ingreso, igual que el bracket de mata-mata
+  // — antes dependía de officialMs.length > 0, dejando las píldoras invisibles hasta la primera
+  // partida jugada.
+  const showHeroBlueRow = competitionFormat !== 'swiss' || pairing.swiss_round != null;
   const showPrimaryInSwissMata =
     movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || isOrganizer);
   const showPrimaryInOfficialsLegacy =
@@ -1266,9 +1324,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
               #{displayNum} · {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
             </Text>
-            {m.is_walkover ? (
-              <Text style={[styles.abortBadge, styles.walkoverBadge]}>Por abandono</Text>
-            ) : null}
             {starterName ? <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text> : null}
           </View>
           {showLive ? (
@@ -1293,10 +1348,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           {m.status === 'completed' && !m.winner_participant_id ? (
             <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
           ) : null}
-          {m.status === 'completed' && m.ended_at ? (
-            <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+          {m.status === 'completed' ? (
+            <View style={styles.matchTimeRow}>
+              <Text style={styles.matchTime}>
+                {m.ended_at ? formatMatchTimestamp(m.ended_at) : 'Cierre pendiente.'}
+              </Text>
+              {m.is_walkover ? (
+                <Text style={[styles.abortBadge, styles.walkoverBadge]}>Por abandono</Text>
+              ) : null}
+            </View>
           ) : null}
-          {m.status === 'completed' && !m.ended_at ? <Text style={styles.matchTime}>Cierre pendiente.</Text> : null}
         </View>
         {turnTrackingEnabled && m.status === 'completed' ? (
           <TouchableOpacity
@@ -1371,10 +1432,16 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           {m.status === 'completed' && !m.winner_participant_id ? (
             <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
           ) : null}
-          {m.status === 'completed' && m.ended_at ? (
-            <Text style={styles.matchTime}>{formatMatchTimestamp(m.ended_at)}</Text>
+          {m.status === 'completed' ? (
+            <View style={styles.matchTimeRow}>
+              <Text style={styles.matchTime}>
+                {m.ended_at ? formatMatchTimestamp(m.ended_at) : 'Cierre pendiente.'}
+              </Text>
+              {m.is_walkover ? (
+                <Text style={[styles.abortBadge, styles.walkoverBadge]}>Por abandono</Text>
+              ) : null}
+            </View>
           ) : null}
-          {m.status === 'completed' && !m.ended_at ? <Text style={styles.matchTime}>Cierre pendiente.</Text> : null}
         </View>
         {turnTrackingEnabled && m.status === 'completed' ? (
           <TouchableOpacity
@@ -1793,7 +1860,10 @@ const styles = StyleSheet.create({
   heroVsBig: { fontSize: 22, fontWeight: '800', color: '#6B7280' },
   heroPlayerName: { marginTop: 8, fontSize: 14, fontWeight: '700', color: '#111', textAlign: 'center' },
   heroBo3RowLeft: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-start', paddingLeft: 4 },
-  heroBo3RowRight: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },
+  // row-reverse (no 'row'): el primer box en el JSX es el que se llena con la primera victoria
+  // — para que ese llenado arranque del lado EXTERIOR (lejos del "vs", como ya pasa del lado
+  // izquierdo por construcción), el orden visual de los boxes tiene que invertirse acá.
+  heroBo3RowRight: { flexDirection: 'row-reverse', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },
   heroBo3RowGreen: { marginTop: 8 },
   heroBo3RowOrange: { marginTop: 8 },
   heroBo3RowBlueBelow: { marginTop: 6 },
@@ -1891,6 +1961,7 @@ const styles = StyleSheet.create({
   matchWinner: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 2 },
   matchDuration: { color: '#4B5563', fontSize: 12, marginTop: 4, fontWeight: '500' },
   matchTime: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  matchTimeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
   primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 12 },
   primaryBtnDisabled: { opacity: 0.45 },
   primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
