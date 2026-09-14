@@ -16,6 +16,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getPairingStatusLabel } from '../lib/labels';
+import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingsList'>;
@@ -326,7 +327,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const [eventRes, pairingsRes, participantsRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('status, competition_format, top_size, match_format, current_swiss_round, event_type')
+        .select(
+          'status, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, event_type'
+        )
         .eq('id', eventId)
         .maybeSingle(),
       supabase
@@ -374,6 +377,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       top_size?: number | null;
       match_format?: string | null;
       current_swiss_round?: number | null;
+      swiss_rounds_total?: number | null;
+      swiss_rounds_manual?: number | null;
       event_type?: string | null;
     } | null;
     setEventType(eventFlags?.event_type ?? null);
@@ -403,6 +408,32 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setCurrentSwissRoundStored(currentSwissRound);
 
     const pairingsAll = (pairingsRes.data ?? []) as PairingRow[];
+
+    // Suizo (top_size=4 fijo, Fase 6.6): mismo chequeo oportunista que EventDetailScreen.tsx —
+    // se re-evalúa cada vez que esta pantalla carga, sin depender de haber pasado por
+    // EventDetailScreen primero. Bug encontrado en vivo: al terminar la última ronda regular y
+    // volver directo a Enfrentamientos (sin pasar por EventDetailScreen en el medio), nadie
+    // llamaba a computeAndCreateSwissTop4Bracket — el bracket genuinamente no existía todavía,
+    // no era un problema de refresco. Se ubica ANTES de la consulta a event_tiebreak_groups más
+    // abajo en este mismo load(), para que si el bracket se crea acá, esa consulta posterior ya
+    // lo vea en el mismo pase — sin esperar un segundo foco de pantalla.
+    if (
+      eventStatus === 'playing' &&
+      eventFlags?.competition_format === 'swiss' &&
+      eventFlags?.top_size === 4
+    ) {
+      const totalSwissRounds = eventFlags.swiss_rounds_manual ?? eventFlags.swiss_rounds_total ?? null;
+      if (totalSwissRounds != null && currentSwissRound != null && currentSwissRound >= totalSwissRounds) {
+        const lastRoundPairings = pairingsAll.filter((p) => p.swiss_round === currentSwissRound);
+        const lastSwissRoundResolved =
+          lastRoundPairings.length > 0 &&
+          lastRoundPairings.every((p) => p.official_winner_participant_id != null || p.official_draw);
+        if (lastSwissRoundResolved) {
+          await computeAndCreateSwissTop4Bracket(eventId);
+        }
+      }
+    }
+
     const pairingsForOfficial: PairingRow[] =
       competitionFormat === 'swiss'
         ? pairingsAll.filter((p) => p.swiss_round != null)

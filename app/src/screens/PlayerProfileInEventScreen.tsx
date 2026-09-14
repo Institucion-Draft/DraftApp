@@ -18,6 +18,7 @@ import type { MtgColor } from '../lib/database.types';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
+import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerProfileInEvent'>;
 
@@ -483,16 +484,29 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       (p) => p.participant_a_id === participantId || p.participant_b_id === participantId
     );
 
+    // Incluye mata-mata (match_type='tiebreak') además de fase regular — mismo conjunto que ya
+    // usa v_head_to_head_stats (0082) para "partidas oficiales" — y excluye walkover, que ya
+    // cuenta para el resultado oficial del pairing/bracket match pero no es una partida jugada
+    // de verdad.
     const officialCompletedForProfile = matches.filter((m) => {
       const pr = pairings.find((p) => p.id === m.pairing_id);
       if (!pr) return false;
       const inPairing = pr.participant_a_id === participantId || pr.participant_b_id === participantId;
-      return inPairing && (m.match_type === 'draft' || m.match_type === 'final') && m.status === 'completed';
+      return (
+        inPairing &&
+        (m.match_type === 'draft' || m.match_type === 'final' || m.match_type === 'tiebreak') &&
+        m.status === 'completed' &&
+        !m.is_walkover
+      );
     });
     setMatchesPlayed(officialCompletedForProfile.length);
     setMatchesWon(officialCompletedForProfile.filter((m) => m.winner_participant_id === participantId).length);
 
-    const ec = profilePairings.filter((p) => p.official_winner_participant_id != null).length;
+    // Un pairing con official_draw=true (BO2, 1-1) está tan completado como uno con ganador —
+    // no debe faltar del conteo de "enfrentamientos completados".
+    const ec = profilePairings.filter(
+      (p) => p.official_winner_participant_id != null || p.official_draw === true
+    ).length;
     const eg = profilePairings.filter((p) => p.official_winner_participant_id === participantId).length;
     setPairingsCompleted(ec);
     setPairingsWon(eg);
@@ -708,15 +722,24 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                 : null;
             if (!phase) continue;
 
-            // Marcador parcial: matches tiebreak del pairing del bracket match,
-            // alineando las victorias a los participantes del bracket match.
+            // Marcador parcial: matches tiebreak del pairing del bracket match, alineando las
+            // victorias a los participantes del bracket match — walkover no infla el marcador
+            // (mismo criterio que profileWins/opponentWins de fase regular más arriba), pero sí
+            // determina el badge "Se fue" de quien perdió por abandono.
             let profileWins = 0;
             let opponentWins = 0;
+            let opponentIsWalkoverLoser = false;
+            let selfIsWalkoverLoser = false;
             if (bm.pairing_id) {
               for (const m of matches) {
                 if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
                 if (m.pairing_id !== bm.pairing_id) continue;
                 const w = String(m.winner_participant_id);
+                if (m.is_walkover) {
+                  if (w === participantId) opponentIsWalkoverLoser = true;
+                  else if (w === oppId) selfIsWalkoverLoser = true;
+                  continue;
+                }
                 if (w === participantId) profileWins += 1;
                 else if (w === oppId) opponentWins += 1;
               }
@@ -731,8 +754,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               sortTier: 0,
               isDraw: false,
               bracketMatchId: bm.id,
-              opponentIsWalkoverLoser: false,
-              selfIsWalkoverLoser: false,
+              opponentIsWalkoverLoser,
+              selfIsWalkoverLoser,
             };
             (phase === 'semi' ? semiRows : phase === 'final' ? finalRows : thirdRows).push(row);
           }
@@ -846,13 +869,22 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           const phase = bm.bracket_phase === 'semi' || bm.bracket_phase === 'final' ? bm.bracket_phase : null;
           if (!phase) continue;
 
+          // Mismo criterio que el bracket real de arriba: walkover no infla el marcador, pero
+          // determina el badge "Se fue".
           let profileWins = 0;
           let opponentWins = 0;
+          let opponentIsWalkoverLoser = false;
+          let selfIsWalkoverLoser = false;
           if (bm.pairing_id) {
             for (const m of matches) {
               if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
               if (m.pairing_id !== bm.pairing_id) continue;
               const w = String(m.winner_participant_id);
+              if (m.is_walkover) {
+                if (w === participantId) opponentIsWalkoverLoser = true;
+                else if (w === oppId) selfIsWalkoverLoser = true;
+                continue;
+              }
               if (w === participantId) profileWins += 1;
               else if (w === oppId) opponentWins += 1;
             }
@@ -867,8 +899,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             sortTier: 0,
             isDraw: false,
             bracketMatchId: bm.id,
-            opponentIsWalkoverLoser: false,
-            selfIsWalkoverLoser: false,
+            opponentIsWalkoverLoser,
+            selfIsWalkoverLoser,
           };
           (phase === 'semi' ? semiRows : finalRows).push(row);
         }
@@ -1147,14 +1179,16 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               if (anyTopcutLegStarted) {
                 const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
                   p_participant_id: participantId,
+                  p_group_origin: 'round_robin_topcut',
                 });
                 if (legWalkoverRes.error) {
                   Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
                   return;
                 }
               } else {
-                const closeRes = await supabase.rpc('close_active_round_robin_topcut_bracket_group', {
+                const closeRes = await supabase.rpc('close_active_topcut_bracket_group', {
                   p_event_id: eventId,
+                  p_group_origin: 'round_robin_topcut',
                 });
                 if (closeRes.error) {
                   Alert.alert('Error', closeRes.error.message ?? 'No se pudo recalcular el top4.');
@@ -1186,6 +1220,112 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
                   // que ya tiene actividad real.
                   const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
                     p_participant_id: participantId,
+                    p_group_origin: 'round_robin_topcut',
+                  });
+                  if (legWalkoverRes.error) {
+                    Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
+          // Fase 6.8 — mismo principio que la Fase 4 de arriba (round_robin), aplicado al
+          // bracket real de topcut de Suizo (group_type='bracket', group_origin='swiss_topcut',
+          // 6.6/6.8): ninguna semi arrancó todavía → recalcular el top4 completo —
+          // computeAndCreateSwissTop4Bracket ya lee swiss_points/omw/gw/ogw persistidas
+          // (hechos históricos propios de cada jugador, no afectados por la salida de un
+          // tercero) y ya excluye left_event_at, así que el corrimiento al siguiente en mérito
+          // es automático, sin parámetros extra (a diferencia de round_robin, Suizo no tiene
+          // equivalente a la Fase 5 — el corte se resuelve matemáticamente, sin disputa en vivo,
+          // así que no hace falta ningún minDisputeSize). Alguna semi ya tiene actividad →
+          // walkover puntual de la fila pendiente vinculada a esta persona (mismas funciones
+          // generalizadas de arriba, con group_origin='swiss_topcut').
+          const swissTopcutGroupRes = await supabase
+            .from('event_tiebreak_groups')
+            .select('id')
+            .eq('event_id', eventId)
+            .eq('group_type', 'bracket')
+            .eq('group_origin', 'swiss_topcut')
+            .eq('status', 'active')
+            .maybeSingle();
+          if (swissTopcutGroupRes.error) {
+            Alert.alert('Error', swissTopcutGroupRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+            return;
+          }
+          const swissTopcutGroupId = swissTopcutGroupRes.data?.id ?? null;
+          if (swissTopcutGroupId) {
+            const swissTopcutMembershipRes = await supabase
+              .from('event_tiebreak_group_participants')
+              .select('participant_id')
+              .eq('group_id', swissTopcutGroupId)
+              .eq('participant_id', participantId)
+              .maybeSingle();
+            if (swissTopcutMembershipRes.error) {
+              Alert.alert('Error', swissTopcutMembershipRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+              return;
+            }
+            if (swissTopcutMembershipRes.data) {
+              const swissTopcutBmRes = await supabase
+                .from('event_tiebreak_bracket_matches')
+                .select('pairing_id')
+                .eq('group_id', swissTopcutGroupId);
+              if (swissTopcutBmRes.error) {
+                Alert.alert('Error', swissTopcutBmRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+                return;
+              }
+              const swissTopcutLegPairingIds = (swissTopcutBmRes.data ?? [])
+                .map((row: { pairing_id: string | null }) => row.pairing_id)
+                .filter((pid): pid is string => pid != null);
+              let anySwissTopcutLegStarted = false;
+              if (swissTopcutLegPairingIds.length > 0) {
+                const startedRes = await supabase
+                  .from('matches')
+                  .select('id')
+                  .in('pairing_id', swissTopcutLegPairingIds)
+                  .eq('match_type', 'tiebreak')
+                  .in('status', ['in_progress', 'completed'])
+                  .limit(1)
+                  .maybeSingle();
+                if (startedRes.error) {
+                  Alert.alert('Error', startedRes.error.message ?? 'No se pudo verificar el bracket de top4.');
+                  return;
+                }
+                anySwissTopcutLegStarted = !!startedRes.data;
+              }
+
+              if (anySwissTopcutLegStarted) {
+                const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
+                  p_participant_id: participantId,
+                  p_group_origin: 'swiss_topcut',
+                });
+                if (legWalkoverRes.error) {
+                  Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
+                  return;
+                }
+              } else {
+                const closeRes = await supabase.rpc('close_active_topcut_bracket_group', {
+                  p_event_id: eventId,
+                  p_group_origin: 'swiss_topcut',
+                });
+                if (closeRes.error) {
+                  Alert.alert('Error', closeRes.error.message ?? 'No se pudo recalcular el top4.');
+                  return;
+                }
+                if (closeRes.data === true) {
+                  const outcome = await computeAndCreateSwissTop4Bracket(eventId);
+                  if (outcome.kind === 'error') {
+                    Alert.alert('Error', outcome.message);
+                    return;
+                  }
+                } else {
+                  // Alguna semi arrancó justo entre el chequeo y el cierre (carrera) — cae a
+                  // walkover puntual como fallback seguro, nunca a recalcular sobre un bracket
+                  // que ya tiene actividad real.
+                  const legWalkoverRes = await supabase.rpc('apply_walkover_for_topcut_bracket_leg', {
+                    p_participant_id: participantId,
+                    p_group_origin: 'swiss_topcut',
                   });
                   if (legWalkoverRes.error) {
                     Alert.alert('Error', legWalkoverRes.error.message ?? 'No se pudo resolver el bracket por abandono.');
