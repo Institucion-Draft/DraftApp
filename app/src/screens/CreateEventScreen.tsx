@@ -40,6 +40,13 @@ const REGULAR_MATCH_FORMAT_OPTIONS: { value: RegularMatchFormat; label: string }
   { value: 'bo3', label: 'BO3' },
 ];
 
+type TopcutFormat = 'bo1' | 'bo3';
+
+const TOPCUT_FORMAT_OPTIONS: { value: TopcutFormat; label: string }[] = [
+  { value: 'bo1', label: 'BO1' },
+  { value: 'bo3', label: 'BO3' },
+];
+
 /** Suizo: cantidad de rondas suizas configurable manualmente (3, 4 o 5), para
  *  cualquier match_format (BO1/BO2/BO3) — antes exclusivo de swiss_bo2 (0045),
  *  generalizado en Fase 6.4. */
@@ -53,11 +60,14 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'two_headed_giant', label: getEventTypeLabel('two_headed_giant') },
 ];
 
+const MATCH_FORMAT_TOOLTIP_BODY =
+  'Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3).';
+
 function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
   if (format === 'round_robin') {
-    return 'Todos los jugadores se enfrentan entre sí. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.';
+    return `Todos los jugadores se enfrentan entre sí. ${MATCH_FORMAT_TOOLTIP_BODY} Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.`;
   }
-  return 'Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado. Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3). Al terminar todas las rondas, los mejores 4 pasan a jugar semifinales.';
+  return `Formato suizo: en cada ronda los jugadores se emparejan según su puntaje acumulado. ${MATCH_FORMAT_TOOLTIP_BODY} Al terminar todas las rondas, los mejores 4 pasan a jugar semifinales.`;
 }
 
 function pickFromOptions(
@@ -145,6 +155,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const typeLabel = EVENT_TYPE_OPTIONS.find((t) => t.value === eventType)?.label ?? eventType;
   const competitionFormatLabel =
     COMPETITION_FORMAT_OPTIONS.find((f) => f.value === competitionFormat)?.label ?? competitionFormat;
+  // Swiss siempre tiene mata-mata (fijo); round_robin solo si se activó el toggle top4.
+  const hasMataMata = competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4);
 
   const validate = (): string | null => {
     const n = name.trim();
@@ -304,7 +316,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
         </View>
         {eventType === 'two_headed_giant' ? (
           <View style={[styles.pickerBtn, { opacity: 0.5 }]}>
-            <Text style={styles.pickerTxt}>Todos contra todos (forzado)</Text>
+            <Text style={styles.pickerTxt}>Todos contra todos</Text>
           </View>
         ) : (
           <TouchableOpacity style={styles.pickerBtn} onPress={openCompetitionFormatPicker}>
@@ -312,11 +324,23 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </TouchableOpacity>
         )}
 
+        {competitionFormat === 'swiss' ? (
+          <Text style={styles.formatHint}>Suizo incluye siempre fase mata-mata (Top 4); no se puede desactivar.</Text>
+        ) : null}
+
         {competitionFormat === 'round_robin' || competitionFormat === 'swiss' ? (
           <>
-            <Text style={styles.label}>
-              {competitionFormat === 'round_robin' ? 'Formato de partidas (fase liga)' : 'Formato de partidas (fase regular)'}
-            </Text>
+            {hasMataMata ? (
+              <Text style={[styles.label, styles.labelInline, styles.labelBold]}>
+                {competitionFormat === 'round_robin' ? 'Fase todos vs todos' : 'Fase rondas suizas'}
+              </Text>
+            ) : null}
+            <View style={styles.labelRow}>
+              <Text style={[styles.label, styles.labelInline, hasMataMata ? styles.labelNormal : styles.labelBold]}>
+                Formato de enfrentamientos
+              </Text>
+              <InfoTooltip title="Formato de enfrentamientos" body={MATCH_FORMAT_TOOLTIP_BODY} />
+            </View>
             <View style={styles.segmented}>
               {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
                 const selected = regularMatchFormat === opt.value;
@@ -347,22 +371,36 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4) ? (
-          <View style={styles.switchRow}>
-            <View style={styles.switchLabelRow}>
-              <Text style={styles.switchLabelInline}>Eliminatorias BO3</Text>
+        {hasMataMata ? (
+          <>
+            <Text style={[styles.label, styles.labelInline, styles.labelBold]}>Fase mata-mata</Text>
+            <View style={styles.labelRow}>
+              <Text style={[styles.label, styles.labelInline, styles.labelNormal]}>Formato de enfrentamientos</Text>
               <InfoTooltip
-                title="Eliminatorias BO3"
-                body="Los partidos de la fase mata-mata pueden jugarse al mejor de 3 (BO3) o a partido único (BO1). Podés cambiar esta opción hasta que arranque el primer partido de desempate o de la fase mata-mata."
+                title="Fase mata-mata - Formato de enfrentamientos"
+                body="Los enfrentamientos de la fase mata-mata pueden jugarse al mejor de 3 (BO3) o a partido único (BO1). Podés cambiar esta opción hasta que arranque cualquier semifinal."
               />
             </View>
-            <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} />
-          </View>
+            <View style={styles.segmented}>
+              {TOPCUT_FORMAT_OPTIONS.map((opt) => {
+                const selected = eliminatoriasBo3 === (opt.value === 'bo3');
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.segment, selected && styles.segmentSelected]}
+                    onPress={() => setEliminatoriasBo3(opt.value === 'bo3')}
+                  >
+                    <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
         ) : null}
 
         {competitionFormat === 'swiss' ? (
           <>
-            <Text style={styles.label}>Rondas suizas</Text>
+            <Text style={styles.label}>Número de rondas suizas</Text>
             <View style={styles.segmented}>
               {SWISS_ROUNDS_OPTIONS.map((n) => {
                 const selected = swissRoundsManual === n;
@@ -384,6 +422,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           <Text style={styles.reglamentoBtnTxt}>📖 Ver reglamento completo</Text>
         </TouchableOpacity>
       </Card>
+
+      <Text style={styles.sectionHeader}>Configuración de partida</Text>
 
       <View style={styles.switchRow}>
         <View style={styles.switchLabelRow}>
@@ -524,7 +564,10 @@ const styles = StyleSheet.create({
   switchLabelRow: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 6 },
   switchLabelInline: { fontSize: 15, color: '#111', fontWeight: '500' },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  labelInline: { marginBottom: 0 },
+  labelInline: { marginBottom: 0, flexShrink: 1 },
+  labelBold: { fontWeight: '700' },
+  labelNormal: { fontWeight: '400' },
+  formatHint: { fontSize: 12, color: '#9CA3AF', marginTop: -12, marginBottom: 16 },
   sectionHeader: { fontSize: 16, fontWeight: '700', color: '#111', marginTop: 4, marginBottom: 10 },
   formatCard: { marginBottom: 16 },
   reglamentoBtn: { marginTop: 4, paddingVertical: 10, alignItems: 'center' },

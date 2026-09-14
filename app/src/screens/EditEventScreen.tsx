@@ -26,6 +26,13 @@ type CompetitionFormat = 'round_robin' | 'swiss';
 
 /** Antes exclusivo de swiss_bo2 (0045), generalizado a cualquier match_format de swiss (0096). */
 const SWISS_ROUNDS_OPTIONS = [3, 4, 5] as const;
+
+type TopcutFormat = 'bo1' | 'bo3';
+
+const TOPCUT_FORMAT_OPTIONS: { value: TopcutFormat; label: string }[] = [
+  { value: 'bo1', label: 'BO1' },
+  { value: 'bo3', label: 'BO3' },
+];
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null): string {
@@ -424,7 +431,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
       {competitionFormat === 'round_robin' || competitionFormat === 'swiss' ? (
         <>
-          <Text style={styles.label}>Formato de partidas (fase regular)</Text>
+          <Text style={styles.label}>Formato de enfrentamientos (fase regular)</Text>
           <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
             <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{getMatchFormatLabel(matchFormat)}</Text>
           </View>
@@ -434,9 +441,21 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
       {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>
-          <View style={styles.turnTrackingRow}>
-            <Text style={styles.turnTrackingLabel}>Eliminatorias BO3</Text>
-            <Switch value={eliminatoriasBo3} onValueChange={setEliminatoriasBo3} disabled={topcutFormatLocked} />
+          <Text style={[styles.label, topcutFormatLocked && styles.labelMuted]}>Eliminatorias</Text>
+          <View style={styles.segmented}>
+            {TOPCUT_FORMAT_OPTIONS.map((opt) => {
+              const selected = eliminatoriasBo3 === (opt.value === 'bo3');
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.segment, selected && styles.segmentSelected]}
+                  disabled={topcutFormatLocked}
+                  onPress={() => setEliminatoriasBo3(opt.value === 'bo3')}
+                >
+                  <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           {topcutFormatLocked ? (
             <Text style={styles.topcutLockedHint}>Ya no editable: las eliminatorias comenzaron.</Text>
