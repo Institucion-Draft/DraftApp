@@ -3,13 +3,15 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import RoundRobinRulesContent from './rules/roundRobinRulesContent';
+import SwissRulesContent from './rules/swissRulesContent';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CompetitionRules'>;
-type ModalityTab = 'round_robin' | 'swiss';
+type ModalityTab = 'round_robin' | 'swiss' | 'two_headed_giant';
 
 const TABS: { value: ModalityTab; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
   { value: 'swiss', label: 'Rondas suizas' },
+  { value: 'two_headed_giant', label: 'Gigante de dos cabezas' },
 ];
 
 export default function CompetitionRulesScreen(_props: Props) {
@@ -34,6 +36,8 @@ export default function CompetitionRulesScreen(_props: Props) {
 
       {tab === 'round_robin' ? (
         <RoundRobinRulesContent />
+      ) : tab === 'swiss' ? (
+        <SwissRulesContent />
       ) : (
         <View style={styles.placeholderWrap}>
           <Text style={styles.placeholderTxt}>Próximamente</Text>
@@ -54,9 +58,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: 20,
   },
-  segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#fafafa' },
+  segment: { flex: 1, paddingVertical: 12, paddingHorizontal: 4, alignItems: 'center', backgroundColor: '#fafafa' },
   segmentSelected: { backgroundColor: '#3B82F6' },
-  segmentTxt: { fontSize: 15, color: '#111', fontWeight: '600' },
+  segmentTxt: { fontSize: 13, color: '#111', fontWeight: '600', textAlign: 'center' },
   segmentTxtSelected: { color: '#fff' },
   placeholderWrap: { alignItems: 'center', paddingVertical: 40 },
   placeholderTxt: { fontSize: 15, color: '#9CA3AF', fontWeight: '500' },

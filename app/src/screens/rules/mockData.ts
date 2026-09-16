@@ -224,3 +224,53 @@ export const SECTION6_THIRD_PLACE_TIE_ROWS: RuleStandingsRow[] = [
   { id: '5', name: 'Elena', pg: 3, pj: 5, rank: 4, highlight: true },
   { id: '6', name: 'Facu', pg: 1, pj: 5, rank: 6 },
 ];
+
+/**
+ * SUIZO — Sección 1: 5 jugadores, 3 rondas, con un bye en el medio para mostrar la asimetría
+ * real de puntos (swiss_points_of, 0094): victoria=3, empate=1 (solo BO2), bye=3 en BO1/BO3,
+ * bye=2 en BO2. PG/PE/PP cuentan solo partidas jugadas; el bye no es un "partido ganado", por
+ * eso Juli/Male llegan a sus puntos sin que PG*3+PE alcance a explicarlos del todo.
+ */
+export const SWISS_SECTION1_BO13_ROWS: RuleStandingsRow[] = [
+  { id: '1', name: 'Nico', pg: 3, pe: 0, pp: 0, pts: 9 },
+  { id: '2', name: 'Fede', pg: 2, pe: 0, pp: 1, pts: 6 },
+  { id: '3', name: 'Juli', pg: 1, pe: 0, pp: 1, pts: 6 },
+  { id: '4', name: 'Male', pg: 1, pe: 0, pp: 2, pts: 3 },
+  { id: '5', name: 'Santi', pg: 0, pe: 0, pp: 3, pts: 0 },
+];
+
+export const SWISS_SECTION1_BO2_ROWS: RuleStandingsRow[] = [
+  { id: '1', name: 'Nico', pg: 3, pe: 0, pp: 0, pts: 9 },
+  { id: '2', name: 'Fede', pg: 2, pe: 1, pp: 0, pts: 7 },
+  { id: '3', name: 'Male', pg: 1, pe: 1, pp: 0, pts: 6 },
+  { id: '4', name: 'Juli', pg: 0, pe: 1, pp: 2, pts: 1 },
+];
+
+/** SUIZO — Sección 3: fase regular de 5 jugadores, ranking por puntos (no hay top4 opcional). */
+export const SWISS_SECTION3_TOP4_ROWS: RuleStandingsRow[] = [
+  { id: '1', name: 'Nico', pg: 4, pe: 0, pp: 0, pts: 12 },
+  { id: '2', name: 'Fede', pg: 3, pe: 0, pp: 1, pts: 9 },
+  { id: '3', name: 'Male', pg: 2, pe: 0, pp: 2, pts: 6 },
+  { id: '4', name: 'Juli', pg: 1, pe: 0, pp: 3, pts: 3 },
+  { id: '5', name: 'Santi', pg: 0, pe: 0, pp: 4, pts: 0 },
+];
+
+export const SWISS_SECTION3_BRACKET_ROUNDS: BracketRound[] = [
+  {
+    title: 'Semifinales',
+    matches: [
+      { a: { kind: 'player', name: 'Nico (1°)' }, b: { kind: 'player', name: 'Juli (4°)' } },
+      { a: { kind: 'player', name: 'Fede (2°)' }, b: { kind: 'player', name: 'Male (3°)' } },
+    ],
+  },
+];
+
+export const SWISS_SECTION3_SEMIS_MATCHUPS: RuleMatchup[] = [
+  { id: 'semi1', phaseLabel: 'Semifinal', a: 'Nico', b: 'Juli' },
+  { id: 'semi2', phaseLabel: 'Semifinal', a: 'Fede', b: 'Male' },
+];
+
+export const SWISS_SECTION3_FINAL_MATCHUPS: RuleMatchup[] = [
+  { id: 'final', phaseLabel: 'Final', a: 'Nico', b: 'Fede' },
+  { id: 'third', phaseLabel: '3er/4to puesto', a: 'Juli', b: 'Male' },
+];
