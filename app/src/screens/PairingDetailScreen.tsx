@@ -26,6 +26,7 @@ import {
   pairingIsBetweenParticipants,
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
+import { useCanManageEvent } from '../hooks/useCanManageEvent';
 
 const ABORT_WINDOW_MS = 3 * 60 * 1000;
 
@@ -247,7 +248,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [mataA, setMataA] = useState<ParticipantRow | null>(null);
   const [mataB, setMataB] = useState<ParticipantRow | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [isOrganizer, setIsOrganizer] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const { canManageEvent } = useCanManageEvent(workspaceId, pairing?.event_id ?? null);
   const [status, setStatus] = useState<'scheduled' | 'in_progress' | 'completed'>('scheduled');
   const [matches, setMatches] = useState<MatchRow[]>([]);
   /** Vidas actuales del match in_progress (si hay). */
@@ -363,22 +365,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
 
     const currentUserId = meRes.data.user?.id ?? null;
     setMyUserId(currentUserId);
-    if (eventRes.data?.workspace_id && currentUserId) {
-      const roleRes = await supabase
-        .from('workspace_members')
-        .select('role')
-        .eq('workspace_id', eventRes.data.workspace_id as string)
-        .eq('user_id', currentUserId)
-        .maybeSingle();
-      if (roleRes.error) {
-        if (__DEV__) {
-          console.error('Error cargando rol del workspace:', roleRes.error);
-        }
-      }
-      setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
-    } else {
-      setIsOrganizer(false);
-    }
+    // isOrganizer/canManageEvent: useCanManageEvent(workspaceId, pairing.event_id) — se
+    // recalcula solo cuando cambian estos dos ids.
+    setWorkspaceId((eventRes.data?.workspace_id as string | undefined) ?? null);
 
     const participants = (partRes.data ?? []) as ParticipantRow[];
     const map = new Map(participants.map((x) => [x.id, x]));
@@ -808,7 +797,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       if (m.status !== 'in_progress') return null;
       if (!myUserId || !a || !b) return null;
       const isParticipantHere = a.user_id === myUserId || b.user_id === myUserId;
-      if (!isParticipantHere && !isOrganizer) return null;
+      if (!isParticipantHere && !canManageEvent) return null;
 
       const isAbortRequestActive = Boolean(
         m.abort_requested_by &&
@@ -820,7 +809,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       const otherRequested = isAbortRequestActive && m.abort_requested_by !== myUserId;
 
       const onTrashPress = () => {
-        if (isOrganizer) {
+        if (canManageEvent) {
           Alert.alert(
             'Abortar partida',
             'Vas a abortar la partida como organizer. Va a desaparecer como si nunca hubiera existido.',
@@ -861,7 +850,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           <TouchableOpacity
             style={styles.abortTrashBtn}
             onPress={onTrashPress}
-            disabled={!isOrganizer && iRequested}
+            disabled={!canManageEvent && iRequested}
           >
             <Text style={styles.abortTrashEmoji}>🗑️</Text>
           </TouchableOpacity>
@@ -873,7 +862,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         </View>
       );
     },
-    [a, b, myUserId, nowTs, isOrganizer, requestAbortMatch, confirmAbortMatch]
+    [a, b, myUserId, nowTs, canManageEvent, requestAbortMatch, confirmAbortMatch]
   );
 
   useLayoutEffect(() => {
@@ -1184,7 +1173,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       userIdA: a?.user_id ?? '',
       userIdB: b?.user_id ?? '',
       myUserId,
-      isWorkspaceOrganizer: isOrganizer,
+      isWorkspaceOrganizer: canManageEvent,
       aInOtherMatchId: details.participantAInOtherMatchId,
       bInOtherMatchId: details.participantBInOtherMatchId,
     });
@@ -1290,9 +1279,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   // partida jugada.
   const showHeroBlueRow = competitionFormat !== 'swiss' || pairing.swiss_round != null;
   const showPrimaryInSwissMata =
-    movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || isOrganizer);
+    movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || canManageEvent);
   const showPrimaryInOfficialsLegacy =
-    movePrimaryBtnAboveRevenge && !useSwissTopcutBracketDetailLayout && (isParticipant || isOrganizer);
+    movePrimaryBtnAboveRevenge && !useSwissTopcutBracketDetailLayout && (isParticipant || canManageEvent);
 
   const renderDraftRow = (m: MatchRow, idx: number) => {
     const displayNum = idx + 1;
@@ -1825,7 +1814,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {isParticipant || isOrganizer ? (
+      {isParticipant || canManageEvent ? (
         !movePrimaryBtnAboveRevenge ? (
         <View style={styles.block}>
           <TouchableOpacity

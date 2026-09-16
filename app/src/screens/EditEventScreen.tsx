@@ -18,6 +18,7 @@ import type { EventStatus, EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { useCanManageEvent } from '../hooks/useCanManageEvent';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
@@ -121,6 +122,10 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const isAdvancedStatus = status === 'playing' || status === 'completed';
   const restricted = isAdvancedStatus && !forceEditOverride;
   const statusPickerLocked = loadedStatus === 'playing' || loadedStatus === 'completed';
+  // "Forzar edición" queda organizer-only: la posta nunca da esta facultad, ni siquiera con
+  // opción (a) (mismo nivel de rigor que ya existía — el toggle es puramente de UI, ver
+  // can_manage_event/RLS que no distingue "forzar" de una edición normal).
+  const { isOrganizer } = useCanManageEvent(workspaceId, eventId);
 
   useEffect(() => {
     void (async () => {
@@ -487,7 +492,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </>
       ) : null}
 
-      {isAdvancedStatus ? (
+      {isAdvancedStatus && isOrganizer ? (
         <View style={styles.forceEditBlock}>
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>El draft ya empezó. ¿Forzar edición?</Text>
