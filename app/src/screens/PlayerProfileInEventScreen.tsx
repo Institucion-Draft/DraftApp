@@ -19,6 +19,7 @@ import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
+import { useCanManageEvent } from '../hooks/useCanManageEvent';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerProfileInEvent'>;
 
@@ -188,8 +189,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [matchesWon, setMatchesWon] = useState(0);
   const [pairingsWon, setPairingsWon] = useState(0);
   const [pairingsCompleted, setPairingsCompleted] = useState(0);
+  /** Del PERFIL VISTO (badge "Organizador"), no de quien mira — no es un check de permisos. */
   const [isWorkspaceOrganizer, setIsWorkspaceOrganizer] = useState(false);
-  const [isCurrentUserOrganizer, setIsCurrentUserOrganizer] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  /** De quien mira la pantalla: facultades sobre ESTE evento (marcar/revertir "me voy" ajeno). */
+  const { canManageEvent } = useCanManageEvent(workspaceId, eventId);
   const [leftEventAt, setLeftEventAt] = useState<string | null>(null);
   const [participantIsShiny, setParticipantIsShiny] = useState(false);
   const [profileGender, setProfileGender] = useState<Gender | null>(null);
@@ -289,6 +293,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       ((evRow as { event_type?: string | null } | null)?.event_type ?? null) === 'two_headed_giant'
     );
     setWorkspaceStreak([]);
+    setWorkspaceId(wsId ?? null);
     if (wsId) {
       const orgRes = await supabase
         .from('workspace_members')
@@ -297,20 +302,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         .eq('user_id', uid)
         .maybeSingle();
       setIsWorkspaceOrganizer(!orgRes.error && orgRes.data?.role === 'organizer');
-      if (currentUserId) {
-        const currentOrgRes = await supabase
-          .from('workspace_members')
-          .select('role')
-          .eq('workspace_id', wsId)
-          .eq('user_id', currentUserId)
-          .maybeSingle();
-        setIsCurrentUserOrganizer(!currentOrgRes.error && currentOrgRes.data?.role === 'organizer');
-      } else {
-        setIsCurrentUserOrganizer(false);
-      }
     } else {
       setIsWorkspaceOrganizer(false);
-      setIsCurrentUserOrganizer(false);
     }
 
     const u = relationOne(
@@ -1548,7 +1541,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       forceSinglePill?: boolean
     ) => (
       <TouchableOpacity
-        key={`${tint}-${row.pairingId}`}
+        key={`${tint}-${row.opponentId}-${row.pairingId ?? row.bracketMatchId ?? 'pending'}`}
         style={styles.h2hCard}
         activeOpacity={row.pairingId ? 0.7 : 1}
         disabled={!row.pairingId}
@@ -2105,7 +2098,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.leftEventText}>
                 Te marcaste como {leftWord} el {formatLeftEventAt(leftEventAt)}
               </Text>
-              {isCurrentUserOrganizer ? (
+              {canManageEvent ? (
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
                   <Text style={styles.primaryBtnTxt}>Revertir</Text>
                 </TouchableOpacity>
@@ -2116,7 +2109,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.secondaryBtnTxt}>Me estoy yendo</Text>
             </TouchableOpacity>
           )
-        ) : isCurrentUserOrganizer ? (
+        ) : canManageEvent ? (
           leftEventAt ? (
             <>
               <Text style={styles.leftEventText}>

@@ -79,6 +79,9 @@ export type DraftEvent = {
   event_type: EventType;
   champion_user_id: string | null;
   created_by: string;
+  /** "Posta": organizador puntual del evento. Nace en created_by, transferible vía RPC
+   *  transfer_event_posta a otro participante role='player' activo. */
+  event_organizer_user_id: string;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

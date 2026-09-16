@@ -9,6 +9,8 @@ import {
   Image,
   Alert,
   RefreshControl,
+  Modal,
+  FlatList,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -66,6 +68,7 @@ type EventRow = {
   cancelled_at: string | null;
   cancelled_by: string | null;
   deleted_at: string | null;
+  event_organizer_user_id: string;
   is_timed_draft?: boolean | null;
   timer_packs?: number[] | null;
   timer_alpha?: number | null;
@@ -100,6 +103,16 @@ type ParticipantView = {
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }[]
     | null;
+};
+
+/** Un candidato a recibir la posta ("Delegar facultades") — un participante role='player' activo,
+ *  o cada miembro individual de una fila de two-headed giant (el gigante puede ceder a A o a B). */
+type DelegateCandidate = {
+  key: string;
+  participantId: string;
+  userId: string;
+  isMemberB: boolean;
+  name: string;
 };
 
 type TiebreakGroupParticipantRow = {
@@ -203,13 +216,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   );
   const firstRef = useRef(true);
   const [, setDraftDurationTick] = useState(0);
+  const [delegateModalVisible, setDelegateModalVisible] = useState(false);
+  const [delegateCandidates, setDelegateCandidates] = useState<DelegateCandidate[]>([]);
+  const [loadingDelegateCandidates, setLoadingDelegateCandidates] = useState(false);
+  const [transferringPosta, setTransferringPosta] = useState(false);
 
   const load = useCallback(async () => {
     setProdeCVoteCount(null);
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -943,6 +960,88 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     navigation.navigate('EventsList', { workspaceId: event.workspace_id });
   };
 
+  const openDelegateModal = async () => {
+    if (!event || !myUserId) return;
+    setLoadingDelegateCandidates(true);
+    setDelegateModalVisible(true);
+
+    // role='player' ya viene filtrado por el select de `participants` (Fase 8: excluye
+    // ghost/exile por diseño, mismo criterio que transfer_event_posta). Acá solo filtramos
+    // "me" (no puedo cederme la posta a mí mismo) y a quien ya se fue del evento.
+    const eligible = participants.filter((p) => p.left_event_at == null);
+
+    const memberBIds = Array.from(
+      new Set(
+        eligible
+          .map((p) => p.member_b_user_id)
+          .filter((id): id is string => !!id && id !== myUserId)
+      )
+    );
+    let memberBNames: Record<string, string> = {};
+    if (memberBIds.length > 0) {
+      const res = await supabase.from('users').select('id, display_name, username').in('id', memberBIds);
+      if (!res.error) {
+        memberBNames = Object.fromEntries(
+          (res.data ?? []).map((u) => [
+            u.id as string,
+            ((u.display_name as string) || (u.username as string) || 'Jugador'),
+          ])
+        );
+      }
+    }
+
+    const candidates: DelegateCandidate[] = [];
+    eligible.forEach((p) => {
+      const u = relationOne(p.users);
+      const mainName = u?.display_name || u?.username || 'Jugador';
+      if (p.user_id !== myUserId) {
+        candidates.push({
+          key: `${p.id}-a`,
+          participantId: p.id,
+          userId: p.user_id,
+          isMemberB: false,
+          name: p.giant_name ? `${mainName} (${p.giant_name})` : mainName,
+        });
+      }
+      if (p.member_b_user_id && p.member_b_user_id !== myUserId) {
+        const bName = memberBNames[p.member_b_user_id] ?? 'Jugador';
+        candidates.push({
+          key: `${p.id}-b`,
+          participantId: p.id,
+          userId: p.member_b_user_id,
+          isMemberB: true,
+          name: p.giant_name ? `${bName} (${p.giant_name})` : bName,
+        });
+      }
+    });
+
+    setDelegateCandidates(candidates);
+    setLoadingDelegateCandidates(false);
+  };
+
+  const doTransferPosta = async (candidate: DelegateCandidate) => {
+    if (!event) return;
+    setTransferringPosta(true);
+    const { error } = await supabase.rpc('transfer_event_posta', {
+      p_event_id: event.id,
+      p_to_user_id: candidate.userId,
+    });
+    setTransferringPosta(false);
+    if (error) {
+      Alert.alert('No se pudo delegar', error.message ?? 'No se pudo transferir la posta.');
+      return;
+    }
+    setDelegateModalVisible(false);
+    await load();
+  };
+
+  const confirmDelegate = (candidate: DelegateCandidate) => {
+    Alert.alert('Delegar facultades', `¿Ceder facultades a ${candidate.name}?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Ceder', onPress: () => void doTransferPosta(candidate) },
+    ]);
+  };
+
   const finishDraftAndGeneratePairings = async () => {
     if (!event) return;
 
@@ -975,6 +1074,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const participantCount = participants.length;
   const hasDeclaredColors = myMemberDeclared;
+  // Organizador real del workspace, o poseedor actual de la posta de este evento puntual.
+  // Ya tenemos isOrganizer/myUserId/event acá (misma carga de `load()`), así que se computa local
+  // en vez de usar useCanManageEvent — evita duplicar el fetch de rol/evento en esta pantalla.
+  // "Eliminar evento" queda aparte, gateado por isOrganizer puro (ver el bloque de "Eliminar
+  // evento" más abajo): la posta nunca da esa facultad.
+  const canManageEvent = isOrganizer || (myUserId != null && event?.event_organizer_user_id === myUserId);
+  // Quien tiene la posta ahora mismo (Fase 8: "Delegar facultades") — a diferencia de
+  // canManageEvent, NO incluye a un organizador real que nunca creó ni recibió la posta: eso
+  // nunca fue suyo, no hay nada que ceder (mismo criterio que transfer_event_posta en la DB).
+  const hasPosta = myUserId != null && event?.event_organizer_user_id === myUserId;
+  // scheduled/playing libre; bloqueado en drafting y en los 3 estados terminales (Fase 3 de diseño).
+  const postaTransferAllowedStatus = event?.status === 'scheduled' || event?.status === 'playing';
   const missingCube = !event?.cube_id;
   const missingVenue = !event?.venue_id;
   const missingParticipants = participantCount < 1;
@@ -1187,10 +1298,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     prodeCVoteCount >= proDeCThreshold;
 
   const showDiaryBlock =
-    event.status !== 'cancelled' && (myParticipantId != null || isOrganizer);
+    event.status !== 'cancelled' && (myParticipantId != null || canManageEvent);
   const diaryNavigateAllowed =
     showDiaryBlock &&
-    (isOrganizer ||
+    (canManageEvent ||
       (myParticipantId != null &&
         (event.status === 'completed' ||
           event.status === 'concluded' ||
@@ -1421,26 +1532,28 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <Text style={styles.meta}>Notas: {event.notes?.trim() || 'Sin notas.'}</Text>
       </View>
 
-      {isOrganizer ? (
+      {isOrganizer && event.status === 'cancelled' ? (
         <View style={styles.block}>
-          {event.status === 'cancelled' ? (
-            <TouchableOpacity
-              style={styles.dangerBtn}
-              onPress={() =>
-                Alert.alert(
-                  'Eliminar evento',
-                  '¿Seguro que querés eliminar este evento? Va a quedar oculto de los listados pero los datos se conservan.',
-                  [
-                    { text: 'Volver', style: 'cancel' },
-                    { text: 'Eliminar', style: 'destructive', onPress: () => void softDeleteEvent() },
-                  ]
-                )
-              }
-            >
-              <Text style={styles.dangerTxt}>Eliminar evento</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
+          <TouchableOpacity
+            style={styles.dangerBtn}
+            onPress={() =>
+              Alert.alert(
+                'Eliminar evento',
+                '¿Seguro que querés eliminar este evento? Va a quedar oculto de los listados pero los datos se conservan.',
+                [
+                  { text: 'Volver', style: 'cancel' },
+                  { text: 'Eliminar', style: 'destructive', onPress: () => void softDeleteEvent() },
+                ]
+              )
+            }
+          >
+            <Text style={styles.dangerTxt}>Eliminar evento</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {canManageEvent && event.status !== 'cancelled' ? (
+        <View style={styles.block}>
               <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
                 <Text style={styles.primaryBtnTxt}>Editar evento</Text>
               </TouchableOpacity>
@@ -1603,8 +1716,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               >
                 <Text style={styles.dangerTxt}>Cancelar evento</Text>
               </TouchableOpacity>
-            </>
-          )}
         </View>
       ) : null}
 
@@ -1664,6 +1775,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           ? participants.map((p) => {
               const u = relationOne(p.users);
               const giantLabel = p.giant_name ?? (u?.display_name || u?.username || 'Gigante');
+              const rowHasPosta =
+                event.event_organizer_user_id === p.user_id ||
+                event.event_organizer_user_id === p.member_b_user_id;
               return (
                 <TouchableOpacity
                   key={p.id}
@@ -1704,6 +1818,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                       ) : null}
                     </View>
                   </View>
+                  {rowHasPosta ? (
+                    <View style={styles.postaBadge}>
+                      <Text style={styles.postaBadgeText}>O</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               );
             })
@@ -1714,6 +1833,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               const polemicaSet = new Set((event?.polemica_winners ?? []).filter(Boolean).map(String));
               const recognitionSet = new Set((event?.recognition_winners ?? []).filter(Boolean).map(String));
               const isFragmentadaEvent = event?.champion_decided_by === 'fragmentada';
+              const rowHasPosta = event.event_organizer_user_id === p.user_id;
               return (
                 <TouchableOpacity
                   key={p.id}
@@ -1764,6 +1884,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                       ) : null}
                     </View>
                   </View>
+                  {rowHasPosta ? (
+                    <View style={styles.postaBadge}>
+                      <Text style={styles.postaBadgeText}>O</Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -1791,7 +1916,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {showDiaryBlock ? (
         <View style={[styles.block, styles.blockLast]}>
-          <Text style={styles.blockTitle}>Bitácora digital</Text>
           {diaryNavigateAllowed ? (
             <TouchableOpacity
               style={styles.primaryBtn}
@@ -1805,7 +1929,23 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      {isOrganizer &&
+      {hasPosta ? (
+        <View style={[styles.block, styles.blockLast]}>
+          {postaTransferAllowedStatus ? (
+            <TouchableOpacity style={styles.delegateBtn} onPress={() => void openDelegateModal()}>
+              <Text style={styles.delegateBtnTxt}>Delegar facultades</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.muted}>
+              {event.status === 'drafting'
+                ? 'No se puede delegar mientras el draft está en curso.'
+                : 'No se puede delegar: el evento ya terminó.'}
+            </Text>
+          )}
+        </View>
+      ) : null}
+
+      {canManageEvent &&
        event.competition_format === 'round_robin' &&
        event.top_size == null &&
        event.status === 'playing' &&
@@ -1828,6 +1968,55 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           </TouchableOpacity>
         </View>
       ) : null}
+
+      <Modal
+        visible={delegateModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDelegateModalVisible(false)}
+      >
+        <View style={styles.delegateBackdrop}>
+          <View style={styles.delegateSheet}>
+            <Text style={styles.delegateTitle}>Delegar facultades</Text>
+            <Text style={styles.delegateSubtitle}>Elegí a quién le cedés las facultades de organizador de este evento.</Text>
+            {loadingDelegateCandidates ? (
+              <ActivityIndicator size="small" color="#3B82F6" style={styles.delegateLoading} />
+            ) : delegateCandidates.length === 0 ? (
+              <Text style={styles.muted}>No hay otros jugadores activos para delegar.</Text>
+            ) : (
+              <FlatList
+                data={delegateCandidates}
+                keyExtractor={(item) => item.key}
+                style={styles.delegateList}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.delegateRow}
+                    disabled={transferringPosta}
+                    onPress={() => confirmDelegate(item)}
+                  >
+                    <PlayerAvatar
+                      userId={item.userId}
+                      participantId={item.participantId}
+                      isMemberB={item.isMemberB}
+                      size="small"
+                      withColorBorder={false}
+                      style={{ marginRight: 10 }}
+                    />
+                    <Text style={styles.delegateName}>{item.name}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            <TouchableOpacity
+              style={styles.delegateCancelBtn}
+              disabled={transferringPosta}
+              onPress={() => setDelegateModalVisible(false)}
+            >
+              <Text style={styles.delegateCancelTxt}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -1952,6 +2141,7 @@ const styles = StyleSheet.create({
   prodecPillLabel: { fontSize: 18, fontWeight: '800', color: '#111' },
   prodecPillLabelCompact: { fontSize: 14 },
   participantRow: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
@@ -2064,4 +2254,63 @@ const styles = StyleSheet.create({
   placeholderTxt: { color: '#374151', fontSize: 14, fontWeight: '600' },
   placeholderSub: { color: '#9CA3AF', fontSize: 12, marginTop: 4, fontWeight: '500' },
   blockLast: { paddingBottom: 28 },
+  delegateBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  delegateSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    maxHeight: '75%',
+  },
+  delegateTitle: { fontSize: 18, fontWeight: '700', color: '#111', marginBottom: 4 },
+  delegateSubtitle: { fontSize: 13, color: '#6B7280', marginBottom: 14 },
+  delegateLoading: { marginVertical: 20 },
+  delegateList: { flexGrow: 0 },
+  delegateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+    backgroundColor: '#fafafa',
+  },
+  delegateName: { fontSize: 15, fontWeight: '600', color: '#111', flexShrink: 1 },
+  // Violeta: distinto del azul (acciones primarias) y del rojo (peligro/cancelar), sin uso
+  // previo en esta pantalla — separa visualmente "Delegar facultades" de "Bitácora digital".
+  delegateBtn: {
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  delegateBtnTxt: { color: '#7C3AED', fontSize: 15, fontWeight: '600' },
+  // Insignia "O" (posta de organizador de este evento) — esquina inferior derecha del BOX
+  // COMPLETO de la fila (participantRow, que ya es position:'relative'), no del avatar. Mismo
+  // patrón que champBadge (EventsListScreen.tsx): offsets en 0 (no negativos) sobre un
+  // contenedor con posición explícita — la versión anterior con offsets negativos sobre un
+  // wrapper del tamaño del avatar aparecía mal ubicada en web y no aparecía en nativo.
+  postaBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  postaBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700', lineHeight: 11 },
+  delegateCancelBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 6 },
+  delegateCancelTxt: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
 });
