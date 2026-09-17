@@ -5,6 +5,8 @@ export type MainStackParamList = {
   CreateWorkspace: undefined;
   WorkspaceDetail: { workspaceId: string };
   WorkspaceDiary: { workspaceId: string };
+  WorkspaceRanking: { workspaceId: string };
+  PlayerPointsDetail: { userId: string; workspaceId: string; playerName?: string };
   SearchWorkspaces: undefined;
   MyJoinRequests: undefined;
   IncomingJoinRequests: { workspaceId: string };

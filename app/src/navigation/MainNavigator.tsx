@@ -7,6 +7,8 @@ import MemberProfileScreen from '../screens/MemberProfileScreen';
 import CreateWorkspaceScreen from '../screens/CreateWorkspaceScreen';
 import WorkspaceDetailScreen from '../screens/WorkspaceDetailScreen';
 import WorkspaceDiaryScreen from '../screens/WorkspaceDiaryScreen';
+import WorkspaceRankingScreen from '../screens/WorkspaceRankingScreen';
+import PlayerPointsDetailScreen from '../screens/PlayerPointsDetailScreen';
 import SearchWorkspacesScreen from '../screens/SearchWorkspacesScreen';
 import MyJoinRequestsScreen from '../screens/MyJoinRequestsScreen';
 import IncomingJoinRequestsScreen from '../screens/IncomingJoinRequestsScreen';
@@ -104,6 +106,19 @@ export default function MainStackNavigator() {
           name="WorkspaceDiary"
           component={WorkspaceDiaryScreen}
           options={{ title: 'Bugs y sugerencias', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="WorkspaceRanking"
+          component={WorkspaceRankingScreen}
+          options={{ title: 'Ranking Global', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="PlayerPointsDetail"
+          component={PlayerPointsDetailScreen}
+          options={({ route }) => ({
+            title: route.params.playerName ? `Puntos — ${route.params.playerName}` : 'Detalle de puntos',
+            headerBackTitle: 'Atrás',
+          })}
         />
         <Stack.Screen
           name="SearchWorkspaces"
