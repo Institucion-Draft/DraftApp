@@ -261,6 +261,12 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         >
           <Text style={styles.memberBtnText}>Partidas sin contexto</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.memberBtn}
+          onPress={() => navigation.navigate('WorkspaceRanking', { workspaceId })}
+        >
+          <Text style={styles.memberBtnText}>Ranking Global</Text>
+        </TouchableOpacity>
       </View>
 
       {isOrganizer ? (
