@@ -8,6 +8,9 @@ import CreateWorkspaceScreen from '../screens/CreateWorkspaceScreen';
 import WorkspaceDetailScreen from '../screens/WorkspaceDetailScreen';
 import WorkspaceDiaryScreen from '../screens/WorkspaceDiaryScreen';
 import WorkspaceRankingScreen from '../screens/WorkspaceRankingScreen';
+import WorkspaceSeasonScreen from '../screens/WorkspaceSeasonScreen';
+import WorkspaceSeasonHistoryScreen from '../screens/WorkspaceSeasonHistoryScreen';
+import SeasonForceCloseScreen from '../screens/SeasonForceCloseScreen';
 import PlayerPointsDetailScreen from '../screens/PlayerPointsDetailScreen';
 import SearchWorkspacesScreen from '../screens/SearchWorkspacesScreen';
 import MyJoinRequestsScreen from '../screens/MyJoinRequestsScreen';
@@ -111,6 +114,21 @@ export default function MainStackNavigator() {
           name="WorkspaceRanking"
           component={WorkspaceRankingScreen}
           options={{ title: 'Ranking Global', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="WorkspaceSeason"
+          component={WorkspaceSeasonScreen}
+          options={{ title: 'Temporada', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="WorkspaceSeasonHistory"
+          component={WorkspaceSeasonHistoryScreen}
+          options={{ title: 'Historial de temporadas', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="SeasonForceClose"
+          component={SeasonForceCloseScreen}
+          options={{ title: 'Cerrar temporada', headerBackTitle: 'Atrás' }}
         />
         <Stack.Screen
           name="PlayerPointsDetail"

@@ -6,7 +6,10 @@ export type MainStackParamList = {
   WorkspaceDetail: { workspaceId: string };
   WorkspaceDiary: { workspaceId: string };
   WorkspaceRanking: { workspaceId: string };
-  PlayerPointsDetail: { userId: string; workspaceId: string; playerName?: string };
+  WorkspaceSeason: { workspaceId: string; seasonId: string };
+  WorkspaceSeasonHistory: { workspaceId: string };
+  SeasonForceClose: { workspaceId: string; seasonId: string };
+  PlayerPointsDetail: { userId: string; workspaceId: string; playerName?: string; seasonId?: string };
   SearchWorkspaces: undefined;
   MyJoinRequests: undefined;
   IncomingJoinRequests: { workspaceId: string };
