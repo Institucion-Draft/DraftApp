@@ -34,6 +34,15 @@ import {
   type RoundRobinStandingInput,
   type RoundRobinPairingResult,
 } from '../lib/podium';
+import {
+  buildPairingRemain,
+  buildPodiumPlayers,
+  fetchPodiumTiebreakInputs,
+  type PodiumMatchRow,
+  type PodiumPairingRow,
+  type PodiumParticipantRow,
+  type PodiumTiebreakGroupRow,
+} from '../lib/eventPodium';
 
 /** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
 const PODIUM_COL_WIDTH = 132;
@@ -1040,137 +1049,34 @@ export default function StandingsScreen({ route, navigation }: Props) {
     }
     setEventFooter({ torneo: torneoLine, bo3: bo3Footer });
 
-    const podiumPlayers = (participants as any[]).map((p: any) => {
-      const pid = p.id as string;
-      const userId = p.user_id as string;
-      const u = relationOne(p.users);
-      const name = u?.display_name || u?.username || 'Jugador';
-      const playerPairings = pairings.filter((pr: any) => pr.participant_a_id === pid || pr.participant_b_id === pid);
-      const pairingSet = new Set(playerPairings.map((x: any) => x.id));
-      const playerMatches = matches.filter((m: any) => pairingSet.has(m.pairing_id));
-      const officialDone = playerMatches.filter(
-        (m: any) =>
-          m.status === 'completed' &&
-          (m.match_type === 'draft' || m.match_type === 'final') &&
-          m.winner_participant_id != null &&
-          String(m.winner_participant_id).length > 0
-      );
-      const pgOff = officialDone.filter((m: any) => m.winner_participant_id === pid).length;
-      const pjOff = officialDone.length;
-      const eg = playerPairings.filter((pr: any) => pr.official_winner_participant_id === pid).length;
-      const ec = playerPairings.filter(
-        (pr: any) => pr.official_winner_participant_id != null || pr.official_draw === true
-      ).length;
-      return {
-        participantId: pid,
-        userId,
-        name,
-        avatarUserId: userId,
-        memberBUserId: (p.member_b_user_id as string | null) ?? null,
-        bo3Won: eg,
-        bo3Completed: ec,
-        bo3WinRate: ec > 0 ? eg / ec : 0,
-        matchesWon: pgOff,
-        matchesCompleted: pjOff,
-        matchWinRate: pjOff > 0 ? pgOff / pjOff : 0,
-      };
-    });
-
-    // isBlocked ya no distingue "alguien de este pairing se fue": con el walkover (0082) un
-    // pairing pendiente contra alguien que se fue se resuelve solo (gana el que se queda) en
-    // cuanto corre apply_walkover_for_participant — mientras siga sin official_winner_
-    // participant_id acá es porque genuinamente todavía no se resolvió (por ejemplo, un pairing
-    // linkeado a un bracket real de desempate, o donde ambos lados se fueron) y el podio debe
-    // seguir tratándolo como incertidumbre real, igual que compute_event_champion (0083).
-    const pairingRemain = (pairings as any[])
-      .filter((pr) => pr.official_winner_participant_id == null && pr.official_draw !== true)
-      .map((pr: any) => ({
-        participantAId: String(pr.participant_a_id),
-        participantBId: String(pr.participant_b_id),
-        isBlocked: false,
-      }));
+    // Armado de los datos de computePodium en lib/eventPodium.ts (compartido con el cierre forzado
+    // de temporadas, que congela el podio asegurado de eventos inconclusos con el mismo código).
+    const podiumPlayers = buildPodiumPlayers(
+      participants as PodiumParticipantRow[],
+      pairings as PodiumPairingRow[],
+      matches as PodiumMatchRow[]
+    );
+    const pairingRemain = buildPairingRemain(pairings as PodiumPairingRow[]);
 
     let podiumTiebreakGroup: ActiveTiebreakGroupPodiumInput | null = null;
     let podiumTiebreakMatches: TiebreakMatchPodiumInput[] = [];
     let podiumBracketMatches: BracketMatchPodiumInput[] = [];
     if (!tiebreakGroupRes.error && tiebreakGroupRes.data) {
-      const tgRow = tiebreakGroupRes.data as {
-        id: string;
-        champion_user_id: string | null;
-        status: string;
-        group_type: string;
-        round_number: number;
-        group_origin?: string | null;
-      };
-      const gpRes = await supabase
-        .from('event_tiebreak_group_participants')
-        .select('participant_id, user_id, seed')
-        .eq('group_id', tgRow.id);
-      if (!gpRes.error && gpRes.data && (gpRes.data as { participant_id: string }[]).length > 0) {
-        podiumTiebreakGroup = {
-          id: tgRow.id,
-          group_type:
-            tgRow.group_type === 'bracket'
-              ? 'bracket'
-              : tgRow.group_type === 'fourth_place'
-                ? 'fourth_place'
-                : 'round_robin',
-          group_origin: tgRow.group_origin ?? null,
-          round_number: tgRow.round_number ?? 1,
-          champion_user_id: tgRow.champion_user_id,
-          participants: gpRes.data as { participant_id: string; user_id: string; seed: number }[],
-        };
-      }
-      const prById = new Map((pairings as { id: string }[]).map((pr) => [String(pr.id), pr]));
-      for (const m of matches as any[]) {
-        if (m.match_type !== 'tiebreak' || m.status !== 'completed') continue;
-        if (m.winner_participant_id == null || String(m.winner_participant_id).length === 0) continue;
-        const pr = prById.get(String(m.pairing_id)) as
-          | { id: string; participant_a_id: string; participant_b_id: string }
-          | undefined;
-        if (!pr) continue;
-        podiumTiebreakMatches.push({
-          pairing_id: String(m.pairing_id),
-          participant_a_id: String(pr.participant_a_id),
-          participant_b_id: String(pr.participant_b_id),
-          winner_participant_id: String(m.winner_participant_id),
-          ended_at: m.ended_at != null ? String(m.ended_at) : null,
-          tiebreak_round: m.tiebreak_round != null ? Number(m.tiebreak_round) : null,
-        });
-      }
-      if (tgRow.group_type === 'bracket' || tgRow.group_type === 'fourth_place') {
-        const bmRes = await supabase
-          .from('event_tiebreak_bracket_matches')
-          .select('bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
-          .eq('group_id', tgRow.id);
-        if (!bmRes.error && bmRes.data) {
-          podiumBracketMatches = (bmRes.data as {
-            bracket_phase: 'semi' | 'final' | 'third_place';
-            participant_a_id: string;
-            participant_b_id: string;
-            winner_participant_id: string | null;
-          }[]).map((r) => ({
-            bracket_phase: r.bracket_phase,
-            participant_a_id: String(r.participant_a_id),
-            participant_b_id: String(r.participant_b_id),
-            winner_participant_id:
-              r.winner_participant_id != null ? String(r.winner_participant_id) : null,
-          }));
-        }
-      }
-      const groupOrigin = tgRow.group_origin ?? 'tiebreak';
+      const tb = await fetchPodiumTiebreakInputs(
+        tiebreakGroupRes.data as PodiumTiebreakGroupRow,
+        pairings as PodiumPairingRow[],
+        matches as PodiumMatchRow[]
+      );
+      podiumTiebreakGroup = tb.group;
+      podiumTiebreakMatches = tb.matches;
+      podiumBracketMatches = tb.bracketMatches;
       if (
-        (groupOrigin === 'swiss_topcut' || groupOrigin === 'round_robin_topcut') &&
-        !gpRes.error &&
-        gpRes.data &&
-        (gpRes.data as { participant_id: string }[]).length >= 4 &&
+        (tb.groupOrigin === 'swiss_topcut' || tb.groupOrigin === 'round_robin_topcut') &&
+        tb.groupParticipants &&
+        tb.groupParticipants.length >= 4 &&
         podiumBracketMatches.length >= 2
       ) {
-        const built = buildSwissTopcutBracketModel(
-          gpRes.data as { participant_id: string; user_id: string; seed: number }[],
-          podiumBracketMatches,
-          infoByParticipantId
-        );
+        const built = buildSwissTopcutBracketModel(tb.groupParticipants, podiumBracketMatches, infoByParticipantId);
         if (built) swissTopcutBracketModel = built;
       }
     }

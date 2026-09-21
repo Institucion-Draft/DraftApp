@@ -19,6 +19,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { fetchWorkspaceSeasons, formatBaDate, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDetail'>;
 
@@ -54,6 +55,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
+  const [seasons, setSeasons] = useState<SeasonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const initialFocusRef = useRef(true);
@@ -151,6 +153,19 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     }, [load])
   );
 
+  // Disparador client-orchestrated de temporadas: crea la actual y la próxima si faltan y cierra
+  // las que ya se puedan cerrar, y después lee el estado. Idempotente, corre en cada foco.
+  const loadSeasons = useCallback(async () => {
+    await syncWorkspaceSeasons(workspaceId);
+    setSeasons(await fetchWorkspaceSeasons(workspaceId));
+  }, [workspaceId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadSeasons();
+    }, [loadSeasons])
+  );
+
   useLayoutEffect(() => {
     navigation.setOptions({
       title: workspace?.name ?? 'Detalle del grupo',
@@ -184,15 +199,16 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), loadSeasons()]);
     setRefreshing(false);
-  }, [load]);
-
-  const placeholder = (label: string) => {
-    Alert.alert('Próximamente', `${label} estará disponible pronto.`);
-  };
+  }, [load, loadSeasons]);
 
   const wsAvatar = workspace ? avatarPublicUrl(workspace.avatar_path) : null;
+
+  // La lista viene ordenada por starts_at: la primera "upcoming" es la próxima.
+  const currentSeason = seasons.find((s) => s.phase === 'active') ?? null;
+  const seasonButtonSeason = currentSeason ?? seasons.find((s) => s.phase === 'upcoming') ?? null;
+  const showSeasonHistory = seasons.some((s) => s.phase === 'finishing' || s.phase === 'closed');
 
   if (loading && !workspace) {
     return (
@@ -261,12 +277,45 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         >
           <Text style={styles.memberBtnText}>Partidas sin contexto</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.memberBtn}
-          onPress={() => navigation.navigate('WorkspaceRanking', { workspaceId })}
-        >
-          <Text style={styles.memberBtnText}>Ranking Global</Text>
-        </TouchableOpacity>
+      </View>
+
+      <View style={styles.rankingSection}>
+        <Text style={styles.rankingTitle}>Ranking</Text>
+        <View style={styles.rankingRow}>
+          {seasonButtonSeason ? (
+            <TouchableOpacity
+              style={[styles.memberBtn, styles.rankingBtn, !currentSeason && styles.rankingBtnDisabled]}
+              disabled={!currentSeason}
+              onPress={() =>
+                currentSeason &&
+                navigation.navigate('WorkspaceSeason', { workspaceId, seasonId: currentSeason.season_id })
+              }
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !currentSeason }}
+            >
+              <Text style={styles.memberBtnText}>Temporada {seasonButtonSeason.name}</Text>
+              {!currentSeason ? (
+                <Text style={styles.rankingBtnSub}>Arranca el {formatBaDate(seasonButtonSeason.starts_at)}</Text>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.memberBtn, styles.rankingBtn]}
+            onPress={() => navigation.navigate('WorkspaceRanking', { workspaceId })}
+            accessibilityRole="button"
+          >
+            <Text style={styles.memberBtnText}>Global</Text>
+          </TouchableOpacity>
+        </View>
+        {showSeasonHistory ? (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('WorkspaceSeasonHistory', { workspaceId })}
+            accessibilityRole="link"
+            hitSlop={8}
+          >
+            <Text style={styles.rankingLink}>Historial de temporadas</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {isOrganizer ? (
@@ -446,6 +495,44 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: 8,
+  },
+  rankingSection: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  rankingTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  rankingRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  rankingBtn: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    marginBottom: 0,
+  },
+  rankingBtnDisabled: {
+    opacity: 0.55,
+  },
+  rankingBtnSub: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  rankingLink: {
+    color: '#3B82F6',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 10,
+    textDecorationLine: 'underline',
   },
   memberBtnText: {
     color: '#374151',

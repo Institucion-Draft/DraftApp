@@ -4,6 +4,13 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import {
+  fetchDefaultPointConfigId,
+  fetchPointTiers,
+  tierIndexForPlayerCount,
+  tierRangeLabel,
+  type PointTier,
+} from '../lib/pointConfig';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerPointsDetail'>;
 
@@ -52,22 +59,6 @@ type EventPoints = {
 
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
-const POINTS_TIERS: { range: string; gold: number; silver: number; bronze: number }[] = [
-  { range: '4-6', gold: 5, silver: 3, bronze: 2 },
-  { range: '7-9', gold: 7, silver: 4, bronze: 3 },
-  { range: '10-12', gold: 9, silver: 6, bronze: 4 },
-  { range: '13+', gold: 12, silver: 8, bronze: 5 },
-];
-
-/** Índice en POINTS_TIERS según cantidad de jugadores — mismo corte que workspace_ranking_points (SQL). */
-function tierIndexForPlayerCount(playerCount: number): number | null {
-  if (playerCount < 4) return null;
-  if (playerCount <= 6) return 0;
-  if (playerCount <= 9) return 1;
-  if (playerCount <= 12) return 2;
-  return 3;
-}
-
 function formatMode(competitionFormat: string | null, topSize: number | null): string {
   if (competitionFormat === 'swiss') return 'Rondas suizas + Top 4';
   if (competitionFormat === 'round_robin') {
@@ -82,17 +73,26 @@ function formatDate(iso: string | null): string {
 }
 
 export default function PlayerPointsDetailScreen({ route }: Props) {
-  const { userId, workspaceId } = route.params;
+  const { userId, workspaceId, seasonId } = route.params;
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<EventPoints[]>([]);
   const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
+  const [tiers, setTiers] = useState<PointTier[]>([]);
 
   const load = useCallback(async () => {
-    const mineRes = await supabase
-      .from('v_workspace_points_breakdown')
-      .select(BREAKDOWN_COLUMNS)
-      .eq('user_id', userId)
-      .eq('workspace_id', workspaceId);
+    // Con seasonId el detalle sale de la temporada (config de puntos propia, incluye los eventos
+    // congelados por un cierre forzado); sin seasonId, del Ranking Global como siempre.
+    const breakdownView = seasonId ? 'v_season_points_breakdown' : 'v_workspace_points_breakdown';
+
+    const configIdPromise: Promise<string | null> = seasonId
+      ? Promise.resolve(
+          supabase.from('v_seasons').select('point_config_id').eq('season_id', seasonId).maybeSingle()
+        ).then((r) => (r.data as { point_config_id: string } | null)?.point_config_id ?? null)
+      : fetchDefaultPointConfigId();
+    const tiersPromise = configIdPromise.then(fetchPointTiers);
+
+    const mineBase = supabase.from(breakdownView).select(BREAKDOWN_COLUMNS).eq('user_id', userId);
+    const mineRes = await (seasonId ? mineBase.eq('season_id', seasonId) : mineBase.eq('workspace_id', workspaceId));
 
     const mine = (mineRes.data ?? []) as BreakdownRow[];
     const eventIds = mine.map((r) => r.event_id);
@@ -100,7 +100,8 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
     let allByEvent = new Map<string, BreakdownRow[]>();
     let namesByUser: Record<string, string> = {};
     if (eventIds.length > 0) {
-      const allRes = await supabase.from('v_workspace_points_breakdown').select(BREAKDOWN_COLUMNS).in('event_id', eventIds);
+      const allBase = supabase.from(breakdownView).select(BREAKDOWN_COLUMNS).in('event_id', eventIds);
+      const allRes = await (seasonId ? allBase.eq('season_id', seasonId) : allBase);
       const all = (allRes.data ?? []) as BreakdownRow[];
       for (const r of all) {
         if (!allByEvent.has(r.event_id)) allByEvent.set(r.event_id, []);
@@ -143,9 +144,10 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
 
     built.sort((a, b) => b.points - a.points);
 
+    setTiers(await tiersPromise);
     setRows(built);
     setLoading(false);
-  }, [userId, workspaceId]);
+  }, [userId, workspaceId, seasonId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -177,7 +179,7 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
   const highlightedCells = new Set<string>();
   for (const r of rows) {
     if (!expandedEventIds.has(r.eventId)) continue;
-    const tierIdx = tierIndexForPlayerCount(r.playerCount);
+    const tierIdx = tierIndexForPlayerCount(tiers, r.playerCount);
     if (tierIdx != null) highlightedCells.add(`${tierIdx}-${r.position}`);
   }
 
@@ -248,18 +250,17 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
             <Text style={[styles.legendCell, styles.legendHeaderTxt]}>🥈</Text>
             <Text style={[styles.legendCell, styles.legendHeaderTxt]}>🥉</Text>
           </View>
-          {POINTS_TIERS.map((t, idx) => (
-            <View key={t.range} style={styles.legendRow}>
-              <Text style={[styles.legendCell, styles.legendRangeCol]}>{t.range}</Text>
-              <Text style={[styles.legendCell, highlightedCells.has(`${idx}-1`) && styles.legendCellHighlight]}>
-                {t.gold}
-              </Text>
-              <Text style={[styles.legendCell, highlightedCells.has(`${idx}-2`) && styles.legendCellHighlight]}>
-                {t.silver}
-              </Text>
-              <Text style={[styles.legendCell, highlightedCells.has(`${idx}-3`) && styles.legendCellHighlight]}>
-                {t.bronze}
-              </Text>
+          {tiers.map((t, idx) => (
+            <View key={t.minPlayers} style={styles.legendRow}>
+              <Text style={[styles.legendCell, styles.legendRangeCol]}>{tierRangeLabel(tiers, idx)}</Text>
+              {[1, 2, 3].map((position) => (
+                <Text
+                  key={position}
+                  style={[styles.legendCell, highlightedCells.has(`${idx}-${position}`) && styles.legendCellHighlight]}
+                >
+                  {t.points[position - 1] ?? 0}
+                </Text>
+              ))}
             </View>
           ))}
         </View>
