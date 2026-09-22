@@ -338,15 +338,13 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           ))}
           <View style={styles.groupRow}>
-            {isOrganizer ? (
-              <TouchableOpacity
-                style={styles.outlineBtn}
-                onPress={() => navigation.navigate('CreateEvent', { workspaceId, from: 'WorkspaceDetail' })}
-                accessibilityRole="button"
-              >
-                <Text style={styles.outlineBtnText}>Crear evento</Text>
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity
+              style={styles.outlineBtn}
+              onPress={() => navigation.navigate('CreateEvent', { workspaceId, from: 'WorkspaceDetail' })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.outlineBtnText}>Crear evento</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.primaryBtn}
               onPress={() => navigation.navigate('EventsList', { workspaceId })}
