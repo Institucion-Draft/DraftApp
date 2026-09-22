@@ -2,20 +2,20 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import PlayerAvatar from './PlayerAvatar';
 import ProDeCManaC from './ProDeCManaC';
-import type { RankingRow } from '../lib/ranking';
+import { formatPointsPerEvent, type RankingRow } from '../lib/ranking';
 
 /** Anchos de columna. Las columnas de la tabla y el espaciador del indicador de ProDeC salen de acá. */
-const COL = { pos: 26, name: 140, stat: 44, pct: 50 } as const;
+const COL = { pos: 26, name: 140, stat: 44, pct: 50, ratio: 52 } as const;
 
 /**
  * Ancho de todo lo que va ANTES del grupo ProDeC: # + Jugador + 8 columnas "stat"
- * (Pts, #PE, 🥇, 🥈, 🥉, EJ, PJ, VJ) + 3 columnas "pct" (WRE, WRP, WRV). Si se agrega o
- * quita una columna principal, actualizar este cálculo.
+ * (Pts, #PE, 🥇, 🥈, 🥉, EJ, PJ, VJ) + 1 columna "ratio" (Pts/PE) + 3 columnas "pct" (WRE, WRP,
+ * WRV). Si se agrega o quita una columna principal, actualizar este cálculo.
  */
-const MAIN_COLUMNS_WIDTH = COL.pos + COL.name + 8 * COL.stat + 3 * COL.pct;
+const MAIN_COLUMNS_WIDTH = COL.pos + COL.name + 8 * COL.stat + COL.ratio + 3 * COL.pct;
 
-/** El grupo ProDeC son 4 columnas "stat": Pts, 🥇, 🥈, 🥉. */
-const PRODEC_COLUMNS_WIDTH = 4 * COL.stat;
+/** El grupo ProDeC: 4 columnas "stat" (Pts, 🥇, 🥈, 🥉) + 1 "ratio" (Pts/PE). */
+const PRODEC_COLUMNS_WIDTH = 4 * COL.stat + COL.ratio;
 
 type Props = {
   rows: RankingRow[];
@@ -50,6 +50,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥇</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥈</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥉</Text>
+            <Text style={[styles.cell, styles.ratioCol, styles.headerTxt]}>Pts/PE</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>EJ</Text>
             <Text style={[styles.cell, styles.pctCol, styles.headerTxt]}>WRE</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>PJ</Text>
@@ -60,6 +61,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥇</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥈</Text>
             <Text style={[styles.cell, styles.statCol, styles.headerTxt]}>🥉</Text>
+            <Text style={[styles.cell, styles.ratioCol, styles.headerTxt]}>Pts/PE</Text>
           </View>
           {rows.length === 0 ? (
             <Text style={styles.emptyText}>{emptyText}</Text>
@@ -78,6 +80,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
                 <Text style={[styles.cell, styles.statCol, styles.goldTxt]}>{r.championships}</Text>
                 <Text style={[styles.cell, styles.statCol, styles.silverTxt]}>{r.secondPlaces}</Text>
                 <Text style={[styles.cell, styles.statCol, styles.bronzeTxt]}>{r.thirdPlaces}</Text>
+                <Text style={[styles.cell, styles.ratioCol]}>{formatPointsPerEvent(r.points, r.completedEvents)}</Text>
                 <Text style={[styles.cell, styles.statCol]}>{r.ej}</Text>
                 <Text style={[styles.cell, styles.pctCol]}>{r.wre != null ? `${r.wre}%` : '-'}</Text>
                 <Text style={[styles.cell, styles.statCol]}>{r.pj}</Text>
@@ -88,6 +91,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
                 <Text style={[styles.cell, styles.statCol, styles.goldTxt]}>{r.prodecFirst}</Text>
                 <Text style={[styles.cell, styles.statCol, styles.silverTxt]}>{r.prodecSecond}</Text>
                 <Text style={[styles.cell, styles.statCol, styles.bronzeTxt]}>{r.prodecThird}</Text>
+                <Text style={[styles.cell, styles.ratioCol]}>{formatPointsPerEvent(r.prodecPoints, r.completedEvents)}</Text>
               </TouchableOpacity>
             ))
           )}
@@ -130,6 +134,7 @@ const styles = StyleSheet.create({
   nameTxt: { fontSize: 13, fontWeight: '600', color: '#111', flexShrink: 1 },
   statCol: { width: COL.stat, minWidth: COL.stat },
   pctCol: { width: COL.pct, minWidth: COL.pct, fontSize: 11 },
+  ratioCol: { width: COL.ratio, minWidth: COL.ratio },
   /** Separador vertical fino al inicio del grupo ProDeC (el ancho de la columna no cambia: border-box). */
   prodecFirstCol: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: '#D1D5DB' },
   pointsTxt: { color: '#3B82F6', fontWeight: '700' },

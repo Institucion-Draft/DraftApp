@@ -23,7 +23,7 @@ export type MainStackParamList = {
   CreateVenue: { workspaceId: string };
   EditVenue: { venueId: string };
   EventsList: { workspaceId: string };
-  CreateEvent: { workspaceId: string };
+  CreateEvent: { workspaceId: string; from?: 'WorkspaceDetail' };
   CompetitionRules: undefined;
   /**
    * workspaceId es opcional: solo sirve como fallback para poder navegar a EventsList si el

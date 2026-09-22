@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,7 +20,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
-import { fetchWorkspaceSeasons, formatBaDate, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
+import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
+import { formatEventMode } from '../lib/eventMode';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDetail'>;
 
@@ -43,6 +45,16 @@ type MemberRow = {
   users: UserEmbed | UserEmbed[] | null;
 };
 
+type TodayEvent = {
+  id: string;
+  name: string;
+  status: string;
+  event_type: string | null;
+  competition_format: string | null;
+  top_size: number | null;
+  match_format: string | null;
+};
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -56,6 +68,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
   const [seasons, setSeasons] = useState<SeasonRow[]>([]);
+  const [todayEvents, setTodayEvents] = useState<TodayEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const initialFocusRef = useRef(true);
@@ -160,11 +173,54 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     setSeasons(await fetchWorkspaceSeasons(workspaceId));
   }, [workspaceId]);
 
+  // Eventos programados para hoy (día calendario del dispositivo), sin cancelados ni eliminados.
+  const loadTodayEvents = useCallback(async () => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    const { data, error } = await supabase
+      .from('draft_events')
+      .select('id, name, status, event_type, competition_format, top_size, match_format')
+      .eq('workspace_id', workspaceId)
+      .is('deleted_at', null)
+      .neq('status', 'cancelled')
+      .gte('scheduled_for', start.toISOString())
+      .lt('scheduled_for', end.toISOString())
+      .order('scheduled_for', { ascending: true });
+    if (error) {
+      if (__DEV__) console.warn('[workspace] eventos de hoy', error.message);
+      setTodayEvents([]);
+      return;
+    }
+    setTodayEvents((data ?? []) as TodayEvent[]);
+  }, [workspaceId]);
+
   useFocusEffect(
     useCallback(() => {
       void loadSeasons();
-    }, [loadSeasons])
+      void loadTodayEvents();
+    }, [loadSeasons, loadTodayEvents])
   );
+
+  // Fade in/out del badge HOY: misma animación que el "ES HOY!" de la lista de eventos
+  // (opacidad 1 -> 0.4 -> 1, 700 ms cada tramo, en loop). Solo corre si hay eventos de hoy.
+  const pulse = useRef(new Animated.Value(1)).current;
+  const hasTodayEvents = todayEvents.length > 0;
+  useEffect(() => {
+    if (!hasTodayEvents) return undefined;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      pulse.setValue(1);
+    };
+  }, [hasTodayEvents, pulse]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -199,9 +255,9 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([load(), loadSeasons()]);
+    await Promise.all([load(), loadSeasons(), loadTodayEvents()]);
     setRefreshing(false);
-  }, [load, loadSeasons]);
+  }, [load, loadSeasons, loadTodayEvents]);
 
   const wsAvatar = workspace ? avatarPublicUrl(workspace.avatar_path) : null;
 
@@ -252,39 +308,84 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         )}
       </View>
 
-      <View style={styles.memberActions}>
-        <TouchableOpacity
-          style={styles.memberBtn}
-          onPress={() => navigation.navigate('EventsList', { workspaceId })}
-        >
-          <Text style={styles.memberBtnText}>Ver eventos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.memberBtn}
-          onPress={() => navigation.navigate('CubesList', { workspaceId })}
-        >
-          <Text style={styles.memberBtnText}>Ver cubos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.memberBtn}
-          onPress={() => navigation.navigate('VenuesList', { workspaceId })}
-        >
-          <Text style={styles.memberBtnText}>Ver sedes</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.memberBtn}
-          onPress={() => navigation.navigate('Playground', { workspaceId })}
-        >
-          <Text style={styles.memberBtnText}>Partidas sin contexto</Text>
-        </TouchableOpacity>
+      <View style={styles.groupSection}>
+        <View style={styles.eventsCard}>
+          <Text style={styles.eventsTitle}>Eventos</Text>
+          {todayEvents.map((e) => (
+            <TouchableOpacity
+              key={e.id}
+              style={styles.todayCard}
+              activeOpacity={0.75}
+              onPress={() => navigation.navigate('EventDetail', { eventId: e.id, workspaceId })}
+              accessibilityRole="button"
+              accessibilityLabel={`Evento de hoy: ${e.name}`}
+            >
+              <View style={styles.todayBody}>
+                <View style={styles.todayNameRow}>
+                  <Text style={styles.todayName} numberOfLines={1}>
+                    {e.name}
+                  </Text>
+                </View>
+                <View style={styles.todayModeRow}>
+                  <Animated.View style={[styles.todayBadge, styles.todayBadgeFloating, { opacity: pulse }]}>
+                    <Text style={styles.todayBadgeText}>HOY</Text>
+                  </Animated.View>
+                  <Text style={styles.todaySub} numberOfLines={1}>
+                    {formatEventMode(e.event_type, e.competition_format, e.top_size, e.match_format)}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+          <View style={styles.groupRow}>
+            {isOrganizer ? (
+              <TouchableOpacity
+                style={styles.outlineBtn}
+                onPress={() => navigation.navigate('CreateEvent', { workspaceId, from: 'WorkspaceDetail' })}
+                accessibilityRole="button"
+              >
+                <Text style={styles.outlineBtnText}>Crear evento</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => navigation.navigate('EventsList', { workspaceId })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.primaryBtnText}>Todos los eventos</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.rankingSection}>
-        <Text style={styles.rankingTitle}>Ranking</Text>
-        <View style={styles.rankingRow}>
+      <View style={styles.groupSection}>
+        <View style={styles.casualCard}>
+          <Text style={styles.casualTitle}>🎲 Partidas sin contexto</Text>
+          <View style={styles.groupRow}>
+            <TouchableOpacity
+              style={styles.casualBtn}
+              onPress={() => navigation.navigate('Playground', { workspaceId })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.casualBtnText}>Jugar contra otros usuarios</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.casualBtn}
+              onPress={() => Alert.alert('Próximamente', 'El contador de vida estará disponible pronto.')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.casualBtnText}>Contador de vida</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.groupSection}>
+        <View style={styles.rankingCard}>
+          <Text style={styles.rankingTitle}>🏆 Ranking</Text>
           {seasonButtonSeason ? (
             <TouchableOpacity
-              style={[styles.memberBtn, styles.rankingBtn, !currentSeason && styles.rankingBtnDisabled]}
+              style={[styles.rankingHeroBtn, !currentSeason && styles.disabledBtn]}
               disabled={!currentSeason}
               onPress={() =>
                 currentSeason &&
@@ -293,29 +394,48 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
               accessibilityRole="button"
               accessibilityState={{ disabled: !currentSeason }}
             >
-              <Text style={styles.memberBtnText}>Temporada {seasonButtonSeason.name}</Text>
-              {!currentSeason ? (
-                <Text style={styles.rankingBtnSub}>Arranca el {formatBaDate(seasonButtonSeason.starts_at)}</Text>
-              ) : null}
+              <Text style={styles.rankingHeroText}>🏁 Temporada {seasonButtonSeason.name}</Text>
+              <Text style={styles.rankingHeroSub}>{phaseSubtitle(seasonButtonSeason)}</Text>
             </TouchableOpacity>
           ) : null}
+          <View style={styles.rankingSmallRow}>
+            <TouchableOpacity
+              style={styles.rankingSmallBtn}
+              onPress={() => navigation.navigate('WorkspaceRanking', { workspaceId })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.rankingSmallText}>🌎 Global</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.rankingSmallBtn, !showSeasonHistory && styles.disabledBtn]}
+              disabled={!showSeasonHistory}
+              onPress={() => navigation.navigate('WorkspaceSeasonHistory', { workspaceId })}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !showSeasonHistory }}
+            >
+              <Text style={styles.rankingSmallText}>📜 Historial</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.groupSection}>
+        <View style={styles.pillRow}>
           <TouchableOpacity
-            style={[styles.memberBtn, styles.rankingBtn]}
-            onPress={() => navigation.navigate('WorkspaceRanking', { workspaceId })}
+            style={styles.pill}
+            onPress={() => navigation.navigate('CubesList', { workspaceId })}
             accessibilityRole="button"
           >
-            <Text style={styles.memberBtnText}>Global</Text>
+            <Text style={styles.pillText}>🧊 Cubos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.pill}
+            onPress={() => navigation.navigate('VenuesList', { workspaceId })}
+            accessibilityRole="button"
+          >
+            <Text style={styles.pillText}>🏠 Sedes</Text>
           </TouchableOpacity>
         </View>
-        {showSeasonHistory ? (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('WorkspaceSeasonHistory', { workspaceId })}
-            accessibilityRole="link"
-            hitSlop={8}
-          >
-            <Text style={styles.rankingLink}>Historial de temporadas</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       {isOrganizer ? (
@@ -343,12 +463,6 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
                 </View>
               ) : null}
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.orgBtn}
-            onPress={() => navigation.navigate('CreateEvent', { workspaceId })}
-          >
-            <Text style={styles.orgBtnText}>Crear evento</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -482,62 +596,228 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  memberActions: {
+  groupSection: {
     paddingHorizontal: 24,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 8,
   },
-  memberBtn: {
-    backgroundColor: '#F3F4F6',
+  todayCard: {
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 8,
+    borderColor: '#3B82F6',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
   },
-  rankingSection: {
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 8,
+  todayBadge: {
+    backgroundColor: '#3B82F6',
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
-  rankingTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#6B7280',
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  rankingRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  rankingBtn: {
-    flex: 1,
+  /** Superpuesto a la izquierda de la línea del modo, sin desplazar su centrado. */
+  todayBadgeFloating: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
     justifyContent: 'center',
-    paddingHorizontal: 8,
-    marginBottom: 0,
   },
-  rankingBtnDisabled: {
-    opacity: 0.55,
+  todayBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  rankingBtnSub: {
-    color: '#6B7280',
+  todayBody: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  /** Contenedor relativo de la línea del nombre, centrada sobre el ancho total. */
+  todayNameRow: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  todayName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'center',
+  },
+  /** Contenedor relativo de la línea del modo: el badge se ancla solo a esta fila. */
+  todayModeRow: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  todaySub: {
     fontSize: 12,
+    color: '#6B7280',
     marginTop: 2,
     textAlign: 'center',
   },
-  rankingLink: {
-    color: '#3B82F6',
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 10,
-    textDecorationLine: 'underline',
+  // --- Eventos: máxima jerarquía ---
+  eventsCard: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 12,
+    padding: 12,
   },
-  memberBtnText: {
-    color: '#374151',
+  eventsTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0C4A6E',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: '#3B82F6',
+    borderRadius: 8,
+    minHeight: 48,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBtnText: {
+    color: '#fff',
     fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  outlineBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    borderRadius: 8,
+    minHeight: 48,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  outlineBtnText: {
+    color: '#3B82F6',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // --- Partidas sin contexto: jerarquía media, casual ---
+  casualCard: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 12,
+    padding: 12,
+  },
+  casualTitle: {
+    fontSize: 14,
     fontWeight: '600',
+    color: '#111',
+    marginBottom: 10,
+  },
+  groupRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  casualBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#6EE7B7',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  casualBtnText: {
+    color: '#047857',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // --- Ranking: festivo/competitivo ---
+  rankingCard: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: 14,
+    padding: 12,
+  },
+  rankingTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#78350F',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  rankingHeroBtn: {
+    backgroundColor: '#FDE68A',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  rankingHeroText: {
+    color: '#78350F',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  rankingHeroSub: {
+    color: '#92400E',
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  rankingSmallRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  rankingSmallBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rankingSmallText: {
+    color: '#78350F',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  disabledBtn: {
+    opacity: 0.55,
+  },
+  // --- Cubos y sedes: accesorio ---
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillText: {
+    color: '#4B5563',
+    fontSize: 13,
+    fontWeight: '500',
   },
   muted: {
     fontSize: 15,

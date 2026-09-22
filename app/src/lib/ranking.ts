@@ -70,6 +70,15 @@ function winrate(won: number, lost: number): number | null {
   return total > 0 ? Math.round((won / total) * 100) : null;
 }
 
+/**
+ * Puntos por evento jugado (puntos / #PE), con 1 decimal y coma decimal. "-" si todavía no
+ * participó de ningún evento (el mismo denominador se usa para el torneo y para ProDeC).
+ */
+export function formatPointsPerEvent(points: number, events: number): string {
+  if (events <= 0) return '-';
+  return (points / events).toFixed(1).replace('.', ',');
+}
+
 function sortKey(v: number | null): number {
   return v ?? -1;
 }
@@ -140,5 +149,5 @@ export function buildRankingLegend(tiers: PointTier[]): string {
     tiers.length > 0
       ? `Pts: Puntos por posición final (1°/2°/3°), según cantidad de jugadores del evento — ${tiersLegendText(tiers)}`
       : 'Pts: Puntos por posición final (1°/2°/3°), según cantidad de jugadores del evento';
-  return `${pointsPart} · #PE: Participaciones en Eventos · 🥇: Copas (veces 1°) · 🥈: veces 2° · 🥉: veces 3° · EJ: Enfrentamientos Jugados · WRE: Winrate de Enfrentamientos · PJ: Partidas Jugadas · WRP: Winrate de Partidas · VJ: Venganzas Jugadas · WRV: Winrate de Venganzas · ProDeC (Pts, 🥇, 🥈, 🥉): puntos y veces que acertó el 1°/2°/3° color más elegido del evento — mismos puntos por escalón que el torneo, sin sumar a Pts`;
+  return `${pointsPart} · #PE: Participaciones en Eventos · 🥇: Copas (veces 1°) · 🥈: veces 2° · 🥉: veces 3° · EJ: Enfrentamientos Jugados · WRE: Winrate de Enfrentamientos · PJ: Partidas Jugadas · WRP: Winrate de Partidas · VJ: Venganzas Jugadas · WRV: Winrate de Venganzas · Pts/PE: puntos por evento jugado (Pts ÷ #PE, en el torneo y en ProDeC) · ProDeC (Pts, 🥇, 🥈, 🥉): puntos y veces que acertó el 1°/2°/3° color más elegido del evento — mismos puntos por escalón que el torneo, sin sumar a Pts`;
 }
