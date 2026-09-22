@@ -11,16 +11,24 @@ const styles = StyleSheet.create({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type StackNav = { navigate: (...args: any[]) => void };
 
-/** Reemplaza el back del header: navega al padre lógico en lugar de `goBack()`. */
+/**
+ * Reemplaza el back del header: navega al padre lógico en lugar de `goBack()`.
+ * Con `popToExisting`, si el padre ya está en el stack vuelve a ÉL (descartando lo de arriba) en
+ * vez de apilar una copia nueva — necesario cuando el padre es la pantalla desde la que se llegó
+ * (React Navigation 7: `navigate` sin `pop: true` siempre hace push). Si no está, lo apila.
+ */
 export function hierarchicalHeaderBack(
   navigation: StackNav,
   target: keyof MainStackParamList,
-  params?: MainStackParamList[keyof MainStackParamList]
+  params?: MainStackParamList[keyof MainStackParamList],
+  popToExisting = false
 ) {
   return () => (
     <Pressable
       onPress={() => {
-        if (params === undefined) {
+        if (popToExisting) {
+          navigation.navigate(target, params, { pop: true });
+        } else if (params === undefined) {
           navigation.navigate(target);
         } else {
           navigation.navigate(target, params);

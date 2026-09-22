@@ -81,12 +81,17 @@ function pickFromOptions(
 }
 
 export default function CreateEventScreen({ route, navigation }: Props) {
-  const { workspaceId } = route.params;
+  const { workspaceId, from } = route.params;
   useLayoutEffect(() => {
+    // Desde el workspace, "Atrás" vuelve a ese workspace (sin pasar por "Todos los eventos");
+    // desde la lista de eventos (o sin origen) sigue yendo a la lista.
     navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'EventsList', { workspaceId }),
+      headerLeft:
+        from === 'WorkspaceDetail'
+          ? hierarchicalHeaderBack(navigation, 'WorkspaceDetail', { workspaceId }, true)
+          : hierarchicalHeaderBack(navigation, 'EventsList', { workspaceId }),
     });
-  }, [navigation, workspaceId]);
+  }, [navigation, workspaceId, from]);
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [eventType, setEventType] = useState<EventType>('draft');
