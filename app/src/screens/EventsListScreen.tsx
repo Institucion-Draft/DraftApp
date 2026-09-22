@@ -50,7 +50,6 @@ export default function EventsListScreen({ navigation, route }: Props) {
   const [items, setItems] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isOrganizer, setIsOrganizer] = useState(false);
   const [cubeMap, setCubeMap] = useState<Record<string, string>>({});
   const [venueMap, setVenueMap] = useState<Record<string, string>>({});
   const [participantCounts, setParticipantCounts] = useState<Record<string, number>>({});
@@ -70,18 +69,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
   }, [pulse]);
 
   const load = useCallback(async () => {
-    const meRes = await supabase.auth.getUser();
-    const currentUserId = meRes.data.user?.id ?? null;
-
-    const [roleRes, eventsRes, cubesRes, venuesRes] = await Promise.all([
-      currentUserId
-        ? supabase
-            .from('workspace_members')
-            .select('role')
-            .eq('workspace_id', workspaceId)
-            .eq('user_id', currentUserId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
+    const [eventsRes, cubesRes, venuesRes] = await Promise.all([
       supabase
         .from('draft_events')
         .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id, has_shiny_participant')
@@ -92,12 +80,6 @@ export default function EventsListScreen({ navigation, route }: Props) {
       supabase.from('venues').select('id, name').eq('workspace_id', workspaceId),
     ]);
 
-    if (roleRes.error) {
-      if (__DEV__) {
-        console.error('Error cargando rol del workspace:', roleRes.error);
-      }
-    }
-    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
     if (eventsRes.error) {
       Alert.alert('Error', 'No se pudieron cargar los eventos.');
       setItems([]);
@@ -328,11 +310,9 @@ export default function EventsListScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      {isOrganizer ? (
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('CreateEvent', { workspaceId })}>
-          <Text style={styles.primaryBtnText}>+ Crear evento</Text>
-        </TouchableOpacity>
-      ) : null}
+      <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('CreateEvent', { workspaceId })}>
+        <Text style={styles.primaryBtnText}>+ Crear evento</Text>
+      </TouchableOpacity>
       <FlatList
         data={items}
         keyExtractor={(it) => it.id}

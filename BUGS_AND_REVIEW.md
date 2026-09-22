@@ -19,3 +19,9 @@ Necesita una revisión completa de reglas y situaciones. Casos identificados has
 ## Drift: constraint `events_type_valid` no incluye 'two_headed_giant'
 
 `draft_events.event_type` se restringe en 0003 a `('draft', 'tournament', 'pepidraft')` y ninguna migración posterior lo amplía, pero la app crea eventos con `event_type = 'two_headed_giant'` (Gigante de Dos Cabezas, 0051 en adelante) y toda la lógica de estadísticas los excluye por ese valor. Eso implica que la base real tiene ese constraint modificado o eliminado a mano, fuera del historial de migraciones. Igual que el drift de 0042, no afecta la base real pero un schema reconstruido desde cero rechazaría la creación de eventos 2HG. Detectado al escribir el test de ProDeC (Fase E).
+
+## Historial de posiciones en el perfil de jugador muestra la posición de fase liga, no la final del torneo
+
+En el perfil de un jugador (dentro del workspace), el historial de "últimos drafts" muestra la posición equivocada cuando el evento tiene fase mata-mata (top4). Caso concreto: Esteban terminó 4° en la fase todos-contra-todos de "Último Draft de Invierno", pero clasificó al top4 y GANÓ la final (quedó 1° del torneo). El perfil le muestra "4°" en vez de "1°" - está mostrando la posición de la tabla de la fase liga en vez de la posición final real del torneo (que ya calculamos correctamente en otros lados, como computePodium/eventPodium.ts).
+
+Investigar dónde vive ese historial en PlayerProfile o pantalla equivalente, y qué fuente de datos usa - probablemente hay que hacerlo consistente con eventPodium.ts (ya extraído y validado en la sesión de Temporadas) en vez de leer directo de standings de fase regular.
