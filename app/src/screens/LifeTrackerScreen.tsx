@@ -206,6 +206,7 @@ type EventTickerContext = {
   currentPairingId: string;
   turnTrackingEnabled: boolean;
   topcutFormat: string;
+  matchFormat: string;
   nameByParticipantId: Map<string, string>;
   pairingById: Map<string, EventTickerPairing>;
   bracketPhaseByPairingId: Map<string, 'semi' | 'final' | 'third_place'>;
@@ -227,6 +228,13 @@ function bracketPhaseTickerLabel(phase: 'semi' | 'final' | 'third_place'): strin
   if (phase === 'semi') return 'SEMIFINAL';
   if (phase === 'final') return 'FINAL';
   return '3ER PUESTO';
+}
+
+/** Mismo texto que getMatchFormatLabel (EditEventScreen) y los selectores de CreateEventScreen. */
+function matchFormatTickerLabel(matchFormat: string | null | undefined): string {
+  if (matchFormat === 'bo1') return 'BO1';
+  if (matchFormat === 'bo2') return 'BO2';
+  return 'BO3';
 }
 
 function formatTickerDuration(startedAt: string | null, endedAt?: string | null): string {
@@ -305,6 +313,12 @@ function matchClosesSeries(ctx: EventTickerContext, pairingId: string, winsA: nu
     if (!phase) return false;
     return Math.max(winsA, winsB) >= topcutWinsNeededTicker(ctx.topcutFormat, phase);
   }
+  // Fase regular: el criterio de cierre depende del match_format real del evento, no de un BO3
+  // fijo. BO1: 1 sola partida decide. BO2: siempre se juegan exactamente 2 (2-0, o 1-1 que queda
+  // como empate del enfrentamiento — sin partida de desempate), así que "2 completadas" ya cierra
+  // sin importar el reparto. BO3: primero en llegar a 2 victorias, como antes.
+  if (ctx.matchFormat === 'bo1') return winsA >= 1 || winsB >= 1;
+  if (ctx.matchFormat === 'bo2') return winsA + winsB >= 2;
   return winsA >= 2 || winsB >= 2;
 }
 
@@ -365,7 +379,7 @@ async function fetchEventTickerContext(
   const [eventRes, pairingsRes, participantsRes, tgRes] = await Promise.all([
     supabase
       .from('draft_events')
-      .select('turn_tracking_enabled, topcut_format, competition_format')
+      .select('turn_tracking_enabled, topcut_format, match_format, competition_format')
       .eq('id', eventId)
       .maybeSingle(),
     supabase.from('pairings').select('id, participant_a_id, participant_b_id, swiss_round').eq('event_id', eventId),
@@ -453,6 +467,8 @@ async function fetchEventTickerContext(
 
   const tfRaw = (eventRes.data as { topcut_format?: string | null } | null)?.topcut_format;
   const topcutFormat = tfRaw === 'bo1' || tfRaw === 'sf_bo1_f_bo3' || tfRaw === 'bo3' ? tfRaw : 'bo3';
+  const mfRaw = (eventRes.data as { match_format?: string | null } | null)?.match_format;
+  const matchFormat = mfRaw === 'bo1' || mfRaw === 'bo2' || mfRaw === 'bo3' ? mfRaw : 'bo3';
 
   return {
     eventId,
@@ -461,6 +477,7 @@ async function fetchEventTickerContext(
     turnTrackingEnabled: !!(eventRes.data as { turn_tracking_enabled?: boolean | null } | null)
       ?.turn_tracking_enabled,
     topcutFormat,
+    matchFormat,
     nameByParticipantId,
     pairingById,
     bracketPhaseByPairingId,
@@ -569,7 +586,7 @@ function buildCompletedTickerItem(ctx: EventTickerContext, m: EventTickerMatch):
   const closes = matchClosesSeries(ctx, m.pairing_id, winsA, winsB);
   const isBracket = ctx.bracketPairingIds.has(m.pairing_id);
   const phase = ctx.bracketPhaseByPairingId.get(m.pairing_id);
-  const seriesLabel = isBracket && phase ? bracketPhaseTickerLabel(phase) : 'BO3';
+  const seriesLabel = isBracket && phase ? bracketPhaseTickerLabel(phase) : matchFormatTickerLabel(ctx.matchFormat);
   const durationLabel = formatTickerDuration(m.started_at, m.ended_at);
   const colorKey: TickerColorKey = closes ? 'closes' : 'partial';
 

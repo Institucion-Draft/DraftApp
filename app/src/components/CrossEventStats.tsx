@@ -9,6 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from './PlayerAvatar';
+import { fetchEventPodiums, type EventPodiumResult } from '../lib/eventPodium';
 
 // Todos los require() deben ser estáticos para Metro bundler
 const MANA_IMAGES: Partial<Record<MtgColor, ReturnType<typeof require>>> = {
@@ -156,18 +157,27 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
         placement: number; total_players: number;
       }>;
       const participantIds = rawHistory.map(e => e.participant_id);
+      const eventIds = Array.from(new Set(rawHistory.map(e => e.event_id)));
+
+      const [colorsRowsRes, podiumsByEvent] = await Promise.all([
+        participantIds.length > 0
+          ? supabase.from('participant_colors').select('participant_id, color').in('participant_id', participantIds)
+          : Promise.resolve({ data: [] as { participant_id: string; color: string }[], error: null }),
+        // 1°/2°/3° salen del podio real del evento (eventPodium.ts, la misma fuente que
+        // StandingsScreen y el cierre de temporada) en vez del rank por winrate de fase regular
+        // que usa v_participant_event_placement — ese rank ignora el bracket de top4, así que a
+        // veces "premia" a alguien de la liga que después perdió el mata-mata. El resto del campo
+        // (4° en adelante) sigue con el placement de la vista, sin tocar: eventPodium solo calcula
+        // podio (1-3), no un ranking completo.
+        eventIds.length > 0 ? fetchEventPodiums(eventIds) : Promise.resolve(new Map<string, EventPodiumResult>()),
+      ]);
+
       let colorsByPart: Record<string, MtgColor[]> = {};
-      if (participantIds.length > 0) {
-        const { data: cRows } = await supabase
-          .from('participant_colors')
-          .select('participant_id, color')
-          .in('participant_id', participantIds);
-        if (!cancelled) {
-          (cRows ?? []).forEach((r: { participant_id: string; color: string }) => {
-            if (!colorsByPart[r.participant_id]) colorsByPart[r.participant_id] = [];
-            colorsByPart[r.participant_id].push(r.color as MtgColor);
-          });
-        }
+      if (!cancelled) {
+        (colorsRowsRes.data ?? []).forEach((r: { participant_id: string; color: string }) => {
+          if (!colorsByPart[r.participant_id]) colorsByPart[r.participant_id] = [];
+          colorsByPart[r.participant_id].push(r.color as MtgColor);
+        });
       }
 
       // Nombres de oponentes (para H2H)
@@ -196,7 +206,16 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
 
       setAggStats((statsRes.data as AggStats | null) ?? null);
       setColorStats((colorsRes.data as ColorStat[] | null) ?? []);
-      setHistory(rawHistory.map(e => ({ ...e, colors: colorsByPart[e.participant_id] ?? [] })));
+      setHistory(rawHistory.map(e => {
+        const podiumStep = podiumsByEvent.get(e.event_id)?.podium.steps.find(
+          (s) => s.players.some((p) => p.userId === userId)
+        );
+        return {
+          ...e,
+          placement: podiumStep?.rank ?? e.placement,
+          colors: colorsByPart[e.participant_id] ?? [],
+        };
+      }));
       setH2H(rawH2H.map(h => ({ ...h, opponent_name: opponentNames[h.opponent_user_id] ?? 'Jugador' })));
       setStreaks((streaksRes.data as Streaks | null) ?? null);
       setLoading(false);
