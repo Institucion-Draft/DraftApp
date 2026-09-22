@@ -1,8 +1,15 @@
 /**
  * Armado de los datos de entrada de `computePodium` (podium.ts). Extraído de StandingsScreen.load()
- * para que el podio del evento y el podio "asegurado" que se congela en el cierre forzado de una
- * temporada salgan del MISMO código: StandingsScreen usa estas funciones para armar su podio y
- * `fetchEventPodium` las usa para calcular el podio de un evento sin abrir esa pantalla.
+ * para que el podio del evento, el podio "asegurado" que se congela en el cierre forzado de una
+ * temporada, y el historial de posiciones del perfil de jugador salgan del MISMO código:
+ * StandingsScreen usa estas funciones para armar su podio, y fetchEventPodium/fetchEventPodiums
+ * las usan para calcular el podio de uno o varios eventos sin abrir esa pantalla.
+ *
+ * fetchEventPodium(eventId) es un caso particular de fetchEventPodiums([eventId]) — mismo código,
+ * para que los dos caminos nunca puedan divergir. fetchEventPodiums hace 7 queries en total sin
+ * importar cuántos eventos se pidan (batch por event_id/pairing_id/group_id), en vez de repetir
+ * ~6-7 queries por evento: pensado para pantallas que necesitan el podio de varios eventos a la
+ * vez (p. ej. el historial de "últimos drafts" de un perfil).
  */
 import { supabase } from './supabase';
 import {
@@ -23,12 +30,14 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 export type PodiumParticipantRow = {
   id: string;
   user_id: string;
+  event_id?: string;
   member_b_user_id?: string | null;
   users?: unknown;
 };
 
 export type PodiumPairingRow = {
   id: string;
+  event_id?: string;
   participant_a_id: string;
   participant_b_id: string;
   official_winner_participant_id: string | null;
@@ -54,6 +63,13 @@ export type PodiumTiebreakGroupRow = {
 };
 
 export type PodiumGroupParticipant = { participant_id: string; user_id: string; seed: number };
+
+type RawBracketMatchQueryRow = {
+  bracket_phase: 'semi' | 'final' | 'third_place';
+  participant_a_id: string;
+  participant_b_id: string;
+  winner_participant_id: string | null;
+};
 
 /** Stats por jugador que consume computePodium (BO3 y partidas oficiales completadas). */
 export function buildPodiumPlayers(
@@ -122,21 +138,20 @@ export type PodiumTiebreakInputs = {
   groupOrigin: string;
 };
 
-/** Datos del desempate/bracket más reciente del evento (`tgRow`) para computePodium. */
-export async function fetchPodiumTiebreakInputs(
+/**
+ * Ensambla PodiumTiebreakInputs a partir de filas YA obtenidas (sin I/O) — compartida por
+ * fetchPodiumTiebreakInputs (un evento, hace sus propias queries) y fetchEventPodiums (varios
+ * eventos, las trae todas en lote antes de llamar acá).
+ */
+function buildPodiumTiebreakInputs(
   tgRow: PodiumTiebreakGroupRow,
+  groupParticipantsRows: PodiumGroupParticipant[] | null,
+  bracketMatchesRows: RawBracketMatchQueryRow[],
   pairings: PodiumPairingRow[],
   matches: PodiumMatchRow[]
-): Promise<PodiumTiebreakInputs> {
+): PodiumTiebreakInputs {
   let group: ActiveTiebreakGroupPodiumInput | null = null;
-  const tiebreakMatches: TiebreakMatchPodiumInput[] = [];
-  let bracketMatches: BracketMatchPodiumInput[] = [];
-
-  const gpRes = await supabase
-    .from('event_tiebreak_group_participants')
-    .select('participant_id, user_id, seed')
-    .eq('group_id', tgRow.id);
-  if (!gpRes.error && gpRes.data && (gpRes.data as { participant_id: string }[]).length > 0) {
+  if (groupParticipantsRows && groupParticipantsRows.length > 0) {
     group = {
       id: tgRow.id,
       group_type:
@@ -148,9 +163,11 @@ export async function fetchPodiumTiebreakInputs(
       group_origin: tgRow.group_origin ?? null,
       round_number: tgRow.round_number ?? 1,
       champion_user_id: tgRow.champion_user_id,
-      participants: gpRes.data as PodiumGroupParticipant[],
+      participants: groupParticipantsRows,
     };
   }
+
+  const tiebreakMatches: TiebreakMatchPodiumInput[] = [];
   const prById = new Map(pairings.map((pr) => [String(pr.id), pr]));
   for (const m of matches) {
     if (m.match_type !== 'tiebreak' || m.status !== 'completed') continue;
@@ -166,33 +183,48 @@ export async function fetchPodiumTiebreakInputs(
       tiebreak_round: m.tiebreak_round != null ? Number(m.tiebreak_round) : null,
     });
   }
-  if (tgRow.group_type === 'bracket' || tgRow.group_type === 'fourth_place') {
-    const bmRes = await supabase
-      .from('event_tiebreak_bracket_matches')
-      .select('bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
-      .eq('group_id', tgRow.id);
-    if (!bmRes.error && bmRes.data) {
-      bracketMatches = (bmRes.data as {
-        bracket_phase: 'semi' | 'final' | 'third_place';
-        participant_a_id: string;
-        participant_b_id: string;
-        winner_participant_id: string | null;
-      }[]).map((r) => ({
-        bracket_phase: r.bracket_phase,
-        participant_a_id: String(r.participant_a_id),
-        participant_b_id: String(r.participant_b_id),
-        winner_participant_id: r.winner_participant_id != null ? String(r.winner_participant_id) : null,
-      }));
-    }
-  }
+
+  const bracketMatches: BracketMatchPodiumInput[] =
+    tgRow.group_type === 'bracket' || tgRow.group_type === 'fourth_place'
+      ? bracketMatchesRows.map((r) => ({
+          bracket_phase: r.bracket_phase,
+          participant_a_id: String(r.participant_a_id),
+          participant_b_id: String(r.participant_b_id),
+          winner_participant_id: r.winner_participant_id != null ? String(r.winner_participant_id) : null,
+        }))
+      : [];
 
   return {
     group,
     matches: tiebreakMatches,
     bracketMatches,
-    groupParticipants: !gpRes.error && gpRes.data ? (gpRes.data as PodiumGroupParticipant[]) : null,
+    groupParticipants: groupParticipantsRows,
     groupOrigin: tgRow.group_origin ?? 'tiebreak',
   };
+}
+
+/** Datos del desempate/bracket más reciente del evento (`tgRow`) para computePodium. */
+export async function fetchPodiumTiebreakInputs(
+  tgRow: PodiumTiebreakGroupRow,
+  pairings: PodiumPairingRow[],
+  matches: PodiumMatchRow[]
+): Promise<PodiumTiebreakInputs> {
+  const gpRes = await supabase
+    .from('event_tiebreak_group_participants')
+    .select('participant_id, user_id, seed')
+    .eq('group_id', tgRow.id);
+  const groupParticipantsRows = !gpRes.error && gpRes.data ? (gpRes.data as PodiumGroupParticipant[]) : null;
+
+  let bracketMatchesRows: RawBracketMatchQueryRow[] = [];
+  if (tgRow.group_type === 'bracket' || tgRow.group_type === 'fourth_place') {
+    const bmRes = await supabase
+      .from('event_tiebreak_bracket_matches')
+      .select('bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
+      .eq('group_id', tgRow.id);
+    if (!bmRes.error && bmRes.data) bracketMatchesRows = bmRes.data as RawBracketMatchQueryRow[];
+  }
+
+  return buildPodiumTiebreakInputs(tgRow, groupParticipantsRows, bracketMatchesRows, pairings, matches);
 }
 
 export type EventPodiumResult = {
@@ -201,14 +233,33 @@ export type EventPodiumResult = {
   playerCount: number;
 };
 
-/** Podio actual de un evento (campeón seguro, peldaños asegurados, etc.). null si falló alguna query. */
-export async function fetchEventPodium(eventId: string): Promise<EventPodiumResult | null> {
-  const [partsRes, pairingsRes, eventRes, tiebreakGroupRes] = await Promise.all([
+type RawEventRow = {
+  id: string;
+  champion_user_id?: string | null;
+  champion_decided_by?: string | null;
+  polemica_winners?: string[] | null;
+  recognition_winners?: string[] | null;
+  competition_format?: string | null;
+  top_size?: number | null;
+};
+
+/**
+ * Podio actual de varios eventos a la vez (campeón seguro, peldaños asegurados, etc.), con 7
+ * queries en total sin importar cuántos eventos se pidan. Devuelve un Map con solo los eventos
+ * que se pudieron calcular (un id ausente equivale al `null` de fetchEventPodium para ese evento).
+ */
+export async function fetchEventPodiums(eventIds: string[]): Promise<Map<string, EventPodiumResult>> {
+  const out = new Map<string, EventPodiumResult>();
+  const ids = Array.from(new Set(eventIds));
+  if (ids.length === 0) return out;
+
+  const [partsRes, pairingsRes, eventsRes, groupsRes] = await Promise.all([
     supabase
       .from('event_participants')
       .select(
         `
         id,
+        event_id,
         user_id,
         member_b_user_id,
         users!event_participants_user_id_fkey (
@@ -217,32 +268,30 @@ export async function fetchEventPodium(eventId: string): Promise<EventPodiumResu
         )
       `
       )
-      .eq('event_id', eventId)
+      .in('event_id', ids)
       .eq('role', 'player'),
     supabase
       .from('pairings')
-      .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
-      .eq('event_id', eventId),
+      .select('id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
+      .in('event_id', ids),
     supabase
       .from('draft_events')
-      .select('champion_user_id, champion_decided_by, polemica_winners, recognition_winners, competition_format, top_size')
-      .eq('id', eventId)
-      .maybeSingle(),
+      .select('id, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, competition_format, top_size')
+      .in('id', ids),
     supabase
       .from('event_tiebreak_groups')
-      .select('id, champion_user_id, status, group_type, round_number, created_at, group_origin')
-      .eq('event_id', eventId)
-      .in('status', ['active', 'resolved', 'failed'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .select('id, event_id, champion_user_id, status, group_type, round_number, created_at, group_origin')
+      .in('event_id', ids)
+      .in('status', ['active', 'resolved', 'failed']),
   ]);
-  if (partsRes.error || pairingsRes.error || eventRes.error || !eventRes.data) return null;
+  if (partsRes.error || pairingsRes.error || eventsRes.error || groupsRes.error) return out;
 
-  const participants = (partsRes.data ?? []) as PodiumParticipantRow[];
-  const pairings = (pairingsRes.data ?? []) as PodiumPairingRow[];
+  const participants = (partsRes.data ?? []) as (PodiumParticipantRow & { event_id: string })[];
+  const pairings = (pairingsRes.data ?? []) as (PodiumPairingRow & { event_id: string })[];
+  const events = (eventsRes.data ?? []) as RawEventRow[];
+  const groupRows = (groupsRes.data ?? []) as (PodiumTiebreakGroupRow & { event_id: string; created_at: string })[];
+
   const pairingIds = pairings.map((p) => p.id);
-
   const matchesRes =
     pairingIds.length > 0
       ? await supabase
@@ -250,43 +299,116 @@ export async function fetchEventPodium(eventId: string): Promise<EventPodiumResu
           .select('id, pairing_id, winner_participant_id, status, ended_at, match_type, tiebreak_round')
           .in('pairing_id', pairingIds)
       : { data: [], error: null };
-  if (matchesRes.error) return null;
+  if (matchesRes.error) return out;
   const matches = (matchesRes.data ?? []) as PodiumMatchRow[];
 
-  const ev = eventRes.data as {
-    champion_user_id?: string | null;
-    champion_decided_by?: string | null;
-    polemica_winners?: string[] | null;
-    recognition_winners?: string[] | null;
-    competition_format?: string | null;
-    top_size?: number | null;
-  };
+  // El grupo de desempate MÁS RECIENTE por evento — mismo criterio (order by created_at desc,
+  // limit 1) que el path de un solo evento, aplicado en el cliente sobre el lote ya traído.
+  const latestGroupByEvent = new Map<string, PodiumTiebreakGroupRow & { event_id: string; created_at: string }>();
+  for (const g of groupRows) {
+    const cur = latestGroupByEvent.get(g.event_id);
+    if (!cur || new Date(g.created_at).getTime() > new Date(cur.created_at).getTime()) {
+      latestGroupByEvent.set(g.event_id, g);
+    }
+  }
+  const relevantGroups = Array.from(latestGroupByEvent.values());
+  const groupIds = relevantGroups.map((g) => g.id);
+  const bracketGroupIds = relevantGroups
+    .filter((g) => g.group_type === 'bracket' || g.group_type === 'fourth_place')
+    .map((g) => g.id);
 
-  let group: ActiveTiebreakGroupPodiumInput | null = null;
-  let tiebreakMatches: TiebreakMatchPodiumInput[] = [];
-  let bracketMatches: BracketMatchPodiumInput[] = [];
-  if (!tiebreakGroupRes.error && tiebreakGroupRes.data) {
-    const tb = await fetchPodiumTiebreakInputs(tiebreakGroupRes.data as PodiumTiebreakGroupRow, pairings, matches);
-    group = tb.group;
-    tiebreakMatches = tb.matches;
-    bracketMatches = tb.bracketMatches;
+  const [gpRes, bmRes] = await Promise.all([
+    groupIds.length > 0
+      ? supabase
+          .from('event_tiebreak_group_participants')
+          .select('group_id, participant_id, user_id, seed')
+          .in('group_id', groupIds)
+      : Promise.resolve({ data: [] as (PodiumGroupParticipant & { group_id: string })[], error: null }),
+    bracketGroupIds.length > 0
+      ? supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('group_id, bracket_phase, participant_a_id, participant_b_id, winner_participant_id')
+          .in('group_id', bracketGroupIds)
+      : Promise.resolve({ data: [] as (RawBracketMatchQueryRow & { group_id: string })[], error: null }),
+  ]);
+
+  const groupParticipantsByGroup = new Map<string, PodiumGroupParticipant[]>();
+  if (!gpRes.error) {
+    for (const row of (gpRes.data ?? []) as (PodiumGroupParticipant & { group_id: string })[]) {
+      if (!groupParticipantsByGroup.has(row.group_id)) groupParticipantsByGroup.set(row.group_id, []);
+      groupParticipantsByGroup.get(row.group_id)!.push(row);
+    }
+  }
+  const bracketMatchesByGroup = new Map<string, RawBracketMatchQueryRow[]>();
+  if (!bmRes.error) {
+    for (const row of (bmRes.data ?? []) as (RawBracketMatchQueryRow & { group_id: string })[]) {
+      if (!bracketMatchesByGroup.has(row.group_id)) bracketMatchesByGroup.set(row.group_id, []);
+      bracketMatchesByGroup.get(row.group_id)!.push(row);
+    }
   }
 
-  const podium = computePodium(
-    buildPodiumPlayers(participants, pairings, matches),
-    buildPairingRemain(pairings),
-    participants.length,
-    ev.champion_user_id ?? null,
-    group,
-    tiebreakMatches,
-    ev.champion_decided_by ?? null,
-    (ev.polemica_winners ?? []) as string[],
-    (ev.recognition_winners ?? []) as string[],
-    bracketMatches,
-    ev.competition_format ?? null,
-    ev.top_size ?? null
-  );
-  return { podium, playerCount: participants.length };
+  const participantsByEvent = new Map<string, PodiumParticipantRow[]>();
+  for (const p of participants) {
+    if (!participantsByEvent.has(p.event_id)) participantsByEvent.set(p.event_id, []);
+    participantsByEvent.get(p.event_id)!.push(p);
+  }
+  const pairingsByEvent = new Map<string, PodiumPairingRow[]>();
+  const pairingToEvent = new Map<string, string>();
+  for (const pr of pairings) {
+    if (!pairingsByEvent.has(pr.event_id)) pairingsByEvent.set(pr.event_id, []);
+    pairingsByEvent.get(pr.event_id)!.push(pr);
+    pairingToEvent.set(pr.id, pr.event_id);
+  }
+  const matchesByEvent = new Map<string, PodiumMatchRow[]>();
+  for (const m of matches) {
+    const evId = pairingToEvent.get(m.pairing_id);
+    if (!evId) continue;
+    if (!matchesByEvent.has(evId)) matchesByEvent.set(evId, []);
+    matchesByEvent.get(evId)!.push(m);
+  }
+
+  for (const ev of events) {
+    const eventParticipants = participantsByEvent.get(ev.id) ?? [];
+    const eventPairings = pairingsByEvent.get(ev.id) ?? [];
+    const eventMatches = matchesByEvent.get(ev.id) ?? [];
+
+    let group: ActiveTiebreakGroupPodiumInput | null = null;
+    let tiebreakMatches: TiebreakMatchPodiumInput[] = [];
+    let bracketMatches: BracketMatchPodiumInput[] = [];
+    const tgRow = latestGroupByEvent.get(ev.id);
+    if (tgRow) {
+      const groupParticipantsRows = gpRes.error ? null : (groupParticipantsByGroup.get(tgRow.id) ?? []);
+      const bracketMatchesRows = bracketMatchesByGroup.get(tgRow.id) ?? [];
+      const tb = buildPodiumTiebreakInputs(tgRow, groupParticipantsRows, bracketMatchesRows, eventPairings, eventMatches);
+      group = tb.group;
+      tiebreakMatches = tb.matches;
+      bracketMatches = tb.bracketMatches;
+    }
+
+    const podium = computePodium(
+      buildPodiumPlayers(eventParticipants, eventPairings, eventMatches),
+      buildPairingRemain(eventPairings),
+      eventParticipants.length,
+      ev.champion_user_id ?? null,
+      group,
+      tiebreakMatches,
+      ev.champion_decided_by ?? null,
+      (ev.polemica_winners ?? []) as string[],
+      (ev.recognition_winners ?? []) as string[],
+      bracketMatches,
+      ev.competition_format ?? null,
+      ev.top_size ?? null
+    );
+    out.set(ev.id, { podium, playerCount: eventParticipants.length });
+  }
+
+  return out;
+}
+
+/** Podio actual de UN evento. Caso particular de fetchEventPodiums — mismo código, sin duplicar. */
+export async function fetchEventPodium(eventId: string): Promise<EventPodiumResult | null> {
+  const map = await fetchEventPodiums([eventId]);
+  return map.get(eventId) ?? null;
 }
 
 export type SecuredPosition = { event_id: string; user_id: string; position: number };
