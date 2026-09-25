@@ -17,6 +17,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeEncounter'>;
 
@@ -50,6 +52,8 @@ function displayName(u: UserInfo): string {
 }
 
 export default function ContextFreeEncounterScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId, userAId, userBId } = route.params;
   const { user } = useAuth();
   const [userA, setUserA] = useState<UserInfo | null>(null);
@@ -530,7 +534,7 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
   if (loading || !userA || !userB) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -637,7 +641,7 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
               disabled={aborting}
             >
               {aborting ? (
-                <ActivityIndicator color="#DC2626" />
+                <ActivityIndicator color={colors.status.error.solid} />
               ) : (
                 <Text style={styles.abortBtnText}>
                   {activeEncounterType === 'bo1'
@@ -782,128 +786,129 @@ export default function ContextFreeEncounterScreen({ navigation, route }: Props)
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#fff' },
-  content: { paddingBottom: 40 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  playersRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-evenly',
-    paddingVertical: 32,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  playerCard: { alignItems: 'center', flex: 1 },
-  playerName: { fontSize: 15, fontWeight: '700', color: '#111', marginTop: 8, textAlign: 'center' },
-  vs: { fontSize: 20, fontWeight: '700', color: '#9CA3AF', marginHorizontal: 8 },
-  actions: { paddingHorizontal: 16, paddingTop: 24, gap: 10 },
-  startBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  startBtnSecondary: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#3B82F6',
-  },
-  startBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  startBtnTextSecondary: { color: '#3B82F6' },
-  abortBtn: {
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  abortBtnText: { color: '#DC2626', fontSize: 14, fontWeight: '600' },
-  disabledBtn: { opacity: 0.5 },
-  spectatorNote: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 32,
-  },
-  historyCard: {
-    margin: 16,
-    marginTop: 24,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  historyCardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#374151',
-    textAlign: 'center',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  h2hGroup: {
-    marginBottom: 8,
-  },
-  h2hGroupTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#374151',
-    textAlign: 'center',
-    marginBottom: 4,
-    marginTop: 4,
-  },
-  h2hSection: { marginBottom: 10 },
-  h2hSectionTitle: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  statCell: { alignItems: 'center', flex: 1 },
-  statNum: { fontSize: 18, fontWeight: '800', color: '#111' },
-  statPct: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginTop: 1 },
-  statLabel: { fontSize: 11, color: '#6B7280', marginTop: 2, textAlign: 'center' },
-  noHistory: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 28,
-    paddingBottom: 8,
-  },
-  extraCard: {
-    margin: 16,
-    marginTop: 12,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    gap: 16,
-  },
-  extraSection: { gap: 8 },
-  extraTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#374151',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    textAlign: 'center',
-  },
-  extraRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  extraCell: { alignItems: 'center', flex: 1, gap: 2 },
-  extraCellLabel: { alignItems: 'flex-start', flex: 1.2 },
-  extraNum: { fontSize: 16, fontWeight: '800', color: '#111', textAlign: 'center' },
-  extraLabel: { fontSize: 11, color: '#6B7280', textAlign: 'center' },
-  extraNameLabel: { fontSize: 10, color: '#9CA3AF', marginTop: 2, textAlign: 'center' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    scroll: { flex: 1, backgroundColor: c.background },
+    content: { paddingBottom: 40 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    playersRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-evenly',
+      paddingVertical: 32,
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    playerCard: { alignItems: 'center', flex: 1 },
+    playerName: { fontSize: 15, fontWeight: '700', color: c.text, marginTop: 8, textAlign: 'center' },
+    vs: { fontSize: 20, fontWeight: '700', color: c.textMuted, marginHorizontal: 8 },
+    actions: { paddingHorizontal: 16, paddingTop: 24, gap: 10 },
+    startBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    startBtnSecondary: {
+      backgroundColor: c.background,
+      borderWidth: 1.5,
+      borderColor: c.accent,
+    },
+    startBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '700' },
+    startBtnTextSecondary: { color: c.accent },
+    abortBtn: {
+      backgroundColor: c.status.error.subtle,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+      borderRadius: 10,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    abortBtnText: { color: c.status.error.solid, fontSize: 14, fontWeight: '600' },
+    disabledBtn: { opacity: 0.5 },
+    spectatorNote: {
+      fontSize: 14,
+      color: c.textMuted,
+      textAlign: 'center',
+      paddingHorizontal: 32,
+      paddingTop: 32,
+    },
+    historyCard: {
+      margin: 16,
+      marginTop: 24,
+      backgroundColor: c.card,
+      borderRadius: 10,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    historyCardTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: c.textBody,
+      textAlign: 'center',
+      marginBottom: 12,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    h2hGroup: {
+      marginBottom: 8,
+    },
+    h2hGroupTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: c.textBody,
+      textAlign: 'center',
+      marginBottom: 4,
+      marginTop: 4,
+    },
+    h2hSection: { marginBottom: 10 },
+    h2hSectionTitle: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: c.textMuted,
+      textAlign: 'center',
+      marginBottom: 6,
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
+    },
+    statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
+    statCell: { alignItems: 'center', flex: 1 },
+    statNum: { fontSize: 18, fontWeight: '800', color: c.text },
+    statPct: { fontSize: 12, fontWeight: '600', color: c.textSecondary, marginTop: 1 },
+    statLabel: { fontSize: 11, color: c.textSecondary, marginTop: 2, textAlign: 'center' },
+    noHistory: {
+      fontSize: 14,
+      color: c.textMuted,
+      textAlign: 'center',
+      paddingHorizontal: 32,
+      paddingTop: 28,
+      paddingBottom: 8,
+    },
+    extraCard: {
+      margin: 16,
+      marginTop: 12,
+      backgroundColor: c.card,
+      borderRadius: 10,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      gap: 16,
+    },
+    extraSection: { gap: 8 },
+    extraTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.textBody,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      textAlign: 'center',
+    },
+    extraRow: { flexDirection: 'row', justifyContent: 'space-around' },
+    extraCell: { alignItems: 'center', flex: 1, gap: 2 },
+    extraCellLabel: { alignItems: 'flex-start', flex: 1.2 },
+    extraNum: { fontSize: 16, fontWeight: '800', color: c.text, textAlign: 'center' },
+    extraLabel: { fontSize: 11, color: c.textSecondary, textAlign: 'center' },
+    extraNameLabel: { fontSize: 10, color: c.textMuted, marginTop: 2, textAlign: 'center' },
+  });

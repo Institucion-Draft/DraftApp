@@ -2,21 +2,23 @@ import React, { useId } from 'react';
 import { View } from 'react-native';
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { MTG_COLOR_HEX } from './ColorFlag';
+import { useTheme } from '../theme';
 
 type Props = {
   /** Alto del bloque del glifo (escala el SVG completo). */
   size?: number;
 };
 
-const OUTLINE = '#111827';
 const OUTLINE_W = 2.2;
 
 /**
- * Letra "C" con degradé W→G y contorno oscuro (el blanco no desaparece sobre fondo claro).
+ * Letra "C" con degradé W→G y contorno del color de texto del tema (oscuro en claro, para que el
+ * blanco no desaparezca; claro en oscuro, para que el negro del degradé no se pierda).
  * Separación respecto a "ProDe": entre el tuck original (-0.11×) y el hueco amplio (+0.2×);
  * quedó ~75% del camino de vuelta hacia el tuck (≈ -0.0325× la altura del bloque).
  */
 export default function ProDeCManaC({ size = 30 }: Props) {
+  const { colors } = useTheme();
   const rawId = useId().replace(/:/g, '');
   const gradId = `prodec-mana-${rawId}`;
   const vbW = 28;
@@ -55,7 +57,7 @@ export default function ProDeCManaC({ size = 30 }: Props) {
           fontSize={fontSize}
           fontWeight="800"
           fill="none"
-          stroke={OUTLINE}
+          stroke={colors.text}
           strokeWidth={OUTLINE_W}
           strokeLinejoin="round"
           strokeLinecap="round"

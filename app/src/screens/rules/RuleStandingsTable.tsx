@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useThemedStyles } from '../../theme';
+import type { ThemeColors } from '../../theme';
 
 export type RuleStandingsRow = {
   id: string;
@@ -33,6 +35,7 @@ type Props = {
 };
 
 export default function RuleStandingsTable({ mode, rows, winrateLabels }: Props) {
+  const styles = useThemedStyles(createStyles);
   const wonLabel = winrateLabels?.won ?? 'PG';
   const totalLabel = winrateLabels?.total ?? 'PJ';
   return (
@@ -84,28 +87,29 @@ export default function RuleStandingsTable({ mode, rows, winrateLabels }: Props)
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { marginBottom: 4 },
-  header: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingBottom: 8,
-    marginBottom: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  rowHighlight: { backgroundColor: '#FEF3C7' },
-  cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
-  leftAlign: { textAlign: 'left' },
-  posCol: { width: 22, minWidth: 22 },
-  nameCol: { flex: 1, minWidth: 90 },
-  statCol: { width: 32, minWidth: 32, fontSize: 11 },
-  pctCol: { width: 40, minWidth: 40, fontSize: 10 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    wrap: { marginBottom: 4 },
+    header: {
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+      paddingBottom: 8,
+      marginBottom: 4,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    rowHighlight: { backgroundColor: c.status.warning.subtle },
+    cell: { textAlign: 'center', color: c.text, fontWeight: '700', fontSize: 12 },
+    leftAlign: { textAlign: 'left' },
+    posCol: { width: 22, minWidth: 22 },
+    nameCol: { flex: 1, minWidth: 90 },
+    statCol: { width: 32, minWidth: 32, fontSize: 11 },
+    pctCol: { width: 40, minWidth: 40, fontSize: 10 },
+  });

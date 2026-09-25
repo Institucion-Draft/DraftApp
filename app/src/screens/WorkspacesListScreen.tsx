@@ -18,6 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspacesList'>;
 
@@ -38,6 +40,8 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function WorkspacesListScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { user, signOut } = useAuth();
   const [items, setItems] = useState<WorkspaceListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -212,8 +216,8 @@ export default function WorkspacesListScreen({ navigation }: Props) {
                 {shortDesc}
               </Text>
             ) : null}
-            <View style={styles.rolePill}>
-              <Text style={styles.rolePillText}>
+            <View style={[styles.rolePill, role === 'organizer' && styles.rolePillOrganizer]}>
+              <Text style={[styles.rolePillText, role === 'organizer' && styles.rolePillTextOrganizer]}>
                 {role === 'organizer' ? 'Organizador' : 'Miembro'}
               </Text>
             </View>
@@ -265,7 +269,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
       <SafeAreaView style={styles.safe} edges={['top']}>
         {renderHeader()}
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#3B82F6" />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       </SafeAreaView>
     );
@@ -291,197 +295,200 @@ export default function WorkspacesListScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  avatarWrap: {
-    width: 48,
-    height: 48,
-    marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  screenTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
-  },
-  searchButton: {
-    padding: 8,
-    marginRight: 0,
-  },
-  searchIcon: {
-    fontSize: 20,
-  },
-  codeButton: {
-    padding: 8,
-    marginRight: 0,
-  },
-  codeIcon: {
-    fontSize: 20,
-  },
-  menuButton: {
-    padding: 8,
-    marginRight: -4,
-  },
-  menuIcon: {
-    fontSize: 22,
-    color: '#374151',
-    fontWeight: '700',
-  },
-  loadingBox: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 32,
-  },
-  listEmptyContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-  },
-  card: {
-    backgroundColor: '#fafafa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  cardAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    marginRight: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  cardAvatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E0E7FF',
-  },
-  cardAvatarLetter: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#4338CA',
-  },
-  cardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 4,
-  },
-  cardDesc: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  rolePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  rolePillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#3B82F6',
-  },
-  emptyWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 28,
-    lineHeight: 22,
-  },
-  primaryBtn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryBtn: {
-    borderWidth: 1,
-    borderColor: '#3B82F6',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    width: '100%',
-    alignItems: 'center',
-  },
-  secondaryBtnText: {
-    color: '#3B82F6',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  outlineAltBtn: {
-    borderWidth: 1,
-    borderColor: '#9CA3AF',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  outlineAltBtnText: {
-    color: '#374151',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footerBtn: {
-    marginTop: 8,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  footerBtnText: {
-    color: '#3B82F6',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    avatarWrap: {
+      width: 48,
+      height: 48,
+      marginRight: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    screenTitle: {
+      flex: 1,
+      fontSize: 18,
+      fontWeight: '700',
+      color: c.text,
+    },
+    searchButton: {
+      padding: 8,
+      marginRight: 0,
+    },
+    searchIcon: {
+      fontSize: 20,
+    },
+    codeButton: {
+      padding: 8,
+      marginRight: 0,
+    },
+    codeIcon: {
+      fontSize: 20,
+    },
+    menuButton: {
+      padding: 8,
+      marginRight: -4,
+    },
+    menuIcon: {
+      fontSize: 22,
+      color: c.textBody,
+      fontWeight: '700',
+    },
+    loadingBox: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    listContent: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 32,
+    },
+    listEmptyContainer: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+    },
+    card: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.divider,
+      padding: 14,
+      marginBottom: 12,
+    },
+    cardRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    cardAvatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      marginRight: 12,
+      backgroundColor: c.backgroundAlt,
+    },
+    cardAvatarPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.status.info.subtle,
+    },
+    cardAvatarLetter: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: c.status.info.text,
+    },
+    cardBody: {
+      flex: 1,
+      minWidth: 0,
+    },
+    cardTitle: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 4,
+    },
+    cardDesc: {
+      fontSize: 14,
+      color: c.textSecondary,
+      lineHeight: 20,
+      marginBottom: 8,
+    },
+    rolePill: {
+      alignSelf: 'flex-start',
+      backgroundColor: c.status.info.subtle,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 6,
+    },
+    rolePillText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.accent,
+    },
+    rolePillOrganizer: { backgroundColor: c.organizer.subtle },
+    rolePillTextOrganizer: { color: c.organizer.text },
+    emptyWrap: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 48,
+    },
+    emptyTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: c.text,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      fontSize: 15,
+      color: c.textSecondary,
+      textAlign: 'center',
+      marginBottom: 28,
+      lineHeight: 22,
+    },
+    primaryBtn: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      borderRadius: 8,
+      width: '100%',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    primaryBtnText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    secondaryBtn: {
+      borderWidth: 1,
+      borderColor: c.accent,
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      borderRadius: 8,
+      width: '100%',
+      alignItems: 'center',
+    },
+    secondaryBtnText: {
+      color: c.accent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    outlineAltBtn: {
+      borderWidth: 1,
+      borderColor: c.textMuted,
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      borderRadius: 8,
+      width: '100%',
+      alignItems: 'center',
+      marginTop: 12,
+    },
+    outlineAltBtnText: {
+      color: c.textBody,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    footerBtn: {
+      marginTop: 8,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    footerBtnText: {
+      color: c.accent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });

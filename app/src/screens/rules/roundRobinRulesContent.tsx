@@ -5,7 +5,7 @@ import RuleStandingsTable from './RuleStandingsTable';
 import RuleBracketCard from './RuleBracketCard';
 import RuleMatchupSection from './RuleMatchupSection';
 import RuleTieCascadeSteps from './RuleTieCascadeSteps';
-import { rulesStyles as rs } from './rulesStyles';
+import { useRulesStyles } from './rulesStyles';
 import {
   SECTION1_BO1_ROWS,
   SECTION1_BO3_ROWS,
@@ -31,8 +31,11 @@ import {
   SECTION6_CASE5PLUS_ROWS,
   SECTION6_THIRD_PLACE_TIE_ROWS,
 } from './mockData';
+import { useThemedStyles } from '../../theme';
+import type { ThemeColors } from '../../theme';
 
 function SituationTable() {
+  const styles = useThemedStyles(createStyles);
   const rows: [string, string][] = [
     ['Liga', 'Empate en el 1er puesto'],
     ['Liga + Top 4', 'Empate en el 4to puesto'],
@@ -54,6 +57,8 @@ function SituationTable() {
 }
 
 export default function RoundRobinRulesContent() {
+  const styles = useThemedStyles(createStyles);
+  const rs = useRulesStyles();
   return (
     <View>
       {/* Sección 1 */}
@@ -288,23 +293,24 @@ export default function RoundRobinRulesContent() {
   );
 }
 
-const styles = StyleSheet.create({
-  spacedTop: { marginTop: 4 },
-  situationTable: {
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  situationRow: { flexDirection: 'row' },
-  situationRowBody: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#eee' },
-  situationCell: {
-    flex: 1,
-    fontSize: 13,
-    color: '#111',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  situationHeaderTxt: { fontWeight: '700', backgroundColor: '#fafafa' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    spacedTop: { marginTop: 4 },
+    situationTable: {
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 12,
+      overflow: 'hidden',
+      marginBottom: 4,
+    },
+    situationRow: { flexDirection: 'row' },
+    situationRowBody: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider },
+    situationCell: {
+      flex: 1,
+      fontSize: 13,
+      color: c.text,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    situationHeaderTxt: { fontWeight: '700', backgroundColor: c.card },
+  });

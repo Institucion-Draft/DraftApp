@@ -19,6 +19,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import CrossEventStats from '../components/CrossEventStats';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MyProfile'>;
 type MyProfileParams = { from?: 'WorkspacesList' | 'WorkspaceDetail' | 'Playground'; workspaceId?: string };
@@ -42,6 +44,8 @@ function isCooldownActive(changedAtIso: string | null): boolean {
 }
 
 export default function MyProfileScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const backParams = (route.params ?? {}) as MyProfileParams;
   const backFrom = backParams.from;
   const backWorkspaceId = backParams.workspaceId;
@@ -214,7 +218,7 @@ export default function MyProfileScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -240,7 +244,7 @@ export default function MyProfileScreen({ navigation, route }: Props) {
           onPress={openEditModal}
           activeOpacity={0.7}
         >
-          <Text style={[styles.editBtnTxt, cooldown && styles.editBtnTxtMuted]}>Editar nombre de usuario</Text>
+          <Text style={styles.editBtnTxt}>Editar nombre de usuario</Text>
         </TouchableOpacity>
         {cooldown && nextChangeDate ? (
           <Text style={styles.cooldownHint}>Vas a poder cambiarlo de nuevo el {nextChangeDate}</Text>
@@ -269,7 +273,7 @@ export default function MyProfileScreen({ navigation, route }: Props) {
                 if (inlineError) setInlineError('');
               }}
               placeholder="Tu nombre visible"
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.textMuted}
               autoCapitalize="words"
               autoCorrect
               editable={!saving}
@@ -286,7 +290,7 @@ export default function MyProfileScreen({ navigation, route }: Props) {
                 disabled={saving}
               >
                 {saving ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.onAccent} />
                 ) : (
                   <Text style={styles.modalConfirmText}>Guardar</Text>
                 )}
@@ -299,58 +303,58 @@ export default function MyProfileScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  muted: { color: '#666', fontSize: 15 },
-  scroll: { padding: 24, paddingBottom: 40 },
-  avatarBlock: { alignItems: 'center', marginBottom: 28 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 8 },
-  currentName: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 16 },
-  editBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  editBtnMuted: { backgroundColor: '#93C5FD' },
-  editBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  editBtnTxtMuted: { color: '#F9FAFB' },
-  cooldownHint: { marginTop: 10, fontSize: 13, color: '#6B7280' },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E5E7EB', marginTop: 24 },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: '#00000066',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111', marginBottom: 14 },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#111',
-  },
-  inlineError: { marginTop: 8, color: '#DC2626', fontSize: 14, fontWeight: '600' },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18, gap: 12 },
-  modalCancel: { paddingVertical: 10, paddingHorizontal: 12 },
-  modalCancelText: { color: '#3B82F6', fontSize: 16, fontWeight: '600' },
-  modalConfirm: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  modalConfirmDisabled: { opacity: 0.6 },
-  modalConfirmText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    muted: { color: c.textSecondary, fontSize: 15 },
+    scroll: { padding: 24, paddingBottom: 40 },
+    avatarBlock: { alignItems: 'center', marginBottom: 28 },
+    sectionTitle: { fontSize: 14, fontWeight: '700', color: c.textBody, marginBottom: 8 },
+    currentName: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 16 },
+    editBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    editBtnMuted: { opacity: 0.5 },
+    editBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '600' },
+    cooldownHint: { marginTop: 10, fontSize: 13, color: c.textSecondary },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginTop: 24 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: 'center',
+      padding: 20,
+    },
+    modalCard: {
+      backgroundColor: c.background,
+      borderRadius: 12,
+      padding: 20,
+    },
+    modalTitle: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 14 },
+    modalInput: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      fontSize: 16,
+      color: c.text,
+    },
+    inlineError: { marginTop: 8, color: c.status.error.solid, fontSize: 14, fontWeight: '600' },
+    modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18, gap: 12 },
+    modalCancel: { paddingVertical: 10, paddingHorizontal: 12 },
+    modalCancelText: { color: c.accent, fontSize: 16, fontWeight: '600' },
+    modalConfirm: {
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      minWidth: 100,
+      alignItems: 'center',
+    },
+    modalConfirmDisabled: { opacity: 0.6 },
+    modalConfirmText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+  });

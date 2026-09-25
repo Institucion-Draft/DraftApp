@@ -11,6 +11,8 @@ import {
   tierRangeLabel,
   type PointTier,
 } from '../lib/pointConfig';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PlayerPointsDetail'>;
 
@@ -73,6 +75,8 @@ function formatDate(iso: string | null): string {
 }
 
 export default function PlayerPointsDetailScreen({ route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { userId, workspaceId, seasonId } = route.params;
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<EventPoints[]>([]);
@@ -169,7 +173,7 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
   if (loading) {
     return (
       <View style={styles.loadingBox}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -269,73 +273,74 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 40 },
-  loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  totalBox: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  totalLabel: { fontSize: 14, fontWeight: '600', color: '#374151' },
-  totalValue: { fontSize: 20, fontWeight: '800', color: '#3B82F6' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-    gap: 10,
-  },
-  medal: { fontSize: 22, width: 30, textAlign: 'center' },
-  rowMain: { flex: 1 },
-  eventName: { fontSize: 15, fontWeight: '600', color: '#111' },
-  rowSub: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  rowPoints: { fontSize: 16, fontWeight: '700', color: '#3B82F6' },
-  expandChevron: { fontSize: 13, color: '#9CA3AF', width: 16, textAlign: 'center' },
-  expandedBox: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    backgroundColor: '#FAFAFA',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    marginTop: -4,
-  },
-  expandedLeft: { flex: 1, paddingRight: 8 },
-  expandedRight: { alignItems: 'flex-end', maxWidth: '48%' },
-  podiumRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
-  podiumMedal: { fontSize: 15, width: 22, textAlign: 'center' },
-  podiumName: { fontSize: 13, color: '#374151', flexShrink: 1 },
-  podiumEmpty: { fontSize: 12, color: '#9CA3AF', fontStyle: 'italic', paddingVertical: 4 },
-  eventMetaLine: { fontSize: 11, color: '#9CA3AF', textAlign: 'right', marginBottom: 3 },
-  emptyText: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', paddingVertical: 24 },
-  legendSection: { marginTop: 16, alignItems: 'flex-start' },
-  legendTitle: { fontSize: 12, color: '#666', marginBottom: 8 },
-  legendTable: { alignSelf: 'flex-start' },
-  legendHeaderRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingBottom: 6,
-    marginBottom: 2,
-  },
-  legendRow: { flexDirection: 'row', paddingVertical: 4 },
-  legendCell: { width: 34, fontSize: 12, color: '#666', textAlign: 'center' },
-  legendRangeCol: { width: 46, textAlign: 'left' },
-  legendHeaderTxt: { fontWeight: '700', color: '#6B7280' },
-  legendCellHighlight: {
-    fontWeight: '800',
-    color: '#111',
-    backgroundColor: '#FEF3C7',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 16, paddingBottom: 40 },
+    loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    totalBox: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      backgroundColor: c.status.info.subtle,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      marginBottom: 16,
+    },
+    totalLabel: { fontSize: 14, fontWeight: '600', color: c.textBody },
+    totalValue: { fontSize: 20, fontWeight: '800', color: c.accent },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+      gap: 10,
+    },
+    medal: { fontSize: 22, width: 30, textAlign: 'center' },
+    rowMain: { flex: 1 },
+    eventName: { fontSize: 15, fontWeight: '600', color: c.text },
+    rowSub: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    rowPoints: { fontSize: 16, fontWeight: '700', color: c.accent },
+    expandChevron: { fontSize: 13, color: c.textMuted, width: 16, textAlign: 'center' },
+    expandedBox: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      backgroundColor: c.card,
+      borderRadius: 8,
+      padding: 12,
+      marginBottom: 8,
+      marginTop: -4,
+    },
+    expandedLeft: { flex: 1, paddingRight: 8 },
+    expandedRight: { alignItems: 'flex-end', maxWidth: '48%' },
+    podiumRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    podiumMedal: { fontSize: 15, width: 22, textAlign: 'center' },
+    podiumName: { fontSize: 13, color: c.textBody, flexShrink: 1 },
+    podiumEmpty: { fontSize: 12, color: c.textMuted, fontStyle: 'italic', paddingVertical: 4 },
+    eventMetaLine: { fontSize: 11, color: c.textMuted, textAlign: 'right', marginBottom: 3 },
+    emptyText: { fontSize: 14, color: c.textMuted, fontStyle: 'italic', paddingVertical: 24 },
+    legendSection: { marginTop: 16, alignItems: 'flex-start' },
+    legendTitle: { fontSize: 12, color: c.textSecondary, marginBottom: 8 },
+    legendTable: { alignSelf: 'flex-start' },
+    legendHeaderRow: {
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+      paddingBottom: 6,
+      marginBottom: 2,
+    },
+    legendRow: { flexDirection: 'row', paddingVertical: 4 },
+    legendCell: { width: 34, fontSize: 12, color: c.textSecondary, textAlign: 'center' },
+    legendRangeCol: { width: 46, textAlign: 'left' },
+    legendHeaderTxt: { fontWeight: '700', color: c.textSecondary },
+    legendCellHighlight: {
+      fontWeight: '800',
+      color: c.text,
+      backgroundColor: c.status.warning.subtle,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+  });

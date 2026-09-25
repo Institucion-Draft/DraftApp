@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useThemedStyles } from '../../theme';
+import type { ThemeColors } from '../../theme';
 
 export type BracketSlot =
   | { kind: 'player'; name: string }
@@ -22,6 +24,7 @@ function slotLabel(slot: BracketSlot): string {
 }
 
 export default function RuleBracketCard({ rounds }: { rounds: BracketRound[] }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.wrap}>
       {rounds.map((round, ri) => (
@@ -53,44 +56,45 @@ export default function RuleBracketCard({ rounds }: { rounds: BracketRound[] }) 
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { marginBottom: 4 },
-  round: { marginBottom: 10 },
-  roundTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6B7280',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  matchBox: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginBottom: 6,
-  },
-  matchRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  matchText: {
-    flexShrink: 1,
-    flexBasis: '38%',
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#111',
-    textAlign: 'center',
-  },
-  vsText: { fontSize: 11, color: '#9CA3AF', fontWeight: '600' },
-  byeText: { fontSize: 12, color: '#9CA3AF', fontStyle: 'italic' },
-  formatTag: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#3B82F6',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    wrap: { marginBottom: 4 },
+    round: { marginBottom: 10 },
+    roundTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: c.textSecondary,
+      marginBottom: 6,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
+    matchBox: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      backgroundColor: c.background,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      marginBottom: 6,
+    },
+    matchRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+    matchText: {
+      flexShrink: 1,
+      flexBasis: '38%',
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.text,
+      textAlign: 'center',
+    },
+    vsText: { fontSize: 11, color: c.textMuted, fontWeight: '600' },
+    byeText: { fontSize: 12, color: c.textMuted, fontStyle: 'italic' },
+    formatTag: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: c.accent,
+      backgroundColor: c.status.info.subtle,
+      borderRadius: 4,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+  });

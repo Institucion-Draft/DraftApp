@@ -15,6 +15,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditCube'>;
 
@@ -27,6 +29,8 @@ type CubeRow = {
 };
 
 export default function EditCubeScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { cubeId } = route.params;
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +140,7 @@ export default function EditCubeScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -158,7 +162,7 @@ export default function EditCubeScreen({ navigation, route }: Props) {
         <Text style={styles.counter}>{notes.length}/2000</Text>
 
         <TouchableOpacity style={[styles.btn, submitting && styles.btnDisabled]} disabled={submitting} onPress={() => void onSave()}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Guardar</Text>}
+          {submitting ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.btnText}>Guardar</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.deleteBtn} disabled={submitting} onPress={onDelete}>
@@ -169,34 +173,36 @@ export default function EditCubeScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 40 },
-  label: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-    marginBottom: 16,
-  },
-  notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
-  counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
-  btn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
-  btnDisabled: { backgroundColor: '#9CA3AF' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  deleteBtn: {
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  deleteTxt: { color: '#DC2626', fontWeight: '600', fontSize: 15 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 40 },
+    label: { fontSize: 15, fontWeight: '600', color: c.text, marginBottom: 8 },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      backgroundColor: c.card,
+      marginBottom: 16,
+      color: c.text,
+    },
+    notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
+    counter: { textAlign: 'right', color: c.textMuted, fontSize: 12, marginBottom: 20 },
+    btn: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+    btnDisabled: { backgroundColor: c.textMuted },
+    btnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    deleteBtn: {
+      marginTop: 20,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+      backgroundColor: c.status.error.subtle,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    deleteTxt: { color: c.status.error.solid, fontWeight: '600', fontSize: 15 },
+  });

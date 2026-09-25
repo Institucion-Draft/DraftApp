@@ -7,6 +7,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MatchResult'>;
 
@@ -73,6 +75,8 @@ function topcutWinsNeededClient(
 }
 
 export default function MatchResultScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { matchId } = route.params;
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<MatchRow | null>(null);
@@ -350,7 +354,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   if (loading || !match || !pairing || !pa || !pb) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -588,24 +592,25 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', padding: 24 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  hero: { alignItems: 'center', marginBottom: 22, marginTop: 12 },
-  winText: { fontSize: 30, fontWeight: '900', color: '#111', textAlign: 'center', marginBottom: 12 },
-  avatarHeroRow: { width: '100%', alignItems: 'center', justifyContent: 'center', minHeight: 160 },
-  loserAvatarWrap: {
-    position: 'absolute',
-    right: 16,
-    bottom: 4,
-    opacity: 0.5,
-  },
-  sub: { color: '#666', marginTop: 4 },
-  block: { borderWidth: 1, borderColor: '#eee', borderRadius: 10, padding: 12, marginBottom: 18 },
-  meta: { color: '#111', marginBottom: 4 },
-  actions: { gap: 10 },
-  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
-  primaryTxt: { color: '#fff', fontWeight: '700' },
-  secondaryBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
-  secondaryTxt: { color: '#374151', fontWeight: '700' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background, padding: 24 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    hero: { alignItems: 'center', marginBottom: 22, marginTop: 12 },
+    winText: { fontSize: 30, fontWeight: '900', color: c.text, textAlign: 'center', marginBottom: 12 },
+    avatarHeroRow: { width: '100%', alignItems: 'center', justifyContent: 'center', minHeight: 160 },
+    loserAvatarWrap: {
+      position: 'absolute',
+      right: 16,
+      bottom: 4,
+      opacity: 0.5,
+    },
+    sub: { color: c.textSecondary, marginTop: 4 },
+    block: { borderWidth: 1, borderColor: c.divider, borderRadius: 10, padding: 12, marginBottom: 18 },
+    meta: { color: c.text, marginBottom: 4 },
+    actions: { gap: 10 },
+    primaryBtn: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+    primaryTxt: { color: c.onAccent, fontWeight: '700' },
+    secondaryBtn: { borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
+    secondaryTxt: { color: c.textBody, fontWeight: '700' },
+  });

@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import type { RootStackParamList } from '../navigation/rootStackParams';
+import { useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Welcome'>;
 
@@ -24,6 +26,7 @@ const WELCOME_MANA_COLORS = [
 ] as const;
 
 export default function WelcomeScreen({ navigation }: Props) {
+  const styles = useThemedStyles(createStyles);
   const { session } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -104,58 +107,59 @@ export default function WelcomeScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  hero: {
-    flex: 1,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  brandBlock: {
-    alignItems: 'center',
-  },
-  captionBlock: {
-    alignItems: 'center',
-  },
-  logo: {
-    marginBottom: 0,
-  },
-  title: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: '#111827',
-    textAlign: 'center',
-    lineHeight: 38,
-    includeFontPadding: false,
-  },
-  colorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    marginTop: 8,
-  },
-  colorDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-  },
-  colorDotBordered: {
-    borderWidth: 1,
-  },
-  hint: {
-    fontSize: 16,
-    fontWeight: '400',
-    color: '#6B7280',
-    textAlign: 'center',
-    paddingHorizontal: 32,
-    marginBottom: 48,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    hero: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    brandBlock: {
+      alignItems: 'center',
+    },
+    captionBlock: {
+      alignItems: 'center',
+    },
+    logo: {
+      marginBottom: 0,
+    },
+    title: {
+      fontSize: 34,
+      fontWeight: '800',
+      color: c.text,
+      textAlign: 'center',
+      lineHeight: 38,
+      includeFontPadding: false,
+    },
+    colorRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+      marginTop: 8,
+    },
+    colorDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+    },
+    colorDotBordered: {
+      borderWidth: 1,
+    },
+    hint: {
+      fontSize: 16,
+      fontWeight: '400',
+      color: c.textSecondary,
+      textAlign: 'center',
+      paddingHorizontal: 32,
+      marginBottom: 48,
+    },
+  });

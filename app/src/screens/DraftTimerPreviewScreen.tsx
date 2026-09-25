@@ -25,6 +25,12 @@ function linePoints(xs: number[], ys: number[], minY: number, maxY: number): str
     .join(' ');
 }
 
+/**
+ * GUARDA DE TEMA: esta pantalla queda SIEMPRE en su estilo claro, sin importar el modo global (las
+ * pantallas de cronómetro Config/Advanced/Sim/Preview están excluidas del modo oscuro). No importar
+ * `useTheme`/`useThemedStyles`/ThemeContext acá. El aislamiento del header, del fondo del stack, de
+ * la barra de estado y del subárbol está en `theme/lightLock.tsx` y se aplica en MainNavigator.
+ */
 export default function DraftTimerPreviewScreen({ route }: Props) {
   const { timerPacks, numPlayers, alpha, beta, gamma, delta, rho, tMin, tMax } = route.params;
 

@@ -14,9 +14,12 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeColorPick'>;
 
+// Chips de color MTG (W/U/B/R/G): contenido, fijos en ambos modos (fondo y texto propios de cada color).
 const COLOR_OPTIONS: { key: MtgColor; label: string; bg: string; textColor: string }[] = [
   { key: 'W', label: 'Blanco', bg: '#F8FAFC', textColor: '#111827' },
   { key: 'U', label: 'Azul', bg: '#DBEAFE', textColor: '#1E3A8A' },
@@ -35,6 +38,8 @@ type PresenceAvatar = {
 };
 
 export default function ContextFreeColorPickScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId, userAId, userBId, encounterType } = route.params;
   const [userA, setUserA] = useState<UserName | null>(null);
   const [userB, setUserB] = useState<UserName | null>(null);
@@ -151,7 +156,7 @@ export default function ContextFreeColorPickScreen({ navigation, route }: Props)
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -241,7 +246,7 @@ export default function ContextFreeColorPickScreen({ navigation, route }: Props)
         disabled={saving}
       >
         {saving ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.onAccent} />
         ) : (
           <Text style={styles.startBtnText}>Comenzar</Text>
         )}
@@ -250,85 +255,86 @@ export default function ContextFreeColorPickScreen({ navigation, route }: Props)
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#fff' },
-  content: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  heading: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  pickerSection: {
-    marginBottom: 20,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  pickerLabel: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 12 },
-  colorRow: { flexDirection: 'row', gap: 8 },
-  colorChip: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  colorChipActive: { borderColor: '#3B82F6' },
-  colorChipText: { fontSize: 16, fontWeight: '800' },
-  colorHint: { fontSize: 12, color: '#9CA3AF', marginTop: 8 },
-  starterSection: {
-    marginBottom: 20,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  starterLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 12,
-  },
-  starterRow: { flexDirection: 'row', gap: 10 },
-  starterOption: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    backgroundColor: '#fff',
-  },
-  starterOptionSelected: {
-    borderColor: '#3B82F6',
-    backgroundColor: '#EFF6FF',
-  },
-  starterAvatar: { width: 52, height: 52, marginBottom: 6 },
-  starterAvatarPh: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#E5E7EB',
-    marginBottom: 6,
-  },
-  starterName: { fontSize: 13, fontWeight: '600', color: '#374151', textAlign: 'center' },
-  starterNameSelected: { color: '#1D4ED8' },
-  startBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 10,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  startBtnDisabled: { opacity: 0.6 },
-  startBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    scroll: { flex: 1, backgroundColor: c.background },
+    content: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 40 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    heading: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: c.text,
+      textAlign: 'center',
+      marginBottom: 24,
+    },
+    pickerSection: {
+      marginBottom: 20,
+      backgroundColor: c.card,
+      borderRadius: 10,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    pickerLabel: { fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 12 },
+    colorRow: { flexDirection: 'row', gap: 8 },
+    colorChip: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    colorChipActive: { borderColor: c.accent },
+    colorChipText: { fontSize: 16, fontWeight: '800' },
+    colorHint: { fontSize: 12, color: c.textMuted, marginTop: 8 },
+    starterSection: {
+      marginBottom: 20,
+      backgroundColor: c.card,
+      borderRadius: 10,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    starterLabel: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 12,
+    },
+    starterRow: { flexDirection: 'row', gap: 10 },
+    starterOption: {
+      flex: 1,
+      alignItems: 'center',
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: c.border,
+      paddingVertical: 12,
+      paddingHorizontal: 8,
+      backgroundColor: c.background,
+    },
+    starterOptionSelected: {
+      borderColor: c.accent,
+      backgroundColor: c.status.info.subtle,
+    },
+    starterAvatar: { width: 52, height: 52, marginBottom: 6 },
+    starterAvatarPh: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: c.border,
+      marginBottom: 6,
+    },
+    starterName: { fontSize: 13, fontWeight: '600', color: c.textBody, textAlign: 'center' },
+    starterNameSelected: { color: c.status.info.text },
+    startBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 10,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    startBtnDisabled: { opacity: 0.6 },
+    startBtnText: { color: c.onAccent, fontSize: 17, fontWeight: '700' },
+  });

@@ -51,6 +51,8 @@ import DraftTimerAdvancedScreen from '../screens/DraftTimerAdvancedScreen';
 import DraftTimerSimScreen from '../screens/DraftTimerSimScreen';
 import DraftTimerPreviewScreen from '../screens/DraftTimerPreviewScreen';
 import DraftTimerScreen from '../screens/DraftTimerScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import { LIGHT_LOCKED_OPTIONS, lightLockedLayout, useTheme } from '../theme';
 import type { MainStackParamList } from './mainStackParams';
 
 export type { MainStackParamList } from './mainStackParams';
@@ -58,11 +60,12 @@ export type { MainStackParamList } from './mainStackParams';
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export default function MainStackNavigator() {
+  const { colors } = useTheme();
   return (
     <Stack.Navigator
       screenOptions={{
         headerShadowVisible: false,
-        contentStyle: { backgroundColor: '#fff' },
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
         <Stack.Screen
@@ -74,6 +77,11 @@ export default function MainStackNavigator() {
           name="MyProfile"
           component={MyProfileScreen}
           options={{ title: 'Mi perfil', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{ title: 'Configuración', headerBackTitle: 'Atrás' }}
         />
         <Stack.Screen
           name="MemberProfile"
@@ -194,7 +202,13 @@ export default function MainStackNavigator() {
         />
         <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventDiary" component={EventDiaryScreen} options={{ title: 'Bitácora', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="ProDeC" component={ProDeCScreen} options={{ title: 'ProDeC', headerBackTitle: 'Atrás' }} />
+        {/* ProDeC: siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="ProDeC"
+          component={ProDeCScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'ProDeC', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
         <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Mi mazo', headerBackTitle: 'Atrás' }} />
         <Stack.Screen
@@ -205,20 +219,59 @@ export default function MainStackNavigator() {
         <Stack.Screen name="PairingsList" component={PairingsListScreen} options={{ title: 'Enfrentamientos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="PairingDetail" component={PairingDetailScreen} options={{ title: 'Enfrentamiento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CubeRoulette" component={CubeRouletteScreen} options={{ title: 'Ruleta de cubos', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="LifeTracker" component={LifeTrackerScreen} options={{ title: 'Life Tracker', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="LifeChart" component={LifeChartScreen} options={{ title: 'Evolución de vida', headerBackTitle: 'Atrás' }} />
+        {/* LifeTracker: siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="LifeTracker"
+          component={LifeTrackerScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Life Tracker', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
+        {/* LifeChart: siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="LifeChart"
+          component={LifeChartScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Evolución de vida', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
         <Stack.Screen name="MatchResult" component={MatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Standings" component={StandingsScreen} options={{ title: 'Tabla de posiciones', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="Playground" component={PlaygroundScreen} options={{ title: 'Partidas sin contexto', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeMatches" component={ContextFreeMatchesScreen} options={{ title: 'Enfrentamientos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeEncounter" component={ContextFreeEncounterScreen} options={{ title: 'Encuentro', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="ContextFreeColorPick" component={ContextFreeColorPickScreen} options={{ title: 'Elegir colores', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="ContextFreeLifeTracker" component={ContextFreeLifeTrackerScreen} options={{ headerShown: false }} />
+        {/* ContextFreeLifeTracker: siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="ContextFreeLifeTracker"
+          component={ContextFreeLifeTrackerScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, headerShown: false }}
+          layout={lightLockedLayout}
+        />
         <Stack.Screen name="ContextFreeMatchResult" component={ContextFreeMatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="DraftTimerConfig" component={DraftTimerConfigScreen} options={{ title: 'Configuración rondas cronometradas', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="DraftTimerAdvanced" component={DraftTimerAdvancedScreen} options={{ title: 'Cronómetro — avanzado', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="DraftTimerSim" component={DraftTimerSimScreen} options={{ title: 'Simulación de tiempos', headerBackTitle: 'Atrás' }} />
-        <Stack.Screen name="DraftTimerPreview" component={DraftTimerPreviewScreen} options={{ title: 'Vista previa', headerBackTitle: 'Atrás' }} />
+        {/* Cronómetro (Config/Advanced/Sim/Preview): siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="DraftTimerConfig"
+          component={DraftTimerConfigScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Configuración rondas cronometradas', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
+        <Stack.Screen
+          name="DraftTimerAdvanced"
+          component={DraftTimerAdvancedScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Cronómetro — avanzado', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
+        <Stack.Screen
+          name="DraftTimerSim"
+          component={DraftTimerSimScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Simulación de tiempos', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
+        <Stack.Screen
+          name="DraftTimerPreview"
+          component={DraftTimerPreviewScreen}
+          options={{ ...LIGHT_LOCKED_OPTIONS, title: 'Vista previa', headerBackTitle: 'Atrás' }}
+          layout={lightLockedLayout}
+        />
         <Stack.Screen name="DraftTimer" component={DraftTimerScreen} options={{ title: 'Cronómetro de draft', headerBackTitle: 'Atrás', headerBackVisible: false }} />
     </Stack.Navigator>
   );

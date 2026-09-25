@@ -1,6 +1,7 @@
 export type MainStackParamList = {
   WorkspacesList: undefined;
   MyProfile: { from?: 'WorkspacesList' | 'WorkspaceDetail' | 'Playground'; workspaceId?: string };
+  Settings: { workspaceId: string };
   MemberProfile: { userId: string; workspaceId: string; from?: 'Playground' };
   CreateWorkspace: undefined;
   WorkspaceDetail: { workspaceId: string };

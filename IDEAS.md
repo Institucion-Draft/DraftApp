@@ -186,3 +186,12 @@ El sistema de Temporadas (ranking de puntos por escalón, automático por estaci
 - Enriquecer schema de `default_avatars` con `pokemon_type_1` y `pokemon_type_2`
 - Cargar data estática de tipos para los 251 Pokémon
 - Frecuencia base de cada tipo en los 251 (data estática)
+
+## Intro animada al abrir la app
+
+Video corto generado con IA que termine visualmente en el mismo gráfico que hoy es el logo/ícono de WelcomeScreen, como transición hacia el resto de la app. No afecta el ícono real del sistema operativo, que sigue siendo estático.
+
+**A definir**:
+- Si se muestra siempre o solo la primera vez (flag en AsyncStorage)
+- Herramienta de generación del video
+- Peso del archivo en el bundle

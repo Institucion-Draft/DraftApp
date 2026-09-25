@@ -3,6 +3,8 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import PlayerAvatar from './PlayerAvatar';
 import ProDeCManaC from './ProDeCManaC';
 import { formatPointsPerEvent, type RankingRow } from '../lib/ranking';
+import { useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 /** Anchos de columna. Las columnas de la tabla y el espaciador del indicador de ProDeC salen de acá. */
 const COL = { pos: 26, name: 140, stat: 44, pct: 50, ratio: 52 } as const;
@@ -27,6 +29,7 @@ type Props = {
 };
 
 export default function RankingTable({ rows, emptyText, legendText, onPressRow, header }: Props) {
+  const styles = useThemedStyles(createStyles);
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} horizontal={false}>
       {header}
@@ -102,45 +105,47 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 40 },
-  tableWrap: { paddingBottom: 8 },
-  groupRow: { flexDirection: 'row', marginBottom: 2 },
-  prodecLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  prodecLabel: { fontSize: 13, fontWeight: '800', color: '#111' },
-  prodecLine: { height: 2, backgroundColor: '#9CA3AF', borderRadius: 1 },
-  headerRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingBottom: 8,
-    marginBottom: 4,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  cell: { textAlign: 'center', color: '#111', fontWeight: '600', fontSize: 12 },
-  headerTxt: { fontWeight: '700', color: '#6B7280', fontSize: 11, textTransform: 'uppercase' },
-  leftAlign: { textAlign: 'left' },
-  posCol: { width: COL.pos, minWidth: COL.pos },
-  nameCol: { width: COL.name, minWidth: COL.name },
-  nameCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  avatar: { marginRight: 2 },
-  nameTxt: { fontSize: 13, fontWeight: '600', color: '#111', flexShrink: 1 },
-  statCol: { width: COL.stat, minWidth: COL.stat },
-  pctCol: { width: COL.pct, minWidth: COL.pct, fontSize: 11 },
-  ratioCol: { width: COL.ratio, minWidth: COL.ratio },
-  /** Separador vertical fino al inicio del grupo ProDeC (el ancho de la columna no cambia: border-box). */
-  prodecFirstCol: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: '#D1D5DB' },
-  pointsTxt: { color: '#3B82F6', fontWeight: '700' },
-  goldTxt: { color: '#CA8A04' },
-  silverTxt: { color: '#9CA3AF' },
-  bronzeTxt: { color: '#B45309' },
-  emptyText: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', paddingVertical: 24 },
-  legendTxt: { marginTop: 14, color: '#666', fontSize: 12, lineHeight: 17 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 16, paddingBottom: 40 },
+    tableWrap: { paddingBottom: 8 },
+    groupRow: { flexDirection: 'row', marginBottom: 2 },
+    prodecLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+    prodecLabel: { fontSize: 13, fontWeight: '800', color: c.text },
+    prodecLine: { height: 2, backgroundColor: c.textMuted, borderRadius: 1 },
+    headerRow: {
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+      paddingBottom: 8,
+      marginBottom: 4,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    cell: { textAlign: 'center', color: c.text, fontWeight: '600', fontSize: 12 },
+    headerTxt: { fontWeight: '700', color: c.textSecondary, fontSize: 11, textTransform: 'uppercase' },
+    leftAlign: { textAlign: 'left' },
+    posCol: { width: COL.pos, minWidth: COL.pos },
+    nameCol: { width: COL.name, minWidth: COL.name },
+    nameCell: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    avatar: { marginRight: 2 },
+    nameTxt: { fontSize: 13, fontWeight: '600', color: c.text, flexShrink: 1 },
+    statCol: { width: COL.stat, minWidth: COL.stat },
+    pctCol: { width: COL.pct, minWidth: COL.pct, fontSize: 11 },
+    ratioCol: { width: COL.ratio, minWidth: COL.ratio },
+    /** Separador vertical fino al inicio del grupo ProDeC (el ancho de la columna no cambia: border-box). */
+    prodecFirstCol: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: c.borderStrong },
+    pointsTxt: { color: c.accent, fontWeight: '700' },
+    // Medallas oro/plata/bronce: colores de contenido, iguales en ambos modos.
+    goldTxt: { color: '#CA8A04' },
+    silverTxt: { color: '#9CA3AF' },
+    bronzeTxt: { color: '#B45309' },
+    emptyText: { fontSize: 14, color: c.textMuted, fontStyle: 'italic', paddingVertical: 24 },
+    legendTxt: { marginTop: 14, color: c.textSecondary, fontSize: 12, lineHeight: 17 },
+  });

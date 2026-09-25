@@ -15,6 +15,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'JoinByCode'>;
 
@@ -23,6 +25,8 @@ function normalizeCode(raw: string): string {
 }
 
 export default function JoinByCodeScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { user } = useAuth();
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -75,7 +79,7 @@ export default function JoinByCodeScreen({ navigation }: Props) {
       <TextInput
         style={styles.input}
         placeholder="ABCDEF123"
-        placeholderTextColor="#999"
+        placeholderTextColor={colors.textMuted}
         value={code}
         onChangeText={(t) => setCode(t.toUpperCase())}
         autoCapitalize="characters"
@@ -90,7 +94,7 @@ export default function JoinByCodeScreen({ navigation }: Props) {
         disabled={busy}
       >
         {busy ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.onAccent} />
         ) : (
           <Text style={styles.btnText}>Unirme</Text>
         )}
@@ -99,52 +103,54 @@ export default function JoinByCodeScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    padding: 24,
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 28,
-    lineHeight: 22,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: 3,
-    textAlign: 'center',
-    backgroundColor: '#fafafa',
-    marginBottom: 20,
-  },
-  btn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  btnDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  btnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+      padding: 24,
+      justifyContent: 'center',
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 15,
+      color: c.textSecondary,
+      textAlign: 'center',
+      marginBottom: 28,
+      lineHeight: 22,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 16,
+      paddingHorizontal: 16,
+      fontSize: 22,
+      fontWeight: '700',
+      color: c.text,
+      letterSpacing: 3,
+      textAlign: 'center',
+      backgroundColor: c.card,
+      marginBottom: 20,
+    },
+    btn: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    btnDisabled: {
+      backgroundColor: c.textMuted,
+    },
+    btnText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });

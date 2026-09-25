@@ -21,6 +21,8 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventTypeLabel } from '../lib/labels';
 import InfoTooltip from '../components/InfoTooltip';
 import Card from '../components/Card';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
@@ -81,6 +83,8 @@ function pickFromOptions(
 }
 
 export default function CreateEventScreen({ route, navigation }: Props) {
+  const { mode, colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId, from } = route.params;
   useLayoutEffect(() => {
     // Desde el workspace, "Atrás" vuelve a ese workspace (sin pasar por "Todos los eventos");
@@ -289,7 +293,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   if (loadingOptions) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -486,6 +490,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           <DateTimePicker
             value={scheduledFor}
             mode="datetime"
+            themeVariant={mode}
             onChange={(_, d) => {
               if (d) setScheduledFor(d);
             }}
@@ -511,82 +516,84 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       <Text style={styles.counter}>{notes.length}/2000</Text>
 
       <TouchableOpacity style={[styles.primaryBtn, submitting && styles.primaryBtnDisabled]} onPress={() => void onCreate()} disabled={submitting}>
-        {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnTxt}>Crear</Text>}
+        {submitting ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryBtnTxt}>Crear</Text>}
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 38 },
-  label: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fafafa',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  pickerBtn: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fafafa',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  pickerTxt: { fontSize: 16, color: '#111' },
-  notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
-  counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
-  iosPickerWrap: { marginBottom: 12 },
-  iosDone: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 },
-  iosDoneTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 16 },
-  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
-  primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
-  primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  sandboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginBottom: 20,
-  },
-  sandboxLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16,
-    paddingVertical: 4,
-  },
-  switchLabelRow: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 6 },
-  switchLabelInline: { fontSize: 15, color: '#111', fontWeight: '500' },
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  labelInline: { marginBottom: 0, flexShrink: 1 },
-  labelBold: { fontWeight: '700' },
-  labelNormal: { fontWeight: '400' },
-  formatHint: { fontSize: 12, color: '#9CA3AF', marginTop: -12, marginBottom: 16 },
-  sectionHeader: { fontSize: 16, fontWeight: '700', color: '#111', marginTop: 4, marginBottom: 10 },
-  formatCard: { marginBottom: 16 },
-  reglamentoBtn: { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
-  reglamentoBtnTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 14 },
-  segmented: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#fafafa' },
-  segmentSelected: { backgroundColor: '#3B82F6' },
-  segmentTxt: { fontSize: 16, color: '#111', fontWeight: '600' },
-  segmentTxtSelected: { color: '#fff' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 38 },
+    label: { fontSize: 15, fontWeight: '600', color: c.text, marginBottom: 8 },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      backgroundColor: c.card,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      color: c.text,
+      marginBottom: 16,
+    },
+    pickerBtn: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      backgroundColor: c.card,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      marginBottom: 16,
+    },
+    pickerTxt: { fontSize: 16, color: c.text },
+    notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
+    counter: { textAlign: 'right', color: c.textMuted, fontSize: 12, marginBottom: 20 },
+    iosPickerWrap: { marginBottom: 12 },
+    iosDone: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 },
+    iosDoneTxt: { color: c.accent, fontWeight: '600', fontSize: 16 },
+    primaryBtn: { backgroundColor: c.accent, borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
+    primaryBtnDisabled: { backgroundColor: c.textMuted },
+    primaryBtnTxt: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    sandboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 10,
+      marginBottom: 20,
+    },
+    sandboxLabel: { fontSize: 14, color: c.textSecondary, fontWeight: '500' },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginBottom: 16,
+      paddingVertical: 4,
+    },
+    switchLabelRow: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 6 },
+    switchLabelInline: { fontSize: 15, color: c.text, fontWeight: '500' },
+    labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+    labelInline: { marginBottom: 0, flexShrink: 1 },
+    labelBold: { fontWeight: '700' },
+    labelNormal: { fontWeight: '400' },
+    formatHint: { fontSize: 12, color: c.textMuted, marginTop: -12, marginBottom: 16 },
+    sectionHeader: { fontSize: 16, fontWeight: '700', color: c.text, marginTop: 4, marginBottom: 10 },
+    formatCard: { marginBottom: 16 },
+    reglamentoBtn: { marginTop: 4, paddingVertical: 10, alignItems: 'center' },
+    reglamentoBtnTxt: { color: c.accent, fontWeight: '600', fontSize: 14 },
+    segmented: {
+      flexDirection: 'row',
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      overflow: 'hidden',
+      marginBottom: 16,
+    },
+    segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: c.card },
+    segmentSelected: { backgroundColor: c.accent },
+    segmentTxt: { fontSize: 16, color: c.text, fontWeight: '600' },
+    segmentTxtSelected: { color: c.onAccent },
+  });

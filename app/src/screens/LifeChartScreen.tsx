@@ -37,6 +37,12 @@ function chooseColors(colorsA: MtgColor[], colorsB: MtgColor[]): { a: string; b:
   return { a: COLOR_HEX[a], b: COLOR_HEX[b] };
 }
 
+/**
+ * GUARDA DE TEMA: esta pantalla queda SIEMPRE en su estilo claro, sin importar el modo global.
+ * No importar `useTheme`/`useThemedStyles`/ThemeContext acá. El aislamiento del header, del fondo
+ * del stack, de la barra de estado y del subárbol (p. ej. PlayerAvatar) está en `theme/lightLock.tsx`
+ * y se aplica en MainNavigator.
+ */
 export default function LifeChartScreen({ route }: Props) {
   const { matchId } = route.params;
   const [loading, setLoading] = useState(true);

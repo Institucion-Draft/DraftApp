@@ -43,6 +43,8 @@ import {
   type PodiumParticipantRow,
   type PodiumTiebreakGroupRow,
 } from '../lib/eventPodium';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 /** Igual que `styles.podiumCol.width`: ancho útil de la fila de avatares del step. */
 const PODIUM_COL_WIDTH = 132;
@@ -340,10 +342,6 @@ function computeMatchDmvt(turns: MatchTurnRow[], myPid: string, pa: string, pb: 
   return sum / valid.length;
 }
 
-const DMV_POS = '#10B981';
-const DMV_NEG = '#EF4444';
-const DMV_GRAY = '#6B7280';
-
 function parseEventMs(iso: string): number {
   return new Date(iso).getTime();
 }
@@ -402,11 +400,12 @@ function formatDmvCell(dmv: number | null): string {
   return rounded.toFixed(1);
 }
 
-function dmvCellColor(dmv: number | null): string {
-  if (dmv == null) return DMV_GRAY;
-  if (dmv > 1e-9) return DMV_POS;
-  if (dmv < -1e-9) return DMV_NEG;
-  return DMV_GRAY;
+/** Color del diferencial de vida ponderado (DMV) según su signo: positivo / negativo / neutro. */
+function dmvCellColor(dmv: number | null, colors: ThemeColors): string {
+  if (dmv == null) return colors.textSecondary;
+  if (dmv > 1e-9) return colors.status.success.solid;
+  if (dmv < -1e-9) return colors.status.error.solid;
+  return colors.textSecondary;
 }
 
 /** TMP en minutos para la tabla; cálculo interno sigue en segundos. */
@@ -478,6 +477,7 @@ function podiumStepAvatarSize(nInStep: number): PlayerAvatarSize {
 const PULSE_HALF_MS = 600;
 
 function PulsingLiveDot() {
+  const styles = useThemedStyles(createStyles);
   const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -510,6 +510,8 @@ type EventFooterStats = { torneo: string | null; bo3: Bo3Footer | null };
 const STC_ROW_H = 46;
 
 function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const winW = Dimensions.get('window').width;
   const totalW = Math.min(Math.max(winW - 24, 300), 540);
   const gap = Math.max(30, Math.round(totalW * 0.07));
@@ -633,10 +635,10 @@ function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
           >
-            <Path d={dLeftTop} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
-            <Path d={dLeftBot} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
-            <Path d={dRightTop} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
-            <Path d={dRightBot} stroke="#9CA3AF" strokeWidth={1.25} fill="none" />
+            <Path d={dLeftTop} stroke={colors.textMuted} strokeWidth={1.25} fill="none" />
+            <Path d={dLeftBot} stroke={colors.textMuted} strokeWidth={1.25} fill="none" />
+            <Path d={dRightTop} stroke={colors.textMuted} strokeWidth={1.25} fill="none" />
+            <Path d={dRightBot} stroke={colors.textMuted} strokeWidth={1.25} fill="none" />
           </Svg>
           <View style={[styles.tcBodyRow, { width: totalW }]}>
             {semiCard(model.semi1)}
@@ -661,6 +663,8 @@ function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
 }
 
 export default function StandingsScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { eventId, showPodiumIntro } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1500,7 +1504,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -1641,6 +1645,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       <View style={styles.podiumSection}>
         <View style={styles.podiumArena}>
           <View style={styles.podiumCenterRow}>
+            {/* Fondos del podio (plata/oro/bronce): contenido, iguales en ambos modos. */}
             {renderPedestalColumn(2, 90, '#D1D5DB')}
             {renderPedestalColumn(1, 124, '#FCD34D')}
             {renderPedestalColumn(3, 70, '#B45309')}
@@ -1816,7 +1821,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   style={[
                     styles.cell,
                     styles.dmvCol,
-                    { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv) },
+                    { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv, colors) },
                   ]}
                 >
                   {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
@@ -1965,245 +1970,247 @@ export default function StandingsScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  screenRoot: { flex: 1, backgroundColor: '#fff' },
-  swissChampionBanner: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-    alignItems: 'center',
-  },
-  swissChampionBannerText: { fontSize: 17, fontWeight: '800', color: '#111827', textAlign: 'center' },
-  confettiOverlay: {
-    ...StyleSheet.absoluteFill,
-    zIndex: 40,
-    elevation: 12,
-  },
-  podiumSection: { marginBottom: 18 },
-  podiumArena: {
-    minHeight: 168,
-    marginBottom: 4,
-    justifyContent: 'flex-end',
-  },
-  podiumCenterRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 4,
-  },
-  podiumCol: {
-    flexDirection: 'column',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    width: PODIUM_COL_WIDTH,
-  },
-  podiumAvatarArea: {
-    width: '100%',
-    justifyContent: 'flex-end',
-    alignItems: 'stretch',
-    minHeight: 112,
-    marginBottom: 2,
-  },
-  podiumAvatarSpacer: { minHeight: 112 },
-  podiumAvatarRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: PODIUM_AVATAR_ROW_GAP,
-    width: '100%',
-  },
-  podiumPlayerStack: { flexShrink: 0, alignItems: 'center' },
-  podiumAvatarCol: { flexDirection: 'column', alignItems: 'center' },
-  podiumCrownMark: { fontSize: 14, lineHeight: 16, marginBottom: 2 },
-  podiumStoolMark: { fontSize: 12, lineHeight: 14, marginTop: 2 },
-  podiumBaseBlock: {
-    width: '100%',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.12)',
-    marginTop: 2,
-  },
-  podiumBaseRank: {
-    fontSize: 34,
-    fontWeight: '900',
-    color: 'rgba(0,0,0,0.45)',
-  },
-  podiumBaseRankLight: {
-    color: '#FFFBEB',
-    textShadowColor: 'rgba(0,0,0,0.35)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 28 },
-  tabsRow: {
-    flexDirection: 'row',
-    marginBottom: 12,
-    marginTop: -4,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-  },
-  tabBtn: { marginRight: 22, paddingBottom: 4 },
-  tabLabel: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
-  tabLabelActive: { color: '#111827', fontWeight: '800' },
-  tabUnderline: { height: 2, backgroundColor: '#3B82F6', borderRadius: 1, marginTop: 6 },
-  tabUnderlineHidden: { backgroundColor: 'transparent' },
-  header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 8, marginBottom: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
-  rowLeftEvent: { opacity: 0.5 },
-  // Mismo tono que tcMatchRowWin (resaltado de ganador en el cuadro de mata-mata suizo), para
-  // que el fondo de "disputó el 4to puesto" se lea con intensidad consistente en toda la app.
-  rowFourthPlaceDispute: { backgroundColor: '#FEF3C7' },
-  rowContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  // La opacidad de "eliminado" va en el contenido, NUNCA en el contenedor que tiene el fondo
-  // amarillo (rowFourthPlaceDispute): opacity ahí compositaría el fondo contra lo que hay
-  // detrás de la fila, dando un amarillo más pálido/distinto en vez de la MISMA intensidad
-  // atenuada para todos los disputantes.
-  rowContentDimmed: { opacity: 0.5 },
-  cell: { textAlign: 'center', color: '#111', fontWeight: '700', fontSize: 12 },
-  tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
-  playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },
-  statCol: { width: 34, minWidth: 34, fontSize: 11 },
-  swissPctCol: { width: 44, minWidth: 44, fontSize: 10 },
-  dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
-  playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
-  standingsAvatar: { marginRight: 6 },
-  giantAvatarPairStandings: { flexDirection: 'row', alignItems: 'center', marginRight: 6 },
-  playerNameRow: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  playerNameInner: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  playerNameWithByeRow: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    flexShrink: 1,
-  },
-  playerName: { flex: 1, flexShrink: 1, color: '#111', fontSize: 12, fontWeight: '600' },
-  playerNameSwiss: { color: '#111', fontSize: 12, fontWeight: '600' },
-  byeLMark: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#DC2626',
-    marginLeft: 2,
-    marginTop: -2,
-  },
-  liveDotWrap: { justifyContent: 'center' },
-  liveDot: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
-  tourneyMeta: {
-    marginTop: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
-  },
-  tourneyMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  tourneyMetaLine: { color: '#111827', fontSize: 11, fontWeight: '700' },
-  tourneyMetaLeft: { flex: 1, flexGrow: 1, minWidth: 120, paddingRight: 6 },
-  tourneyMetaLeftSpacer: { flex: 1, minWidth: 0 },
-  tourneyMetaRight: { flexShrink: 1, textAlign: 'right', color: '#374151', fontSize: 11 },
-  tourneyMetaBo3Norm: { color: '#374151', fontWeight: '400' },
-  tourneyMetaBo3Bold: { color: '#374151', fontWeight: '700' },
-  tourneyMetaBo3Sep: { color: '#374151', fontWeight: '400' },
-  legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  legendStaticDot: { color: '#3B82F6', fontWeight: '700', fontSize: 11 },
-  legendLiveCaption: { color: '#6B7280', fontSize: 11 },
-  legendWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-    marginTop: 10,
-  },
-  legendSegment: { color: '#666', fontSize: 12, marginBottom: 4, marginRight: 4 },
-  legendFootnote: { marginTop: 8, color: '#666', fontSize: 12 },
-  tcSection: { marginTop: 22, marginBottom: 14, width: '100%', alignItems: 'center' },
-  tcBracketOuter: { marginTop: 4 },
-  tcHdrRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  tcHdrCol: { fontSize: 13, color: '#6B7280', fontWeight: '700', textAlign: 'center' },
-  tcBodyWrap: { position: 'relative' },
-  tcBodyRow: { flexDirection: 'row', alignItems: 'center', height: '100%', zIndex: 1 },
-  tcMatchCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-      },
-      android: { elevation: 2 },
-      default: {},
-    }),
-  },
-  tcMatchCardFinal: {
-    backgroundColor: '#FAFAFA',
-    borderWidth: 2,
-    borderColor: '#9CA3AF',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 5,
-      },
-      android: { elevation: 3 },
-      default: {},
-    }),
-  },
-  tcMatchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: STC_ROW_H,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    gap: 8,
-  },
-  tcMatchRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  tcMatchRowWin: {
-    backgroundColor: '#FEF3C7',
-    borderLeftWidth: 4,
-    borderLeftColor: '#D97706',
-  },
-  tcMatchRowLose: { opacity: 0.45 },
-  tcMatchName: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  tcMatchNamePh: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  tcPhAvatarSm: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#E5E7EB' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screenRoot: { flex: 1, backgroundColor: c.background },
+    swissChampionBanner: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'center',
+    },
+    swissChampionBannerText: { fontSize: 17, fontWeight: '800', color: c.text, textAlign: 'center' },
+    confettiOverlay: {
+      ...StyleSheet.absoluteFill,
+      zIndex: 40,
+      elevation: 12,
+    },
+    podiumSection: { marginBottom: 18 },
+    podiumArena: {
+      minHeight: 168,
+      marginBottom: 4,
+      justifyContent: 'flex-end',
+    },
+    podiumCenterRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      gap: 10,
+      paddingHorizontal: 4,
+    },
+    podiumCol: {
+      flexDirection: 'column',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      width: PODIUM_COL_WIDTH,
+    },
+    podiumAvatarArea: {
+      width: '100%',
+      justifyContent: 'flex-end',
+      alignItems: 'stretch',
+      minHeight: 112,
+      marginBottom: 2,
+    },
+    podiumAvatarSpacer: { minHeight: 112 },
+    podiumAvatarRow: {
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+      gap: PODIUM_AVATAR_ROW_GAP,
+      width: '100%',
+    },
+    podiumPlayerStack: { flexShrink: 0, alignItems: 'center' },
+    podiumAvatarCol: { flexDirection: 'column', alignItems: 'center' },
+    podiumCrownMark: { fontSize: 14, lineHeight: 16, marginBottom: 2 },
+    podiumStoolMark: { fontSize: 12, lineHeight: 14, marginTop: 2 },
+    // Peldaños del podio y su numeral: colores de contenido (oro/plata/bronce), fijos en ambos modos.
+    podiumBaseBlock: {
+      width: '100%',
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(0,0,0,0.12)',
+      marginTop: 2,
+    },
+    podiumBaseRank: {
+      fontSize: 34,
+      fontWeight: '900',
+      color: 'rgba(0,0,0,0.45)',
+    },
+    podiumBaseRankLight: {
+      color: '#FFFBEB',
+      textShadowColor: 'rgba(0,0,0,0.35)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
+    },
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 16, paddingBottom: 28 },
+    tabsRow: {
+      flexDirection: 'row',
+      marginBottom: 12,
+      marginTop: -4,
+      paddingBottom: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    tabBtn: { marginRight: 22, paddingBottom: 4 },
+    tabLabel: { fontSize: 15, fontWeight: '600', color: c.textSecondary },
+    tabLabelActive: { color: c.text, fontWeight: '800' },
+    tabUnderline: { height: 2, backgroundColor: c.accent, borderRadius: 1, marginTop: 6 },
+    tabUnderlineHidden: { backgroundColor: 'transparent' },
+    header: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: c.border, paddingBottom: 8, marginBottom: 8 },
+    row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider },
+    rowLeftEvent: { opacity: 0.5 },
+    // Mismo tono que tcMatchRowWin (resaltado de ganador en el cuadro de mata-mata suizo), para
+    // que el fondo de "disputó el 4to puesto" se lea con intensidad consistente en toda la app.
+    rowFourthPlaceDispute: { backgroundColor: c.status.warning.subtle },
+    rowContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    // La opacidad de "eliminado" va en el contenido, NUNCA en el contenedor que tiene el fondo
+    // amarillo (rowFourthPlaceDispute): opacity ahí compositaría el fondo contra lo que hay
+    // detrás de la fila, dando un amarillo más pálido/distinto en vez de la MISMA intensidad
+    // atenuada para todos los disputantes.
+    rowContentDimmed: { opacity: 0.5 },
+    cell: { textAlign: 'center', color: c.text, fontWeight: '700', fontSize: 12 },
+    tmpCol: { width: 50, minWidth: 50, fontSize: 10 },
+    playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },
+    statCol: { width: 34, minWidth: 34, fontSize: 11 },
+    swissPctCol: { width: 44, minWidth: 44, fontSize: 10 },
+    dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
+    playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
+    standingsAvatar: { marginRight: 6 },
+    giantAvatarPairStandings: { flexDirection: 'row', alignItems: 'center', marginRight: 6 },
+    playerNameRow: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    playerNameInner: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
+    playerNameWithByeRow: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      flexShrink: 1,
+    },
+    playerName: { flex: 1, flexShrink: 1, color: c.text, fontSize: 12, fontWeight: '600' },
+    playerNameSwiss: { color: c.text, fontSize: 12, fontWeight: '600' },
+    byeLMark: {
+      fontSize: 9,
+      fontWeight: '800',
+      color: c.status.error.solid,
+      marginLeft: 2,
+      marginTop: -2,
+    },
+    liveDotWrap: { justifyContent: 'center' },
+    liveDot: { color: c.accent, fontWeight: '700', fontSize: 12 },
+    tourneyMeta: {
+      marginTop: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      backgroundColor: c.backgroundAlt,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    tourneyMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    tourneyMetaLine: { color: c.text, fontSize: 11, fontWeight: '700' },
+    tourneyMetaLeft: { flex: 1, flexGrow: 1, minWidth: 120, paddingRight: 6 },
+    tourneyMetaLeftSpacer: { flex: 1, minWidth: 0 },
+    tourneyMetaRight: { flexShrink: 1, textAlign: 'right', color: c.textBody, fontSize: 11 },
+    tourneyMetaBo3Norm: { color: c.textBody, fontWeight: '400' },
+    tourneyMetaBo3Bold: { color: c.textBody, fontWeight: '700' },
+    tourneyMetaBo3Sep: { color: c.textBody, fontWeight: '400' },
+    legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+    legendStaticDot: { color: c.accent, fontWeight: '700', fontSize: 11 },
+    legendLiveCaption: { color: c.textSecondary, fontSize: 11 },
+    legendWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
+      marginTop: 10,
+    },
+    legendSegment: { color: c.textSecondary, fontSize: 12, marginBottom: 4, marginRight: 4 },
+    legendFootnote: { marginTop: 8, color: c.textSecondary, fontSize: 12 },
+    tcSection: { marginTop: 22, marginBottom: 14, width: '100%', alignItems: 'center' },
+    tcBracketOuter: { marginTop: 4 },
+    tcHdrRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    tcHdrCol: { fontSize: 13, color: c.textSecondary, fontWeight: '700', textAlign: 'center' },
+    tcBodyWrap: { position: 'relative' },
+    tcBodyRow: { flexDirection: 'row', alignItems: 'center', height: '100%', zIndex: 1 },
+    tcMatchCard: {
+      backgroundColor: c.background,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: {
+          shadowColor: c.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.08,
+          shadowRadius: 4,
+        },
+        android: { elevation: 2 },
+        default: {},
+      }),
+    },
+    tcMatchCardFinal: {
+      backgroundColor: c.card,
+      borderWidth: 2,
+      borderColor: c.textMuted,
+      ...Platform.select({
+        ios: {
+          shadowColor: c.shadow,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 5,
+        },
+        android: { elevation: 3 },
+        default: {},
+      }),
+    },
+    tcMatchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: STC_ROW_H,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      gap: 8,
+    },
+    tcMatchRowBorder: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    tcMatchRowWin: {
+      backgroundColor: c.status.warning.subtle,
+      borderLeftWidth: 4,
+      borderLeftColor: c.status.warning.solid,
+    },
+    tcMatchRowLose: { opacity: 0.45 },
+    tcMatchName: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.text,
+    },
+    tcMatchNamePh: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.textSecondary,
+    },
+    tcPhAvatarSm: { width: 32, height: 32, borderRadius: 16, backgroundColor: c.border },
+  });

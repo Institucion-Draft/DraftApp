@@ -19,6 +19,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { useCanManageEvent } from '../hooks/useCanManageEvent';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
@@ -79,6 +81,8 @@ function pick(title: string, opts: { label: string; onPress: () => void }[]) {
 }
 
 export default function EditEventScreen({ route, navigation }: Props) {
+  const { mode, colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { eventId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -412,7 +416,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -553,6 +557,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
           <DateTimePicker
             value={scheduledFor}
             mode="datetime"
+            themeVariant={mode}
             onChange={(_, d) => {
               if (d) setScheduledFor(d);
             }}
@@ -623,7 +628,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         onPress={() => void onSave()}
         disabled={submitting || !hasDirtyFields}
       >
-        {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnTxt}>Guardar</Text>}
+        {submitting ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryBtnTxt}>Guardar</Text>}
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.deleteBtn} onPress={onDelete} disabled={submitting}>
@@ -633,99 +638,101 @@ export default function EditEventScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 40 },
-  label: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fafafa',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  pickerBtn: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#fafafa',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  pickerBtnDisabled: {
-    backgroundColor: '#E5E7EB',
-    borderColor: '#D1D5DB',
-  },
-  pickerTxt: { fontSize: 16, color: '#111' },
-  pickerTxtMuted: { color: '#6B7280' },
-  readOnlyHint: { fontSize: 12, color: '#9CA3AF', marginTop: 4, marginBottom: 16 },
-  topcutLockedHint: { fontSize: 12, color: '#9CA3AF', marginBottom: 16 },
-  labelMuted: { color: '#6B7280' },
-  forceEditBlock: { marginBottom: 8 },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 12,
-    paddingVertical: 4,
-  },
-  switchLabel: { flex: 1, fontSize: 15, color: '#374151', fontWeight: '500' },
-  sandboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginBottom: 20,
-  },
-  sandboxLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  turnTrackingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  turnTrackingLabel: { flex: 1, fontSize: 15, color: '#111', fontWeight: '500', marginRight: 12 },
-  forceEditHint: {
-    fontSize: 13,
-    color: '#6B7280',
-    lineHeight: 18,
-    marginBottom: 12,
-  },
-  notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
-  counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
-  iosPickerWrap: { marginBottom: 12 },
-  iosDone: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 },
-  iosDoneTxt: { color: '#3B82F6', fontWeight: '600', fontSize: 16 },
-  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
-  primaryBtnDisabled: { backgroundColor: '#9CA3AF' },
-  noChangesHint: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', marginBottom: 10 },
-  primaryBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  deleteBtn: {
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  deleteTxt: { color: '#DC2626', fontWeight: '600', fontSize: 15 },
-  segmented: {
-    flexDirection: 'row',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#fafafa' },
-  segmentSelected: { backgroundColor: '#3B82F6' },
-  segmentTxt: { fontSize: 16, color: '#111', fontWeight: '600' },
-  segmentTxtSelected: { color: '#fff' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 40 },
+    label: { fontSize: 15, fontWeight: '600', color: c.text, marginBottom: 8 },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      backgroundColor: c.card,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      color: c.text,
+      marginBottom: 16,
+    },
+    pickerBtn: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      backgroundColor: c.card,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      marginBottom: 16,
+    },
+    pickerBtnDisabled: {
+      backgroundColor: c.border,
+      borderColor: c.borderStrong,
+    },
+    pickerTxt: { fontSize: 16, color: c.text },
+    pickerTxtMuted: { color: c.textSecondary },
+    readOnlyHint: { fontSize: 12, color: c.textMuted, marginTop: 4, marginBottom: 16 },
+    topcutLockedHint: { fontSize: 12, color: c.textMuted, marginBottom: 16 },
+    labelMuted: { color: c.textSecondary },
+    forceEditBlock: { marginBottom: 8 },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginBottom: 12,
+      paddingVertical: 4,
+    },
+    switchLabel: { flex: 1, fontSize: 15, color: c.textBody, fontWeight: '500' },
+    sandboxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 10,
+      marginBottom: 20,
+    },
+    sandboxLabel: { fontSize: 14, color: c.textSecondary, fontWeight: '500' },
+    turnTrackingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 16,
+    },
+    turnTrackingLabel: { flex: 1, fontSize: 15, color: c.text, fontWeight: '500', marginRight: 12 },
+    forceEditHint: {
+      fontSize: 13,
+      color: c.textSecondary,
+      lineHeight: 18,
+      marginBottom: 12,
+    },
+    notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
+    counter: { textAlign: 'right', color: c.textMuted, fontSize: 12, marginBottom: 20 },
+    iosPickerWrap: { marginBottom: 12 },
+    iosDone: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 },
+    iosDoneTxt: { color: c.accent, fontWeight: '600', fontSize: 16 },
+    primaryBtn: { backgroundColor: c.accent, borderRadius: 8, alignItems: 'center', paddingVertical: 14 },
+    primaryBtnDisabled: { backgroundColor: c.textMuted },
+    noChangesHint: { fontSize: 13, color: c.textMuted, textAlign: 'center', marginBottom: 10 },
+    primaryBtnTxt: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    deleteBtn: {
+      marginTop: 20,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+      backgroundColor: c.status.error.subtle,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    deleteTxt: { color: c.status.error.solid, fontWeight: '600', fontSize: 15 },
+    segmented: {
+      flexDirection: 'row',
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      overflow: 'hidden',
+      marginBottom: 16,
+    },
+    segment: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: c.card },
+    segmentSelected: { backgroundColor: c.accent },
+    segmentTxt: { fontSize: 16, color: c.text, fontWeight: '600' },
+    segmentTxtSelected: { color: c.onAccent },
+  });

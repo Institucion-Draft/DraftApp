@@ -21,6 +21,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'GenerateInvite'>;
 
@@ -52,6 +54,8 @@ type InviteRow = {
 };
 
 export default function GenerateInviteScreen({ route, navigation }: Props) {
+  const { mode, colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -246,7 +250,7 @@ export default function GenerateInviteScreen({ route, navigation }: Props) {
       <TextInput
         style={styles.input}
         placeholder="Ej.: 10"
-        placeholderTextColor="#999"
+        placeholderTextColor={colors.textMuted}
         value={maxUsesText}
         onChangeText={setMaxUsesText}
         keyboardType="number-pad"
@@ -287,6 +291,7 @@ export default function GenerateInviteScreen({ route, navigation }: Props) {
           <DateTimePicker
             value={expiresAt ?? new Date()}
             mode="date"
+            themeVariant={mode}
             display="spinner"
             minimumDate={new Date()}
             onChange={(_event, date) => {
@@ -310,7 +315,7 @@ export default function GenerateInviteScreen({ route, navigation }: Props) {
         disabled={submitting}
       >
         {submitting ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.onAccent} />
         ) : (
           <Text style={styles.primaryBtnText}>Generar código</Text>
         )}
@@ -365,176 +370,178 @@ export default function GenerateInviteScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  scrollContent: {
-    padding: 24,
-    paddingBottom: 40,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 6,
-  },
-  hint: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 8,
-    lineHeight: 18,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    marginBottom: 20,
-    backgroundColor: '#fafafa',
-  },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginBottom: 20,
-  },
-  datePreview: {
-    flex: 1,
-    minWidth: 120,
-    fontSize: 15,
-    color: '#111',
-  },
-  dateBtn: {
-    backgroundColor: '#EFF6FF',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    marginRight: 8,
-  },
-  dateBtnText: {
-    color: '#3B82F6',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  clearDateBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-  },
-  clearDateText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  iosPickerWrap: {
-    marginBottom: 16,
-  },
-  iosPickerDone: {
-    alignSelf: 'flex-end',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  iosPickerDoneText: {
-    color: '#3B82F6',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  primaryBtn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  primaryBtnDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  codeBox: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  codeLabel: {
-    fontSize: 14,
-    color: '#166534',
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  codeBig: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 4,
-    color: '#111',
-    marginBottom: 16,
-  },
-  copyBtn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  copyBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 12,
-  },
-  muted: {
-    fontSize: 14,
-    color: '#666',
-  },
-  inviteCard: {
-    backgroundColor: '#fafafa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
-    padding: 14,
-    marginBottom: 12,
-  },
-  inviteCode: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
-    letterSpacing: 2,
-    marginBottom: 6,
-  },
-  inviteMeta: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 4,
-  },
-  revokeBtn: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-    backgroundColor: '#FEE2E2',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  revokeBtnText: {
-    color: '#DC2626',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    scroll: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scrollContent: {
+      padding: 24,
+      paddingBottom: 40,
+    },
+    label: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 6,
+    },
+    hint: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginBottom: 8,
+      lineHeight: 18,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      marginBottom: 20,
+      backgroundColor: c.card,
+      color: c.text,
+    },
+    dateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: 20,
+    },
+    datePreview: {
+      flex: 1,
+      minWidth: 120,
+      fontSize: 15,
+      color: c.text,
+    },
+    dateBtn: {
+      backgroundColor: c.status.info.subtle,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.status.info.border,
+      marginRight: 8,
+    },
+    dateBtnText: {
+      color: c.accent,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    clearDateBtn: {
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+    },
+    clearDateText: {
+      color: c.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    iosPickerWrap: {
+      marginBottom: 16,
+    },
+    iosPickerDone: {
+      alignSelf: 'flex-end',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+    },
+    iosPickerDoneText: {
+      color: c.accent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    primaryBtn: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    primaryBtnDisabled: {
+      backgroundColor: c.textMuted,
+    },
+    primaryBtnText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    codeBox: {
+      backgroundColor: c.status.success.subtle,
+      borderWidth: 1,
+      borderColor: c.status.success.border,
+      borderRadius: 12,
+      padding: 20,
+      marginBottom: 24,
+      alignItems: 'center',
+    },
+    codeLabel: {
+      fontSize: 14,
+      color: c.status.success.text,
+      marginBottom: 8,
+      fontWeight: '600',
+    },
+    codeBig: {
+      fontSize: 28,
+      fontWeight: '800',
+      letterSpacing: 4,
+      color: c.text,
+      marginBottom: 16,
+    },
+    copyBtn: {
+      backgroundColor: c.accent,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+    },
+    copyBtnText: {
+      color: c.onAccent,
+      fontWeight: '600',
+      fontSize: 15,
+    },
+    sectionTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 12,
+    },
+    muted: {
+      fontSize: 14,
+      color: c.textSecondary,
+    },
+    inviteCard: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.divider,
+      padding: 14,
+      marginBottom: 12,
+    },
+    inviteCode: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: c.text,
+      letterSpacing: 2,
+      marginBottom: 6,
+    },
+    inviteMeta: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginBottom: 4,
+    },
+    revokeBtn: {
+      marginTop: 10,
+      alignSelf: 'flex-start',
+      backgroundColor: c.status.error.subtle,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+    },
+    revokeBtnText: {
+      color: c.status.error.solid,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+  });

@@ -17,6 +17,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import { expireStalePresence, splitPresenceByCooldown } from '../lib/playgroundPresence';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeMatches'>;
 
@@ -65,6 +67,8 @@ function buildPairs(rows: PresenceRow[], currentUserId: string | undefined): Pai
 }
 
 export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   const { user } = useAuth();
   const [pairs, setPairs] = useState<Pair[]>([]);
@@ -126,7 +130,7 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -197,38 +201,39 @@ export default function ContextFreeMatchesScreen({ navigation, route }: Props) {
 
 const AVATAR_SIZE = 36;
 
-const styles = StyleSheet.create({
-  list: { flex: 1, backgroundColor: '#fff' },
-  listContent: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  empty: {
-    fontSize: 15,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    paddingTop: 40,
-    paddingHorizontal: 32,
-  },
-  card: {
-    backgroundColor: '#fafafa',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  compactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
-  inlinePlayerRight: { justifyContent: 'flex-end' },
-  avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 },
-  avatarPh: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: '#E5E7EB',
-  },
-  name: { fontSize: 12, color: '#111', fontWeight: '700', flexShrink: 1 },
-  nameRight: { fontSize: 12, color: '#111', fontWeight: '700', textAlign: 'right', flexShrink: 1 },
-  vsWrap: { minWidth: 40, alignItems: 'center' },
-  vs: { color: '#6B7280', fontWeight: '700', fontSize: 13 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    list: { flex: 1, backgroundColor: c.background },
+    listContent: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 32 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    empty: {
+      fontSize: 15,
+      color: c.textMuted,
+      textAlign: 'center',
+      paddingTop: 40,
+      paddingHorizontal: 32,
+    },
+    card: {
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginBottom: 8,
+    },
+    compactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+    inlinePlayerRight: { justifyContent: 'flex-end' },
+    avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 },
+    avatarPh: {
+      width: AVATAR_SIZE,
+      height: AVATAR_SIZE,
+      borderRadius: AVATAR_SIZE / 2,
+      backgroundColor: c.border,
+    },
+    name: { fontSize: 12, color: c.text, fontWeight: '700', flexShrink: 1 },
+    nameRight: { fontSize: 12, color: c.text, fontWeight: '700', textAlign: 'right', flexShrink: 1 },
+    vsWrap: { minWidth: 40, alignItems: 'center' },
+    vs: { color: c.textSecondary, fontWeight: '700', fontSize: 13 },
+  });

@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from './ColorFlag';
+import { useTheme } from '../theme';
 
 export type PlayerAvatarSize = 'tiny' | 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -18,12 +19,20 @@ const SIZE_PT: Record<PlayerAvatarSize, number> = {
 
 const CORNER_RATIO = 0.15;
 
+/** Anillo neutro (jugador sin colores declarados): es contenido del anillo, igual en ambos modos. */
 const NEUTRAL_BORDER = '#9CA3AF';
-const PLACEHOLDER_BG = '#9CA3AF';
-/** Contorno fino del anillo de colores (visible sobre W/C y fondos claros). */
-const RING_OUTLINE = '#1F2937';
+/**
+ * Contorno fino del anillo de colores: toma `colors.text` del tema (oscuro en claro, para que W/C se
+ * vean; claro en oscuro, para que el anillo B no se pierda contra el fondo).
+ * Nota: el fondo #f3f4f6 detrás del sprite de Pokémon (`spriteFrame` y su `Image`) es FIJO en ambos
+ * modos a propósito: los sprites están dibujados para fondo claro.
+ */
 const RING_OUTLINE_W = 1;
 
+/**
+ * Color de identidad del jugador fuera de eventos (se elige por hash del userId): es contenido, no UI
+ * de tema, así que es igual en ambos modos (la inicial blanca `phText` contrasta sobre todos).
+ */
 const OUTSIDE_EVENT_PALETTE = [
   '#4F46E5',
   '#2563EB',
@@ -250,6 +259,7 @@ export default function PlayerAvatar({
   memberColors,
   isMemberB = false,
 }: Props) {
+  const { colors } = useTheme();
   const diameter = SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
   const outer = diameter + 2 * bw;
@@ -519,7 +529,7 @@ export default function PlayerAvatar({
           rx={outerRingOutlineRx}
           ry={outerRingOutlineRx}
           fill="none"
-          stroke={RING_OUTLINE}
+          stroke={colors.text}
           strokeWidth={RING_OUTLINE_W}
         />
       ) : null}
@@ -542,7 +552,7 @@ export default function PlayerAvatar({
             ...(bw > 0
               ? {
                   borderWidth: RING_OUTLINE_W,
-                  borderColor: RING_OUTLINE,
+                  borderColor: colors.text,
                 }
               : {}),
           },
@@ -556,7 +566,7 @@ export default function PlayerAvatar({
                 width: diameter,
                 height: diameter,
                 borderRadius: rInner,
-                backgroundColor: outsideEvent ? outsidePhBg : PLACEHOLDER_BG,
+                backgroundColor: outsideEvent ? outsidePhBg : colors.textMuted,
               },
             ]}
           >

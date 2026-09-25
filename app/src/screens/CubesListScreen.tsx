@@ -16,6 +16,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubesList'>;
 
@@ -29,6 +31,8 @@ type CubeRow = {
 };
 
 export default function CubesListScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -163,7 +167,7 @@ export default function CubesListScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -191,38 +195,39 @@ export default function CubesListScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  primaryBtn: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  listWrap: { padding: 16, paddingBottom: 30 },
-  emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  empty: { color: '#666', fontSize: 15 },
-  card: {
-    backgroundColor: '#fafafa',
-    borderColor: '#eee',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-  },
-  row: { flexDirection: 'row', alignItems: 'flex-start' },
-  avatar: { width: 48, height: 48, borderRadius: 10, backgroundColor: '#f3f4f6', marginRight: 12 },
-  avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E0E7FF' },
-  avatarTxt: { fontSize: 18, fontWeight: '700', color: '#4338CA' },
-  body: { flex: 1, minWidth: 0 },
-  name: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 4 },
-  meta: { fontSize: 13, color: '#666', marginBottom: 2 },
-  link: { fontSize: 13, color: '#3B82F6', marginTop: 4 },
-  actions: { flexDirection: 'row', marginLeft: 8 },
-  iconBtn: { paddingHorizontal: 6, paddingVertical: 2 },
-  iconTxt: { fontSize: 16 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    primaryBtn: {
+      marginHorizontal: 16,
+      marginTop: 12,
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    primaryBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    listWrap: { padding: 16, paddingBottom: 30 },
+    emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+    empty: { color: c.textSecondary, fontSize: 15 },
+    card: {
+      backgroundColor: c.card,
+      borderColor: c.divider,
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+    },
+    row: { flexDirection: 'row', alignItems: 'flex-start' },
+    avatar: { width: 48, height: 48, borderRadius: 10, backgroundColor: c.backgroundAlt, marginRight: 12 },
+    avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: c.status.info.subtle },
+    avatarTxt: { fontSize: 18, fontWeight: '700', color: c.status.info.text },
+    body: { flex: 1, minWidth: 0 },
+    name: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 4 },
+    meta: { fontSize: 13, color: c.textSecondary, marginBottom: 2 },
+    link: { fontSize: 13, color: c.accent, marginTop: 4 },
+    actions: { flexDirection: 'row', marginLeft: 8 },
+    iconBtn: { paddingHorizontal: 6, paddingVertical: 2 },
+    iconTxt: { fontSize: 16 },
+  });

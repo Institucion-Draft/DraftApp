@@ -25,6 +25,8 @@ import {
   clearTimerSession,
 } from '../lib/draftTimerStore';
 import { generateEventPairings } from '../lib/generateEventPairings';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'DraftTimer'>;
 type Phase = 'loading' | 'waiting' | 'counting' | 'done';
@@ -34,16 +36,28 @@ const CARD_W = 12;
 const CARD_H = 18;
 const CARD_GAP = 3;
 const CARD_RADIUS = 2;
-const CARD_EMPTY = '#E5E7EB';
 
+/**
+ * Colores de acento que elige el organizador (`timer_color`): contenido/diseño elegido, FIJOS en
+ * ambos modos. El texto sobre ellos es siempre blanco. La excepción es 'black' (ver `resolveAccent`).
+ */
 const ACCENT_COLORS: Record<string, string> = {
   blue:   '#3B82F6',
   green:  '#10B981',
   orange: '#F97316',
   red:    '#EF4444',
   purple: '#8B5CF6',
-  black:  '#1F2937',
 };
+
+/**
+ * 'black' es "tinta": toma los colores del tema (fondo = `text`, texto = `background`), así que en
+ * claro es casi negro con texto blanco y en oscuro pasa a gris claro con texto oscuro (un botón
+ * #1F2937 sobre el fondo oscuro no se vería).
+ */
+function resolveAccent(timerColor: string, colors: ThemeColors): { bg: string; fg: string } {
+  if (timerColor === 'black') return { bg: colors.text, fg: colors.background };
+  return { bg: ACCENT_COLORS[timerColor] ?? '#3B82F6', fg: '#ffffff' };
+}
 
 function PackPanel({
   packs,
@@ -56,6 +70,7 @@ function PackPanel({
   completedInCurrentPack: number;
   accentColor: string;
 }) {
+  const panelStyles = useThemedStyles(createPanelStyles);
   return (
     <View style={panelStyles.container}>
       {packs.map((packSize, s) => {
@@ -105,45 +120,47 @@ function PackPanel({
   );
 }
 
-const panelStyles = StyleSheet.create({
-  container: { gap: 6 },
-  packRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 8,
-    backgroundColor: '#FAFAFA',
-    opacity: 0.5,
-  },
-  packRowActive: {
-    borderColor: '#3B82F6',
-    borderWidth: 2,
-    backgroundColor: '#EFF6FF',
-    opacity: 1,
-  },
-  packRowDone: {
-    borderColor: '#D1D5DB',
-    backgroundColor: '#F3F4F6',
-    opacity: 0.7,
-  },
-  packMeta: { width: 36, alignItems: 'center', paddingTop: 2 },
-  packLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
-  packLabelDone: { color: '#059669' },
-  packCount: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
-  packCountDone: { color: '#6B7280' },
-  cardsWrap: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP },
-  card: {
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: CARD_RADIUS,
-  },
-  cardFilled: { backgroundColor: '#C8A96E' },
-  cardDone: { backgroundColor: '#9CA3AF' },
-  cardEmpty: { backgroundColor: CARD_EMPTY, borderWidth: 1, borderColor: '#D1D5DB' },
-});
+const createPanelStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { gap: 6 },
+    packRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      padding: 8,
+      backgroundColor: c.card,
+      opacity: 0.5,
+    },
+    packRowActive: {
+      borderColor: c.accent,
+      borderWidth: 2,
+      backgroundColor: c.status.info.subtle,
+      opacity: 1,
+    },
+    packRowDone: {
+      borderColor: c.borderStrong,
+      backgroundColor: c.backgroundAlt,
+      opacity: 0.7,
+    },
+    packMeta: { width: 36, alignItems: 'center', paddingTop: 2 },
+    packLabel: { fontSize: 12, fontWeight: '700', color: c.textBody },
+    packLabelDone: { color: c.status.success.text },
+    packCount: { fontSize: 10, color: c.textMuted, marginTop: 2 },
+    packCountDone: { color: c.textSecondary },
+    cardsWrap: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP },
+    card: {
+      width: CARD_W,
+      height: CARD_H,
+      borderRadius: CARD_RADIUS,
+    },
+    // Sin uso hoy (dorado fijo).
+    cardFilled: { backgroundColor: '#C8A96E' },
+    cardDone: { backgroundColor: c.textMuted },
+    cardEmpty: { backgroundColor: c.border, borderWidth: 1, borderColor: c.borderStrong },
+  });
 
 function formatElapsed(sec: number): string {
   if (sec < 60) return `${sec}s`;
@@ -159,6 +176,8 @@ function formatElapsed(sec: number): string {
 }
 
 export default function DraftTimerScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   useKeepAwake();
   const { eventId } = route.params;
 
@@ -457,7 +476,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   if (phase === 'loading') {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -472,10 +491,12 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const completedInCurrentPack = phase === 'done' ? packSize : (pickInPack - 1);
   const displayPackIdx = phase === 'done' ? packs.length : packIdx;
 
-  const accentColor = ACCENT_COLORS[timerColor] ?? '#3B82F6';
+  const { bg: accentColor, fg: accentText } = resolveAccent(timerColor, colors);
 
   const flashBg = flashAnim.interpolate({
     inputRange: [0, 1],
+    // Destello rojo de "se acabó el tiempo": señal de urgencia fija en ambos modos. Arranca
+    // transparente (deja ver el fondo del tema).
     outputRange: ['rgba(254,242,242,0)', 'rgba(239,68,68,0.35)'],
   });
 
@@ -503,13 +524,13 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
         activeOpacity={0.8}
       >
         {phase === 'waiting' ? (
-          <Text style={[styles.bigBtnTxt, styles.countdownTxt]}>{secondsLeft}s</Text>
+          <Text style={[styles.bigBtnTxt, { color: accentText }, styles.countdownTxt]}>{secondsLeft}s</Text>
         ) : phase === 'done' ? (
-          <Text style={styles.bigBtnTxt}>Volver al evento</Text>
+          <Text style={[styles.bigBtnTxt, { color: accentText }]}>Volver al evento</Text>
         ) : paused ? (
-          <Text style={styles.bigBtnTxt}>Reanudar</Text>
+          <Text style={[styles.bigBtnTxt, { color: accentText }]}>Reanudar</Text>
         ) : (
-          <Text style={[styles.bigBtnTxt, styles.countdownTxt]}>{secondsLeft}s</Text>
+          <Text style={[styles.bigBtnTxt, { color: accentText }, styles.countdownTxt]}>{secondsLeft}s</Text>
         )}
       </TouchableOpacity>
 
@@ -533,43 +554,44 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, padding: 20, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', padding: 24 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  backLink: { color: '#3B82F6', fontSize: 16, fontWeight: '600' },
-  titleBlock: { alignItems: 'center', marginBottom: 20 },
-  elapsedTime: { fontSize: 11, color: '#C0C8D8', marginBottom: 4 },
-  packTitle: { fontSize: 22, fontWeight: '800', color: '#111', textAlign: 'center' },
-  globalPick: { fontSize: 13, color: '#9CA3AF', marginTop: 4 },
-  bigBtn: {
-    alignSelf: 'center',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-  },
-  bigBtnTxt: { color: '#fff', fontSize: 20, fontWeight: '800', textAlign: 'center' },
-  countdownTxt: { fontSize: 48 },
-  skipBtn: {
-    alignSelf: 'center',
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1.5,
-    borderColor: '#BFDBFE',
-    borderRadius: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 32,
-    marginBottom: 10,
-  },
-  skipBtnTxt: { color: '#1D4ED8', fontSize: 16, fontWeight: '700' },
-  progressCount: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginBottom: 10 },
-  panelScroll: { flex: 1 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    root: { flex: 1, padding: 20, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background, padding: 24 },
+    topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+    backLink: { color: c.accent, fontSize: 16, fontWeight: '600' },
+    titleBlock: { alignItems: 'center', marginBottom: 20 },
+    elapsedTime: { fontSize: 11, color: c.textMuted, marginBottom: 4 },
+    packTitle: { fontSize: 22, fontWeight: '800', color: c.text, textAlign: 'center' },
+    globalPick: { fontSize: 13, color: c.textMuted, marginTop: 4 },
+    bigBtn: {
+      alignSelf: 'center',
+      width: 180,
+      height: 180,
+      borderRadius: 90,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+      elevation: 4,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18,
+      shadowRadius: 4,
+    },
+    bigBtnTxt: { fontSize: 20, fontWeight: '800', textAlign: 'center' },
+    countdownTxt: { fontSize: 48 },
+    skipBtn: {
+      alignSelf: 'center',
+      backgroundColor: c.status.info.subtle,
+      borderWidth: 1.5,
+      borderColor: c.status.info.border,
+      borderRadius: 10,
+      paddingVertical: 11,
+      paddingHorizontal: 32,
+      marginBottom: 10,
+    },
+    skipBtnTxt: { color: c.status.info.text, fontSize: 16, fontWeight: '700' },
+    progressCount: { fontSize: 12, color: c.textMuted, textAlign: 'center', marginBottom: 10 },
+    panelScroll: { flex: 1 },
+  });

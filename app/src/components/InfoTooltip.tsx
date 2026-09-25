@@ -1,5 +1,7 @@
 import React from 'react';
 import { Alert, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = {
   title: string;
@@ -7,6 +9,7 @@ type Props = {
 };
 
 export default function InfoTooltip({ title, body }: Props) {
+  const styles = useThemedStyles(createStyles);
   return (
     <TouchableOpacity
       style={styles.btn}
@@ -18,7 +21,8 @@ export default function InfoTooltip({ title, body }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  btn: { paddingHorizontal: 2 },
-  icon: { fontSize: 16, color: '#6B7280', fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    btn: { paddingHorizontal: 2 },
+    icon: { fontSize: 16, color: c.textSecondary, fontWeight: '600' },
+  });

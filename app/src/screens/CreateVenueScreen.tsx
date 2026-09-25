@@ -16,10 +16,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateVenue'>;
 
 export default function CreateVenueScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -70,40 +74,42 @@ export default function CreateVenueScreen({ route, navigation }: Props) {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Nombre</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={60} placeholder="Nombre de la sede" />
+        <TextInput placeholderTextColor={colors.textMuted} style={styles.input} value={name} onChangeText={setName} maxLength={60} placeholder="Nombre de la sede" />
 
         <Text style={styles.label}>Dirección (opcional)</Text>
-        <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="Dirección o referencia" />
+        <TextInput placeholderTextColor={colors.textMuted} style={styles.input} value={address} onChangeText={setAddress} placeholder="Dirección o referencia" />
 
         <Text style={styles.label}>Notas (opcional)</Text>
-        <TextInput style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={1000} />
+        <TextInput placeholderTextColor={colors.textMuted} style={[styles.input, styles.notes]} value={notes} onChangeText={setNotes} multiline maxLength={1000} />
         <Text style={styles.counter}>{notes.length}/1000</Text>
 
         <TouchableOpacity style={[styles.btn, submitting && styles.btnDisabled]} disabled={submitting} onPress={() => void onCreate()}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Crear</Text>}
+          {submitting ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.btnText}>Crear</Text>}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 32 },
-  label: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-    marginBottom: 16,
-  },
-  notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
-  counter: { textAlign: 'right', color: '#999', fontSize: 12, marginBottom: 20 },
-  btn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
-  btnDisabled: { backgroundColor: '#9CA3AF' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 32 },
+    label: { fontSize: 15, fontWeight: '600', color: c.text, marginBottom: 8 },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      color: c.text,
+      backgroundColor: c.card,
+      marginBottom: 16,
+    },
+    notes: { minHeight: 110, textAlignVertical: 'top', marginBottom: 6 },
+    counter: { textAlign: 'right', color: c.textMuted, fontSize: 12, marginBottom: 20 },
+    btn: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+    btnDisabled: { backgroundColor: c.textMuted },
+    btnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+  });

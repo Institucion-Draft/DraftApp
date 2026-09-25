@@ -67,6 +67,12 @@ function podiumStepAvatarSize(nInStep: number): PlayerAvatarSize {
 const ASYNC_COMPACT = (userId: string, eventId: string) => `prodec_detail_compact_${userId}_${eventId}`;
 const ASYNC_CONFETTI = (userId: string, eventId: string) => `prodec_confetti_${userId}_${eventId}`;
 
+/**
+ * GUARDA DE TEMA: esta pantalla queda SIEMPRE en su estilo claro, sin importar el modo global.
+ * No importar `useTheme`/`useThemedStyles`/ThemeContext acá. El aislamiento del header, del fondo
+ * del stack, de la barra de estado y del subárbol (PlayerAvatar, ProDeCManaC, etc.) está en
+ * `theme/lightLock.tsx` y se aplica en MainNavigator.
+ */
 export default function ProDeCScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
   const { user } = useAuth();
