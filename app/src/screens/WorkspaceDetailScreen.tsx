@@ -20,6 +20,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
+import UnseenDot from '../components/UnseenDot';
+import { hasUnseenAchievements, syncWorkspaceAchievements } from '../lib/achievements';
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
 import { formatEventMode } from '../lib/eventMode';
 import { useTheme, useThemedStyles } from '../theme';
@@ -72,6 +74,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
   const [seasons, setSeasons] = useState<SeasonRow[]>([]);
+  const [seasonUnseen, setSeasonUnseen] = useState(false);
   const [todayEvents, setTodayEvents] = useState<TodayEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -174,8 +177,16 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   // las que ya se puedan cerrar, y después lee el estado. Idempotente, corre en cada foco.
   const loadSeasons = useCallback(async () => {
     await syncWorkspaceSeasons(workspaceId);
-    setSeasons(await fetchWorkspaceSeasons(workspaceId));
-  }, [workspaceId]);
+    const list = await fetchWorkspaceSeasons(workspaceId);
+    setSeasons(list);
+    // Red de seguridad de logros (silenciosa, sin loading): va DESPUÉS de mostrar las temporadas
+    // para no demorarlas, y ANTES del chequeo de "sin ver", así el indicador ya refleja lo que
+    // destrabe.
+    await syncWorkspaceAchievements(workspaceId);
+    // Indicador personal sobre el acceso a la temporada actual: logros del usuario sin ver.
+    const active = list.find((s) => s.phase === 'active');
+    setSeasonUnseen(active && user?.id ? await hasUnseenAchievements(active.season_id, user.id) : false);
+  }, [workspaceId, user?.id]);
 
   // Eventos programados para hoy (día calendario del dispositivo), sin cancelados ni eliminados.
   const loadTodayEvents = useCallback(async () => {
@@ -409,6 +420,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
             >
               <Text style={styles.rankingHeroText}>🏁 Temporada {seasonButtonSeason.name}</Text>
               <Text style={styles.rankingHeroSub}>{phaseSubtitle(seasonButtonSeason)}</Text>
+              {seasonUnseen && currentSeason ? <UnseenDot style={styles.rankingHeroDot} /> : null}
             </TouchableOpacity>
           ) : null}
           <View style={styles.rankingSmallRow}>
@@ -795,6 +807,7 @@ const createStyles = (c: ThemeColors) =>
       fontWeight: '800',
       textAlign: 'center',
     },
+    rankingHeroDot: { position: 'absolute', top: -6, right: -6 },
     rankingHeroSub: {
       color: c.status.warning.text,
       fontSize: 12,

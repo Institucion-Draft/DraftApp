@@ -20,6 +20,8 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
+import UnseenDot from '../components/UnseenDot';
+import { hasUnseenEventAchievements } from '../lib/achievements';
 import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
@@ -199,6 +201,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
+  const [diaryAchievementsUnseen, setDiaryAchievementsUnseen] = useState(false);
   const [myMemberDeclared, setMyMemberDeclared] = useState(false);
   const [prodeCVoteCount, setProdeCVoteCount] = useState<number | null>(null);
   const [prodeCCompact, setProdeCCompact] = useState(false);
@@ -731,6 +734,24 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         cancelled = true;
       };
     }, [load])
+  );
+
+  // Indicador de la bitácora, para TODOS los inscriptos del evento: hay logros conseguidos en este
+  // evento posteriores a su última visita a la bitácora (o nunca la visitó y existe alguno).
+  useFocusEffect(
+    useCallback(() => {
+      if (!eventId || !myUserId || !myParticipantId) {
+        setDiaryAchievementsUnseen(false);
+        return undefined;
+      }
+      let cancelled = false;
+      void hasUnseenEventAchievements(eventId, myUserId).then((unseen) => {
+        if (!cancelled) setDiaryAchievementsUnseen(unseen);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [eventId, myUserId, myParticipantId])
   );
 
   useFocusEffect(
@@ -1926,6 +1947,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
               onPress={() => navigation.navigate('EventDiary', { eventId: event.id })}
             >
               <Text style={styles.primaryBtnTxt}>Bitácora digital</Text>
+              {diaryAchievementsUnseen ? <UnseenDot style={styles.diaryBtnDot} /> : null}
             </TouchableOpacity>
           ) : (
             <Text style={styles.muted}>Bitácora digital (próximamente)</Text>
@@ -2084,6 +2106,7 @@ const createStyles = (c: ThemeColors) =>
     tiebreakVsBtnTxt: { color: c.status.warning.onSolid, fontWeight: '700', textAlign: 'center', fontSize: 13 },
     block: { paddingHorizontal: 24, paddingTop: 18 },
     blockTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 10 },
+    diaryBtnDot: { position: 'absolute', top: -6, right: -6 },
     primaryBtn: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginBottom: 10 },
     primaryBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '600' },
     notFoundBtn: { paddingHorizontal: 24, marginTop: 16, marginBottom: 0 },

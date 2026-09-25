@@ -20,6 +20,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import AchievementMedal from '../components/AchievementMedal';
+import { fetchEventAchievementItems, markEventDiarySeen, type EventAchievementItem } from '../lib/achievements';
 import type { EventStatus } from '../lib/database.types';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -46,6 +48,10 @@ type DiaryRow = {
       }[]
     | null;
 };
+
+type FeedItem =
+  | { kind: 'entry'; ts: string; row: DiaryRow }
+  | { kind: 'achievement'; ts: string; item: EventAchievementItem };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
@@ -94,6 +100,8 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [entries, setEntries] = useState<DiaryRow[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [achievementItems, setAchievementItems] = useState<EventAchievementItem[]>([]);
   const [tab, setTab] = useState<'curiosity' | 'bugs'>('curiosity');
 
   const [formOpen, setFormOpen] = useState(false);
@@ -129,8 +137,9 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
     setEventName(ev.name);
     setEventStatus(ev.status);
     setScheduledFor(ev.scheduled_for);
+    setWorkspaceId(ev.workspace_id);
 
-    const [roleRes, partRes, diaryRes, eventPartsRes] = await Promise.all([
+    const [roleRes, partRes, diaryRes, eventPartsRes, achievements] = await Promise.all([
       uid
         ? supabase
             .from('workspace_members')
@@ -164,6 +173,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
         .is('deleted_at', null)
         .order('created_at', { ascending: false }),
       supabase.from('event_participants').select('id, user_id').eq('event_id', eventId),
+      fetchEventAchievementItems(eventId),
     ]);
 
     const role = roleRes.data as { role: string } | null;
@@ -194,7 +204,11 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
       );
     }
 
+    setAchievementItems(achievements);
     setLoading(false);
+
+    // Entrar a la bitácora apaga el indicador de logros sin ver de este evento.
+    void markEventDiarySeen(eventId);
   }, [eventId]);
 
   useFocusEffect(
@@ -223,10 +237,25 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
     eventStatus != null &&
     canPostDiaryEntry(eventStatus, scheduledFor);
 
-  const visibleEntries = useMemo(() => {
-    if (tab === 'curiosity') return entries.filter((e) => e.entry_type === 'curiosity');
-    return entries.filter((e) => e.entry_type === 'bug' || e.entry_type === 'suggestion');
-  }, [entries, tab]);
+  // Feed de la pestaña. Los logros conseguidos en este evento se sintetizan como ítems de solo
+  // lectura (no son filas de event_diary_entries) y se mezclan, en Curiosidades, ordenados por
+  // unlocked_at junto con las entradas reales (más recientes primero, como el resto del feed).
+  const feed = useMemo<FeedItem[]>(() => {
+    if (tab === 'curiosity') {
+      const real: FeedItem[] = entries
+        .filter((e) => e.entry_type === 'curiosity')
+        .map((row) => ({ kind: 'entry', ts: row.created_at, row }));
+      const synthesized: FeedItem[] = achievementItems.map((item) => ({
+        kind: 'achievement',
+        ts: item.unlocked_at,
+        item,
+      }));
+      return [...real, ...synthesized].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+    }
+    return entries
+      .filter((e) => e.entry_type === 'bug' || e.entry_type === 'suggestion')
+      .map((row) => ({ kind: 'entry', ts: row.created_at, row }));
+  }, [entries, achievementItems, tab]);
 
   const openCreateCuriosity = () => {
     if (!allowPost) {
@@ -386,6 +415,39 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
     );
   };
 
+  // Mensaje de logro sintetizado: SOLO LECTURA. No es una fila de event_diary_entries, así que no
+  // tiene (ni puede tener) editar/borrar: no hay ningún handler de edición ni de borrado acá.
+  const renderAchievementCard = (item: EventAchievementItem) => (
+    <TouchableOpacity
+      key={`ach-${item.id}`}
+      style={styles.achievementCard}
+      activeOpacity={0.8}
+      onPress={() => {
+        if (!workspaceId) return;
+        navigation.navigate('AchievementDetail', {
+          achievementId: item.achievement_id,
+          seasonId: item.season_id,
+          userId: item.user_id,
+          workspaceId,
+          from: 'EventDiary',
+          eventId,
+        });
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.userName} obtuvo un logro - ${item.achievementName}`}
+    >
+      <View style={styles.achievementRow}>
+        <AchievementMedal slot={item.iconSlot} unlocked size={40} />
+        <View style={styles.cardHeaderText}>
+          <Text style={styles.achievementTitle}>
+            {item.userName} obtuvo un logro - <Text style={styles.achievementName}>{item.achievementName}</Text>
+          </Text>
+          <Text style={styles.achievementMeta}>{formatDiaryWhen(item.unlocked_at)}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -432,10 +494,10 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {visibleEntries.length === 0 ? (
+        {feed.length === 0 ? (
           <Text style={styles.empty}>Todavía no hay entradas en esta pestaña.</Text>
         ) : (
-          visibleEntries.map(renderCard)
+          feed.map((f) => (f.kind === 'entry' ? renderCard(f.row) : renderAchievementCard(f.item)))
         )}
       </ScrollView>
 
@@ -547,6 +609,24 @@ const createStyles = (c: ThemeColors) =>
       shadowRadius: 4,
       elevation: 2,
     },
+    // Mensaje de logro: mismo box que un mensaje normal, con el borde/fondo dorado del token achievement.
+    achievementCard: {
+      backgroundColor: c.achievement.subtle,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 12,
+      borderWidth: 1.5,
+      borderColor: c.achievement.solid,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.06,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    achievementRow: { flexDirection: 'row', alignItems: 'center' },
+    achievementTitle: { fontSize: 15, fontWeight: '600', color: c.achievement.text, flexShrink: 1 },
+    achievementName: { fontWeight: '800' },
+    achievementMeta: { fontSize: 12, color: c.achievement.text, opacity: 0.75, marginTop: 2 },
     cardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
     cardHeaderText: { flex: 1, marginLeft: 10, minWidth: 0 },
     cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
