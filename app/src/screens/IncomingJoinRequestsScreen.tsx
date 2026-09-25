@@ -16,6 +16,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'IncomingJoinRequests'>;
 
@@ -40,6 +42,8 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function IncomingJoinRequestsScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -203,7 +207,7 @@ export default function IncomingJoinRequestsScreen({ route, navigation }: Props)
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -226,94 +230,95 @@ export default function IncomingJoinRequestsScreen({ route, navigation }: Props)
   );
 }
 
-const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  listEmpty: {
-    flexGrow: 1,
-    padding: 24,
-  },
-  empty: {
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 15,
-    marginTop: 48,
-  },
-  card: {
-    backgroundColor: '#fafafa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  cardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  username: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111',
-  },
-  date: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 4,
-  },
-  msg: {
-    fontSize: 14,
-    color: '#444',
-    marginTop: 8,
-    lineHeight: 20,
-    fontStyle: 'italic',
-  },
-  noMsg: {
-    fontSize: 13,
-    color: '#999',
-    marginTop: 8,
-  },
-  actions: {
-    flexDirection: 'row',
-    marginTop: 14,
-    justifyContent: 'flex-end',
-  },
-  btn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginLeft: 10,
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  btnReject: {
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  btnRejectText: {
-    color: '#DC2626',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  btnApprove: {
-    backgroundColor: '#3B82F6',
-  },
-  btnApproveText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: c.background,
+    },
+    listContent: {
+      padding: 16,
+      paddingBottom: 32,
+    },
+    listEmpty: {
+      flexGrow: 1,
+      padding: 24,
+    },
+    empty: {
+      textAlign: 'center',
+      color: c.textSecondary,
+      fontSize: 15,
+      marginTop: 48,
+    },
+    card: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.divider,
+      padding: 14,
+      marginBottom: 12,
+    },
+    cardTop: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    cardBody: {
+      flex: 1,
+      minWidth: 0,
+    },
+    username: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.text,
+    },
+    date: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginTop: 4,
+    },
+    msg: {
+      fontSize: 14,
+      color: c.textBody,
+      marginTop: 8,
+      lineHeight: 20,
+      fontStyle: 'italic',
+    },
+    noMsg: {
+      fontSize: 13,
+      color: c.textMuted,
+      marginTop: 8,
+    },
+    actions: {
+      flexDirection: 'row',
+      marginTop: 14,
+      justifyContent: 'flex-end',
+    },
+    btn: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      marginLeft: 10,
+      minWidth: 100,
+      alignItems: 'center',
+    },
+    btnReject: {
+      backgroundColor: c.status.error.subtle,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+    },
+    btnRejectText: {
+      color: c.status.error.solid,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    btnApprove: {
+      backgroundColor: c.accent,
+    },
+    btnApproveText: {
+      color: c.onAccent,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+  });

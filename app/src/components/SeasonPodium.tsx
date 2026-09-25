@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import PlayerAvatar, { type PlayerAvatarSize } from './PlayerAvatar';
 import type { SeasonPodiumPlayer, SeasonPodiumStep } from '../lib/seasonPodium';
+import { useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 /** Mismo ancho de columna y alturas de peldaño que el podio de un evento (StandingsScreen/ProDeC). */
 const COL_WIDTH = 132;
@@ -33,6 +35,7 @@ type Props = {
 };
 
 export default function SeasonPodium({ steps, onPressPlayer }: Props) {
+  const styles = useThemedStyles(createStyles);
   if (steps.length === 0) return null;
 
   const renderColumn = (rank: 1 | 2 | 3) => {
@@ -87,49 +90,51 @@ export default function SeasonPodium({ steps, onPressPlayer }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  section: { marginBottom: 20 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 4,
-  },
-  col: {
-    flexDirection: 'column',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    width: COL_WIDTH,
-  },
-  avatarArea: {
-    width: '100%',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    minHeight: 96,
-    marginBottom: 2,
-  },
-  avatarRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: AVATAR_ROW_GAP,
-    width: '100%',
-  },
-  playerStack: { alignItems: 'center' },
-  names: { width: '100%', alignItems: 'center', marginBottom: 4 },
-  nameTxt: { fontSize: 12, fontWeight: '700', color: '#111', maxWidth: COL_WIDTH },
-  base: {
-    width: '100%',
-    borderRadius: 8,
-    marginTop: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.12)',
-  },
-  baseRank: { fontSize: 26, fontWeight: '800', color: '#111' },
-  basePts: { fontSize: 12, fontWeight: '700', color: '#374151', marginTop: 2 },
-  baseLight: { color: '#fff' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    section: { marginBottom: 20 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      gap: 10,
+      paddingHorizontal: 4,
+    },
+    col: {
+      flexDirection: 'column',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      width: COL_WIDTH,
+    },
+    avatarArea: {
+      width: '100%',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      minHeight: 96,
+      marginBottom: 2,
+    },
+    avatarRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      alignItems: 'flex-end',
+      gap: AVATAR_ROW_GAP,
+      width: '100%',
+    },
+    playerStack: { alignItems: 'center' },
+    names: { width: '100%', alignItems: 'center', marginBottom: 4 },
+    nameTxt: { fontSize: 12, fontWeight: '700', color: c.text, maxWidth: COL_WIDTH },
+    base: {
+      width: '100%',
+      borderRadius: 8,
+      marginTop: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'rgba(0,0,0,0.12)',
+    },
+    // Texto sobre los peldaños oro/plata/bronce (PEDESTAL): el fondo es fijo, así que el texto también.
+    baseRank: { fontSize: 26, fontWeight: '800', color: '#111' },
+    basePts: { fontSize: 12, fontWeight: '700', color: '#374151', marginTop: 2 },
+    baseLight: { color: '#fff' },
+  });

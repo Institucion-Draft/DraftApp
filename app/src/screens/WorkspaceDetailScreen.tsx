@@ -22,6 +22,8 @@ import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
 import { formatEventMode } from '../lib/eventMode';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDetail'>;
 
@@ -61,6 +63,8 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function WorkspaceDetailScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   const { user } = useAuth();
   const [workspace, setWorkspace] = useState<WorkspaceRow | null>(null);
@@ -229,29 +233,40 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       headerRight:
         user?.id != null
           ? () => (
-              <Pressable
-                onPress={() =>
-                  navigation.navigate('MyProfile', {
-                    from: 'WorkspaceDetail',
-                    workspaceId,
-                  })
-                }
-                hitSlop={12}
-                style={styles.headerAvatarBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Mi perfil"
-              >
-                <PlayerAvatar
-                  userId={user.id}
-                  size="small"
-                  withColorBorder={false}
-                  outsideEvent
-                />
-              </Pressable>
+              <View style={styles.headerRightRow}>
+                <Pressable
+                  onPress={() => navigation.navigate('Settings', { workspaceId })}
+                  hitSlop={12}
+                  style={styles.headerSettingsBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Configuración"
+                >
+                  <Text style={styles.headerSettingsIcon}>⚙️</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate('MyProfile', {
+                      from: 'WorkspaceDetail',
+                      workspaceId,
+                    })
+                  }
+                  hitSlop={12}
+                  style={styles.headerAvatarBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Mi perfil"
+                >
+                  <PlayerAvatar
+                    userId={user.id}
+                    size="small"
+                    withColorBorder={false}
+                    outsideEvent
+                  />
+                </Pressable>
+              </View>
             )
           : undefined,
     });
-  }, [navigation, workspace?.name, user?.id, workspaceId]);
+  }, [navigation, workspace?.name, user?.id, workspaceId, styles]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -269,7 +284,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   if (loading && !workspace) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -339,18 +354,18 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
           ))}
           <View style={styles.groupRow}>
             <TouchableOpacity
-              style={styles.outlineBtn}
-              onPress={() => navigation.navigate('CreateEvent', { workspaceId, from: 'WorkspaceDetail' })}
-              accessibilityRole="button"
-            >
-              <Text style={styles.outlineBtnText}>Crear evento</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={styles.primaryBtn}
               onPress={() => navigation.navigate('EventsList', { workspaceId })}
               accessibilityRole="button"
             >
               <Text style={styles.primaryBtnText}>Todos los eventos</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.outlineBtn}
+              onPress={() => navigation.navigate('CreateEvent', { workspaceId, from: 'WorkspaceDetail' })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.outlineBtnText}>Crear evento</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -537,383 +552,398 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  headerAvatarBtn: {
-    marginRight: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scroll: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  scrollContent: {
-    paddingBottom: 32,
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  hero: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 20,
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  heroAvatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 16,
-    marginBottom: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  heroAvatarPh: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E0E7FF',
-  },
-  heroAvatarLetter: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#4338CA',
-  },
-  heroTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  heroDesc: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  groupSection: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  todayCard: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#3B82F6',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-  },
-  todayBadge: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  /** Superpuesto a la izquierda de la línea del modo, sin desplazar su centrado. */
-  todayBadgeFloating: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-  },
-  todayBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  todayBody: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  /** Contenedor relativo de la línea del nombre, centrada sobre el ancho total. */
-  todayNameRow: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  todayName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111',
-    textAlign: 'center',
-  },
-  /** Contenedor relativo de la línea del modo: el badge se ancla solo a esta fila. */
-  todayModeRow: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  todaySub: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  // --- Eventos: máxima jerarquía ---
-  eventsCard: {
-    backgroundColor: '#F0F9FF',
-    borderWidth: 1,
-    borderColor: '#BAE6FD',
-    borderRadius: 12,
-    padding: 12,
-  },
-  eventsTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#0C4A6E',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  primaryBtn: {
-    flex: 1,
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    minHeight: 48,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  outlineBtn: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#93C5FD',
-    borderRadius: 8,
-    minHeight: 48,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  outlineBtnText: {
-    color: '#3B82F6',
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  // --- Partidas sin contexto: jerarquía media, casual ---
-  casualCard: {
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderRadius: 12,
-    padding: 12,
-  },
-  casualTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 10,
-  },
-  groupRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  casualBtn: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#6EE7B7',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  casualBtnText: {
-    color: '#047857',
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  // --- Ranking: festivo/competitivo ---
-  rankingCard: {
-    backgroundColor: '#FFFBEB',
-    borderWidth: 1,
-    borderColor: '#FCD34D',
-    borderRadius: 14,
-    padding: 12,
-  },
-  rankingTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#78350F',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  rankingHeroBtn: {
-    backgroundColor: '#FDE68A',
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-  },
-  rankingHeroText: {
-    color: '#78350F',
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  rankingHeroSub: {
-    color: '#92400E',
-    fontSize: 12,
-    marginTop: 3,
-    textAlign: 'center',
-  },
-  rankingSmallRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  rankingSmallBtn: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#FCD34D',
-    borderRadius: 8,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankingSmallText: {
-    color: '#78350F',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  disabledBtn: {
-    opacity: 0.55,
-  },
-  // --- Cubos y sedes: accesorio ---
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pillText: {
-    color: '#4B5563',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  muted: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-  },
-  orgSection: {
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 12,
-    paddingHorizontal: 24,
-    marginTop: 20,
-  },
-  orgBtn: {
-    backgroundColor: '#EFF6FF',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-  },
-  orgBtnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  orgBtnText: {
-    color: '#3B82F6',
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  badge: {
-    marginLeft: 10,
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#DC2626',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f0f0f0',
-  },
-  memberBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  memberName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111',
-  },
-  memberRole: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  diarySection: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  diaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingVertical: 12,
-  },
-  diaryBtnIcon: {
-    fontSize: 16,
-  },
-  diaryBtnText: {
-    color: '#374151',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    headerAvatarBtn: {
+      marginRight: 4,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    headerRightRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    headerSettingsBtn: {
+      marginRight: 14,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    headerSettingsIcon: {
+      fontSize: 22,
+    },
+    scroll: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scrollContent: {
+      paddingBottom: 32,
+    },
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: c.background,
+    },
+    hero: {
+      paddingHorizontal: 24,
+      paddingTop: 16,
+      paddingBottom: 20,
+      alignItems: 'center',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    heroAvatar: {
+      width: 88,
+      height: 88,
+      borderRadius: 16,
+      marginBottom: 12,
+      backgroundColor: c.backgroundAlt,
+    },
+    heroAvatarPh: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.status.info.subtle,
+    },
+    heroAvatarLetter: {
+      fontSize: 36,
+      fontWeight: '700',
+      color: c.status.info.text,
+    },
+    heroTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: c.text,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    heroDesc: {
+      fontSize: 15,
+      color: c.textSecondary,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    groupSection: {
+      paddingHorizontal: 24,
+      paddingTop: 12,
+      paddingBottom: 8,
+    },
+    todayCard: {
+      backgroundColor: c.background,
+      borderWidth: 1,
+      borderColor: c.accent,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 10,
+    },
+    todayBadge: {
+      backgroundColor: c.accent,
+      borderRadius: 5,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    /** Superpuesto a la izquierda de la línea del modo, sin desplazar su centrado. */
+    todayBadgeFloating: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      justifyContent: 'center',
+    },
+    todayBadgeText: {
+      color: c.onAccent,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    todayBody: {
+      width: '100%',
+      alignItems: 'center',
+    },
+    /** Contenedor relativo de la línea del nombre, centrada sobre el ancho total. */
+    todayNameRow: {
+      width: '100%',
+      alignItems: 'center',
+    },
+    todayName: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: c.text,
+      textAlign: 'center',
+    },
+    /** Contenedor relativo de la línea del modo: el badge se ancla solo a esta fila. */
+    todayModeRow: {
+      width: '100%',
+      alignItems: 'center',
+    },
+    todaySub: {
+      fontSize: 12,
+      color: c.textSecondary,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    // --- Eventos: máxima jerarquía ---
+    eventsCard: {
+      backgroundColor: c.status.info.subtle,
+      borderWidth: 1,
+      borderColor: c.status.info.border,
+      borderRadius: 12,
+      padding: 12,
+    },
+    eventsTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: c.status.info.text,
+      marginBottom: 10,
+      textAlign: 'center',
+    },
+    primaryBtn: {
+      flex: 1,
+      backgroundColor: c.status.info.border,
+      borderWidth: 1,
+      borderColor: c.status.info.solid,
+      borderRadius: 8,
+      minHeight: 48,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    primaryBtnText: {
+      color: c.status.info.text,
+      fontSize: 15,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    outlineBtn: {
+      flex: 1,
+      backgroundColor: c.status.info.subtle,
+      borderWidth: 1,
+      borderColor: c.accent,
+      borderRadius: 8,
+      minHeight: 48,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    outlineBtnText: {
+      color: c.status.info.text,
+      fontSize: 15,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    // --- Partidas sin contexto: jerarquía media, casual ---
+    casualCard: {
+      backgroundColor: c.status.success.subtle,
+      borderWidth: 1,
+      borderColor: c.status.success.border,
+      borderRadius: 12,
+      padding: 12,
+    },
+    casualTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 10,
+    },
+    groupRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    casualBtn: {
+      flex: 1,
+      backgroundColor: c.background,
+      borderWidth: 1,
+      borderColor: c.status.success.border,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    casualBtnText: {
+      color: c.status.success.text,
+      fontSize: 15,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    // --- Ranking: festivo/competitivo ---
+    rankingCard: {
+      backgroundColor: c.status.warning.subtle,
+      borderWidth: 1,
+      borderColor: c.status.warning.border,
+      borderRadius: 14,
+      padding: 12,
+    },
+    rankingTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: c.status.warning.text,
+      marginBottom: 10,
+      textAlign: 'center',
+    },
+    rankingHeroBtn: {
+      backgroundColor: c.status.warning.border,
+      borderWidth: 1,
+      borderColor: c.status.warning.solid,
+      borderRadius: 10,
+      paddingVertical: 14,
+      paddingHorizontal: 12,
+      alignItems: 'center',
+    },
+    rankingHeroText: {
+      color: c.status.warning.text,
+      fontSize: 16,
+      fontWeight: '800',
+      textAlign: 'center',
+    },
+    rankingHeroSub: {
+      color: c.status.warning.text,
+      fontSize: 12,
+      marginTop: 3,
+      textAlign: 'center',
+    },
+    rankingSmallRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    rankingSmallBtn: {
+      flex: 1,
+      backgroundColor: c.background,
+      borderWidth: 1,
+      borderColor: c.status.warning.border,
+      borderRadius: 8,
+      paddingVertical: 11,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rankingSmallText: {
+      color: c.status.warning.text,
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
+    disabledBtn: {
+      opacity: 0.55,
+    },
+    // --- Cubos y sedes: accesorio ---
+    pillRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    pill: {
+      height: 40,
+      paddingHorizontal: 16,
+      borderRadius: 20,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pillText: {
+      color: c.textBody,
+      fontSize: 13,
+      fontWeight: '500',
+    },
+    muted: {
+      fontSize: 15,
+      color: c.textSecondary,
+      textAlign: 'center',
+    },
+    orgSection: {
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 12,
+      paddingHorizontal: 24,
+      marginTop: 20,
+    },
+    orgBtn: {
+      backgroundColor: c.status.info.subtle,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 8,
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: c.status.info.border,
+    },
+    orgBtnRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    orgBtnText: {
+      color: c.accent,
+      fontSize: 15,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    badge: {
+      marginLeft: 10,
+      minWidth: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: c.status.error.solid,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    badgeText: {
+      color: c.status.error.onSolid,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    memberRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 24,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    memberBody: {
+      flex: 1,
+      minWidth: 0,
+    },
+    memberName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: c.text,
+    },
+    memberRole: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    diarySection: {
+      paddingHorizontal: 24,
+      paddingTop: 24,
+    },
+    diaryBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: c.backgroundAlt,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      paddingVertical: 12,
+    },
+    diaryBtnIcon: {
+      fontSize: 16,
+    },
+    diaryBtnText: {
+      color: c.textBody,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+  });

@@ -14,6 +14,8 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { WorkspaceJoinRequestStatus } from '../lib/database.types';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MyJoinRequests'>;
 
@@ -56,23 +58,25 @@ function statusLabel(s: WorkspaceJoinRequestStatus): string {
   }
 }
 
-function statusColors(s: WorkspaceJoinRequestStatus): {
+function statusColors(s: WorkspaceJoinRequestStatus, c: ThemeColors): {
   bg: string;
   text: string;
 } {
   switch (s) {
     case 'pending':
-      return { bg: '#FEF9C3', text: '#CA8A04' };
+      return { bg: c.status.warning.subtle, text: c.status.warning.text };
     case 'approved':
-      return { bg: '#DCFCE7', text: '#15803D' };
+      return { bg: c.status.success.subtle, text: c.status.success.text };
     case 'rejected':
-      return { bg: '#FEE2E2', text: '#DC2626' };
+      return { bg: c.status.error.subtle, text: c.status.error.solid };
     default:
-      return { bg: '#F3F4F6', text: '#666' };
+      return { bg: c.backgroundAlt, text: c.textSecondary };
   }
 }
 
 export default function MyJoinRequestsScreen(_props: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { user } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,14 +166,14 @@ export default function MyJoinRequestsScreen(_props: Props) {
       : item.reviewed_by
         ? 'Organizador'
         : null;
-    const colors = statusColors(item.status);
+    const badge = statusColors(item.status, colors);
 
     return (
       <View style={styles.card}>
         <Text style={styles.wsName}>{ws?.name ?? 'Grupo'}</Text>
         <Text style={styles.date}>Solicitud: {formatDate(item.created_at)}</Text>
-        <View style={[styles.statusPill, { backgroundColor: colors.bg }]}>
-          <Text style={[styles.statusText, { color: colors.text }]}>
+        <View style={[styles.statusPill, { backgroundColor: badge.bg }]}>
+          <Text style={[styles.statusText, { color: badge.text }]}>
             {statusLabel(item.status)}
           </Text>
         </View>
@@ -194,7 +198,7 @@ export default function MyJoinRequestsScreen(_props: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -217,66 +221,67 @@ export default function MyJoinRequestsScreen(_props: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  listContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  listEmpty: {
-    flexGrow: 1,
-    padding: 24,
-  },
-  empty: {
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 15,
-    marginTop: 48,
-  },
-  card: {
-    backgroundColor: '#fafafa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
-    padding: 16,
-    marginBottom: 12,
-  },
-  wsName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 6,
-  },
-  date: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 8,
-  },
-  statusPill: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginBottom: 8,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  message: {
-    fontSize: 14,
-    color: '#444',
-    lineHeight: 20,
-    marginTop: 4,
-  },
-  reviewer: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 8,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: c.background,
+    },
+    listContent: {
+      padding: 16,
+      paddingBottom: 32,
+    },
+    listEmpty: {
+      flexGrow: 1,
+      padding: 24,
+    },
+    empty: {
+      textAlign: 'center',
+      color: c.textSecondary,
+      fontSize: 15,
+      marginTop: 48,
+    },
+    card: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.divider,
+      padding: 16,
+      marginBottom: 12,
+    },
+    wsName: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 6,
+    },
+    date: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginBottom: 8,
+    },
+    statusPill: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 6,
+      marginBottom: 8,
+    },
+    statusText: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    message: {
+      fontSize: 14,
+      color: c.textBody,
+      lineHeight: 20,
+      marginTop: 4,
+    },
+    reviewer: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginTop: 8,
+    },
+  });

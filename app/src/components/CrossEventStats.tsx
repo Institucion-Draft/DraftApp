@@ -10,6 +10,8 @@ import { supabase } from '../lib/supabase';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from './PlayerAvatar';
 import { fetchEventPodiums, type EventPodiumResult } from '../lib/eventPodium';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 // Todos los require() deben ser estáticos para Metro bundler
 const MANA_IMAGES: Partial<Record<MtgColor, ReturnType<typeof require>>> = {
@@ -86,6 +88,7 @@ function pct(won: number, lost: number): number | null {
 }
 
 function CellStat({ won, lost }: { won: number; lost: number }) {
+  const styles = useThemedStyles(createStyles);
   const p = pct(won, lost);
   return (
     <View style={styles.h2hCell}>
@@ -103,6 +106,8 @@ type Props = {
 };
 
 export default function CrossEventStats({ userId, workspaceId }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const [loading, setLoading] = useState(true);
   const [aggStats, setAggStats] = useState<AggStats | null>(null);
   const [colorStats, setColorStats] = useState<ColorStat[]>([]);
@@ -228,7 +233,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
   if (loading) {
     return (
       <View style={styles.loadingBox}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -407,99 +412,100 @@ const H2H_DRAFT_W = 104; // ancho total del grupo Oficiales (2 × 52)
 const H2H_SUB_W   = 52;  // ancho de cada subcolumna dentro de Draft
 const H2H_SINGLE_W = 56; // ancho de Venganza y Total
 
-const styles = StyleSheet.create({
-  loadingBox: { paddingVertical: 32, alignItems: 'center' },
-  section: { marginTop: 24 },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 12,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  statLabel: { fontSize: 15, color: '#374151' },
-  statValue: { fontSize: 15, fontWeight: '600', color: '#111' },
-  emptyText: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic' },
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    loadingBox: { paddingVertical: 32, alignItems: 'center' },
+    section: { marginTop: 24 },
+    sectionTitle: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginBottom: 12,
+    },
+    statRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    statLabel: { fontSize: 15, color: c.textBody },
+    statValue: { fontSize: 15, fontWeight: '600', color: c.text },
+    emptyText: { fontSize: 14, color: c.textMuted, fontStyle: 'italic' },
 
-  // Colores
-  colorsRow: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
-  colorItem: { alignItems: 'center', gap: 4 },
-  colorLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
-  colorPct: { fontSize: 11, color: '#6B7280' },
-  colorWr:  { fontSize: 11, fontWeight: '700', color: '#3B82F6' },
+    // Colores
+    colorsRow: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
+    colorItem: { alignItems: 'center', gap: 4 },
+    colorLabel: { fontSize: 12, fontWeight: '700', color: c.textBody },
+    colorPct: { fontSize: 11, color: c.textSecondary },
+    colorWr:  { fontSize: 11, fontWeight: '700', color: c.accent },
 
-  // Historial drafts
-  historyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  historyLeft: { flex: 1, marginRight: 8 },
-  historyName: { fontSize: 15, color: '#374151', marginBottom: 4 },
-  historyColors: { flexDirection: 'row', gap: 4 },
-  historyPlacement: { fontSize: 15, fontWeight: '700', color: '#111' },
+    // Historial drafts
+    historyRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    historyLeft: { flex: 1, marginRight: 8 },
+    historyName: { fontSize: 15, color: c.textBody, marginBottom: 4 },
+    historyColors: { flexDirection: 'row', gap: 4 },
+    historyPlacement: { fontSize: 15, fontWeight: '700', color: c.text },
 
-  // H2H tabla
-  h2hHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingBottom: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  h2hRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-  },
-  h2hPlayerCol: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  h2hAvatar: { marginRight: 6 },
-  h2hName: { flex: 1, fontSize: 13, color: '#111', fontWeight: '500' },
+    // H2H tabla
+    h2hHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingBottom: 6,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    h2hRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    h2hPlayerCol: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+    h2hAvatar: { marginRight: 6 },
+    h2hName: { flex: 1, fontSize: 13, color: c.text, fontWeight: '500' },
 
-  // Grupo Oficiales (Bo3 + MaM)
-  h2hDraftHeaderGroup: {
-    width: H2H_DRAFT_W,
-    alignItems: 'center',
-  },
-  h2hDraftGroup: {
-    width: H2H_DRAFT_W,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  h2hGroupLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  h2hGroupSubs: { flexDirection: 'row', width: H2H_DRAFT_W },
-  h2hColSub: {
-    width: H2H_SUB_W,
-    fontSize: 10,
-    color: '#9CA3AF',
-    textAlign: 'center',
-  },
+    // Grupo Oficiales (Bo3 + MaM)
+    h2hDraftHeaderGroup: {
+      width: H2H_DRAFT_W,
+      alignItems: 'center',
+    },
+    h2hDraftGroup: {
+      width: H2H_DRAFT_W,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    h2hGroupLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: c.textSecondary,
+      textAlign: 'center',
+    },
+    h2hGroupSubs: { flexDirection: 'row', width: H2H_DRAFT_W },
+    h2hColSub: {
+      width: H2H_SUB_W,
+      fontSize: 10,
+      color: c.textMuted,
+      textAlign: 'center',
+    },
 
-  // Columna simple (Venganza, Total)
-  h2hSingleCol: { width: H2H_SINGLE_W, alignItems: 'center' },
+    // Columna simple (Venganza, Total)
+    h2hSingleCol: { width: H2H_SINGLE_W, alignItems: 'center' },
 
-  // Celda de dato
-  h2hCell: { width: H2H_SUB_W, alignItems: 'center' },
-  h2hCellRecord: { fontSize: 11, fontWeight: '600', color: '#111', textAlign: 'center' },
-  h2hCellPct:    { fontSize: 10, color: '#6B7280', textAlign: 'center' },
-});
+    // Celda de dato
+    h2hCell: { width: H2H_SUB_W, alignItems: 'center' },
+    h2hCellRecord: { fontSize: 11, fontWeight: '600', color: c.text, textAlign: 'center' },
+    h2hCellPct:    { fontSize: 10, color: c.textSecondary, textAlign: 'center' },
+  });

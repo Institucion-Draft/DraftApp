@@ -15,6 +15,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ContextFreeMatchResult'>;
 
@@ -31,6 +33,8 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function ContextFreeMatchResultScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { winnerId, encounterType, winsA, winsB, userAId, userBId, workspaceId, encounterId } =
     route.params;
 
@@ -152,7 +156,7 @@ export default function ContextFreeMatchResultScreen({ route, navigation }: Prop
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -203,28 +207,29 @@ export default function ContextFreeMatchResultScreen({ route, navigation }: Prop
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', padding: 24 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  hero: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  winText: { fontSize: 30, fontWeight: '900', color: '#111', textAlign: 'center', marginBottom: 16 },
-  winnerAvatar: { width: 140, height: 140, borderRadius: 70, marginBottom: 16 },
-  score: { fontSize: 16, color: '#374151', marginTop: 4 },
-  actions: { gap: 10 },
-  primaryBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  primaryTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  secondaryBtn: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  secondaryTxt: { color: '#374151', fontWeight: '700' },
-  btnDisabled: { opacity: 0.5 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background, padding: 24 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    hero: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+    winText: { fontSize: 30, fontWeight: '900', color: c.text, textAlign: 'center', marginBottom: 16 },
+    winnerAvatar: { width: 140, height: 140, borderRadius: 70, marginBottom: 16 },
+    score: { fontSize: 16, color: c.textBody, marginTop: 4 },
+    actions: { gap: 10 },
+    primaryBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    primaryTxt: { color: c.onAccent, fontWeight: '700', fontSize: 16 },
+    secondaryBtn: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    secondaryTxt: { color: c.textBody, fontWeight: '700' },
+    btnDisabled: { opacity: 0.5 },
+  });

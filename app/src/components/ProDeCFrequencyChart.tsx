@@ -4,6 +4,7 @@ import Svg, { G, Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
 import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from './ColorFlag';
 import { PRODEC_BAR_ORDER } from '../lib/prodecDisplay';
+import { useTheme } from '../theme';
 
 type Props = {
   counts: Record<MtgColor, number>;
@@ -16,8 +17,11 @@ const MARGIN_RIGHT = 12;
 const MARGIN_TOP = 10;
 /** Solo letra bajo el eje X (sin número). */
 const MARGIN_BOTTOM = 30;
+// Panel de trazado (relleno, ejes, rejilla y puntos): colores FIJOS en ambos modos. El relleno es un
+// tono medio-claro elegido para que los colores MTG (W y B en particular) contrasten; ejes y rejilla
+// se dibujan sobre ese panel, no sobre el fondo de la pantalla. Solo el texto que queda FUERA del
+// panel (números del eje Y y letras bajo el eje X) lee el tema.
 const AXIS_STROKE = '#374151';
-/** Fondo del área de trazado: tono medio-claro para que W y B sigan contrastando. */
 const PLOT_FILL = '#CAD4DE';
 const GRID_STROKE = 'rgba(255,255,255,0.45)';
 
@@ -30,6 +34,7 @@ function yScaleMax(maxFreq: number): number {
  * Gráfico de frecuencias: ejes esquemáticos, rejilla, tallos + puntos (sin barras rellenas).
  */
 export default function ProDeCFrequencyChart({ counts, width }: Props) {
+  const { colors } = useTheme();
   const uid = useId().replace(/:/g, '');
   const plotW = Math.max(120, width - MARGIN_LEFT - MARGIN_RIGHT);
   const plotH = CHART_H - MARGIN_TOP - MARGIN_BOTTOM;
@@ -85,7 +90,7 @@ export default function ProDeCFrequencyChart({ counts, width }: Props) {
                   y={y + 4}
                   fontSize={11}
                   fontWeight="500"
-                  fill="#4B5563"
+                  fill={colors.textSecondary}
                   textAnchor="end"
                 >
                   {String(t)}
@@ -152,7 +157,7 @@ export default function ProDeCFrequencyChart({ counts, width }: Props) {
                 y={baselineY + 18}
                 fontSize={13}
                 fontWeight="800"
-                fill="#374151"
+                fill={colors.textBody}
                 textAnchor="middle"
               >
                 {s.col}

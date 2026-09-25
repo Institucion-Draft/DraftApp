@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useThemedStyles } from '../../theme';
+import type { ThemeColors } from '../../theme';
 
 export type RuleMatchup = {
   id: string;
@@ -16,6 +18,7 @@ type Props = {
 };
 
 export default function RuleMatchupSection({ title, matchups }: Props) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.wrap}>
       <Text style={styles.header}>{title}</Text>
@@ -49,37 +52,38 @@ export default function RuleMatchupSection({ title, matchups }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    backgroundColor: '#fafafa',
-    padding: 12,
-    marginBottom: 4,
-  },
-  header: { fontSize: 13, fontWeight: '700', color: '#111', marginBottom: 8 },
-  row: { marginBottom: 10 },
-  phaseLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 4,
-  },
-  matchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  avatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#E0E7FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarTxt: { fontSize: 12, fontWeight: '700', color: '#4338CA' },
-  name: { flex: 1, fontSize: 13, fontWeight: '600', color: '#111' },
-  nameRight: { textAlign: 'right' },
-  vs: { fontSize: 11, color: '#9CA3AF', fontWeight: '600', marginHorizontal: 2 },
-  score: { fontSize: 13, fontWeight: '700', color: '#111', marginHorizontal: 4 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    wrap: {
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 12,
+      backgroundColor: c.card,
+      padding: 12,
+      marginBottom: 4,
+    },
+    header: { fontSize: 13, fontWeight: '700', color: c.text, marginBottom: 8 },
+    row: { marginBottom: 10 },
+    phaseLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: c.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+      marginBottom: 4,
+    },
+    matchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    avatar: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: c.status.info.subtle,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarTxt: { fontSize: 12, fontWeight: '700', color: c.status.info.text },
+    name: { flex: 1, fontSize: 13, fontWeight: '600', color: c.text },
+    nameRight: { textAlign: 'right' },
+    vs: { fontSize: 11, color: c.textMuted, fontWeight: '600', marginHorizontal: 2 },
+    score: { fontSize: 13, fontWeight: '700', color: c.text, marginHorizontal: 4 },
+  });

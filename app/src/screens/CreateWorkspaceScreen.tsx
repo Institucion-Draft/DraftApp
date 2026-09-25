@@ -16,6 +16,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateWorkspace'>;
 
@@ -47,6 +49,8 @@ function slugFromName(name: string): string {
 }
 
 export default function CreateWorkspaceScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -131,6 +135,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Nombre del grupo de Draft"
+          placeholderTextColor={colors.textMuted}
           value={name}
           onChangeText={onNameChange}
           editable={!submitting}
@@ -145,6 +150,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         <TextInput
           style={styles.input}
           placeholder="mi-grupo-draft"
+          placeholderTextColor={colors.textMuted}
           value={slug}
           onChangeText={onSlugChange}
           autoCapitalize="none"
@@ -157,6 +163,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
         <TextInput
           style={[styles.input, styles.textArea]}
           placeholder="De qué se trata este grupo…"
+          placeholderTextColor={colors.textMuted}
           value={description}
           onChangeText={setDescription}
           editable={!submitting}
@@ -178,8 +185,8 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
             value={isPublic}
             onValueChange={setIsPublic}
             disabled={submitting}
-            trackColor={{ false: '#D1D5DB', true: '#93C5FD' }}
-            thumbColor={isPublic ? '#3B82F6' : '#f4f3f4'}
+            trackColor={{ false: colors.borderStrong, true: colors.accent }}
+            thumbColor={colors.onAccent}
           />
         </View>
 
@@ -191,7 +198,7 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
           disabled={submitting}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.onAccent} />
           ) : (
             <Text style={styles.buttonText}>Crear</Text>
           )}
@@ -201,83 +208,85 @@ export default function CreateWorkspaceScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  scroll: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 8,
-  },
-  labelInline: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 4,
-  },
-  hint: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 8,
-    lineHeight: 18,
-  },
-  hintSmall: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 18,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    marginBottom: 16,
-    backgroundColor: '#fafafa',
-  },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-    marginBottom: 4,
-  },
-  counter: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginBottom: 20,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 28,
-    gap: 16,
-  },
-  switchLabels: {
-    flex: 1,
-    minWidth: 0,
-  },
-  button: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingHorizontal: 24,
+      paddingTop: 16,
+      paddingBottom: 32,
+    },
+    label: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 8,
+    },
+    labelInline: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 4,
+    },
+    hint: {
+      fontSize: 13,
+      color: c.textSecondary,
+      marginBottom: 8,
+      lineHeight: 18,
+    },
+    hintSmall: {
+      fontSize: 13,
+      color: c.textSecondary,
+      lineHeight: 18,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      marginBottom: 16,
+      backgroundColor: c.card,
+      color: c.text,
+    },
+    textArea: {
+      minHeight: 100,
+      textAlignVertical: 'top',
+      marginBottom: 4,
+    },
+    counter: {
+      fontSize: 12,
+      color: c.textMuted,
+      textAlign: 'right',
+      marginBottom: 20,
+    },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 28,
+      gap: 16,
+    },
+    switchLabels: {
+      flex: 1,
+      minWidth: 0,
+    },
+    button: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    buttonDisabled: {
+      backgroundColor: c.textMuted,
+    },
+    buttonText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });

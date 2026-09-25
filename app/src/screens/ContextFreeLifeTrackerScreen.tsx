@@ -150,6 +150,11 @@ function pickCoordinatedBgColors(
   return { bgA: secondPick, bgB: firstPick };
 }
 
+/**
+ * GUARDA DE TEMA: esta pantalla queda SIEMPRE en su estilo claro, sin importar el modo global.
+ * No importar `useTheme`/`useThemedStyles`/ThemeContext acá. El aislamiento del header, del fondo
+ * del stack y de la barra de estado está en `theme/lightLock.tsx` y se aplica en MainNavigator.
+ */
 export default function ContextFreeLifeTrackerScreen({ route, navigation }: Props) {
   useKeepAwake();
   const { matchId, encounterId, workspaceId } = route.params;

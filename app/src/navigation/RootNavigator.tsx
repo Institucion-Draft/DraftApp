@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
@@ -7,12 +7,15 @@ import WelcomeScreen from '../screens/WelcomeScreen';
 import AuthStackNavigator from './AuthNavigator';
 import MainStackNavigator from './MainNavigator';
 import type { RootStackParamList } from './rootStackParams';
+import { buildNavigationTheme, useTheme } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
   const { loading } = useAuth();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const { mode, colors } = useTheme();
+  const navigationTheme = useMemo(() => buildNavigationTheme(mode, colors), [mode, colors]);
 
   useEffect(() => {
     if (loading) return undefined;
@@ -40,12 +43,12 @@ export default function RootNavigator() {
   }, [loading, navigationRef]);
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="Welcome"
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#ffffff' },
+          contentStyle: { backgroundColor: colors.background },
         }}
       >
         <Stack.Screen name="Welcome" component={WelcomeScreen} />

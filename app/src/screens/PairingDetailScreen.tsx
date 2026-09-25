@@ -27,6 +27,8 @@ import {
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
 import { useCanManageEvent } from '../hooks/useCanManageEvent';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 const ABORT_WINDOW_MS = 3 * 60 * 1000;
 
@@ -234,6 +236,8 @@ function computeMatchTurnTimeLines(
 }
 
 export default function PairingDetailScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { pairingId, fromTab: fromPairingsTab = 'official', fromPlayerProfile, bracketMatchId } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -888,7 +892,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -1835,125 +1839,126 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  muted: { color: '#666', fontSize: 14 },
-  scroll: { paddingBottom: 30 },
-  hero: { paddingVertical: 20, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
-  heroThreeCol: { flexDirection: 'row', alignItems: 'stretch', width: '100%' },
-  heroSide: { flex: 1, alignItems: 'center', minWidth: 0 },
-  heroSideLeft: { paddingRight: 4 },
-  heroSideRight: { paddingLeft: 4 },
-  heroCenter: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
-  heroVsBig: { fontSize: 22, fontWeight: '800', color: '#6B7280' },
-  heroPlayerName: { marginTop: 8, fontSize: 14, fontWeight: '700', color: '#111', textAlign: 'center' },
-  heroBo3RowLeft: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-start', paddingLeft: 4 },
-  // row-reverse (no 'row'): el primer box en el JSX es el que se llena con la primera victoria
-  // — para que ese llenado arranque del lado EXTERIOR (lejos del "vs", como ya pasa del lado
-  // izquierdo por construcción), el orden visual de los boxes tiene que invertirse acá.
-  heroBo3RowRight: { flexDirection: 'row-reverse', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },
-  heroBo3RowGreen: { marginTop: 8 },
-  heroBo3RowOrange: { marginTop: 8 },
-  heroBo3RowBlueBelow: { marginTop: 6 },
-  heroBo3Box: {
-    width: 26,
-    height: 12,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    marginRight: 6,
-  },
-  heroBo3Filled: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  heroBo3FilledGreen: { backgroundColor: '#15803D', borderColor: '#15803D' },
-  heroBo3FilledOrange: { backgroundColor: '#F59E0B', borderColor: '#F59E0B' },
-  subAccBlue: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#3B82F6',
-    paddingLeft: 10,
-    paddingVertical: 4,
-    marginBottom: 4,
-  },
-  subAccGreen: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#15803D',
-    paddingLeft: 10,
-    paddingVertical: 4,
-    marginBottom: 4,
-  },
-  subAccGreenSpaced: { marginTop: 16 },
-  subAccOrange: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#F59E0B',
-    paddingLeft: 10,
-    paddingVertical: 4,
-    marginBottom: 4,
-  },
-  subAccOrangeSpaced: { marginTop: 16 },
-  subTitleSwissBlue: { fontSize: 14, fontWeight: '700', color: '#2563EB', marginBottom: 6 },
-  subTitleSwissGreen: { fontSize: 14, fontWeight: '700', color: '#15803D', marginBottom: 6 },
-  subTitleSwissOrange: { fontSize: 14, fontWeight: '700', color: '#F59E0B', marginBottom: 6 },
-  block: { paddingHorizontal: 24, paddingTop: 18 },
-  blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8 },
-  sectionSubtitle: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 6 },
-  sectionSubtitleSpaced: { marginTop: 14 },
-  primaryAboveRevengeWrap: { marginTop: 16, marginBottom: 4 },
-  revengeCounter: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  meta: { fontSize: 14, color: '#666', marginBottom: 4 },
-  matchMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  matchStartedBy: { fontSize: 12, color: '#6B7280', marginLeft: 6 },
-  matchChartBtn: {
-    justifyContent: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    marginRight: 4,
-  },
-  matchChartEmoji: { fontSize: 18 },
-  matchRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  matchRowMain: { flex: 1, minWidth: 0 },
-  matchAbortActions: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginLeft: 'auto',
-    alignSelf: 'flex-start',
-  },
-  abortTrashBtn: { padding: 4, alignSelf: 'flex-start' },
-  abortTrashEmoji: { fontSize: 14 },
-  abortBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-  },
-  abortBadgeMuted: { backgroundColor: '#E5E7EB', color: '#6B7280' },
-  abortBadgeAlert: { backgroundColor: '#FEE2E2', color: '#DC2626' },
-  walkoverBadge: { backgroundColor: '#FEF3C7', color: '#92400E', marginLeft: 6 },
-  matchRowLive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  matchLiveTxt: { color: '#1D4ED8', fontWeight: '700' },
-  matchLiveScore: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 4 },
-  matchWinner: { color: '#111', fontWeight: '600', fontSize: 13, marginTop: 2 },
-  matchDuration: { color: '#4B5563', fontSize: 12, marginTop: 4, fontWeight: '500' },
-  matchTime: { color: '#6B7280', fontSize: 12, marginTop: 2 },
-  matchTimeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
-  primaryBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 12 },
-  primaryBtnDisabled: { opacity: 0.45 },
-  primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  resumeBtn: { backgroundColor: '#FACC15' },
-  resumeBtnTxt: { color: '#111827' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    muted: { color: c.textSecondary, fontSize: 14 },
+    scroll: { paddingBottom: 30 },
+    hero: { paddingVertical: 20, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider },
+    heroThreeCol: { flexDirection: 'row', alignItems: 'stretch', width: '100%' },
+    heroSide: { flex: 1, alignItems: 'center', minWidth: 0 },
+    heroSideLeft: { paddingRight: 4 },
+    heroSideRight: { paddingLeft: 4 },
+    heroCenter: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16 },
+    heroVsBig: { fontSize: 22, fontWeight: '800', color: c.textSecondary },
+    heroPlayerName: { marginTop: 8, fontSize: 14, fontWeight: '700', color: c.text, textAlign: 'center' },
+    heroBo3RowLeft: { flexDirection: 'row', marginTop: 10, alignSelf: 'flex-start', paddingLeft: 4 },
+    // row-reverse (no 'row'): el primer box en el JSX es el que se llena con la primera victoria
+    // — para que ese llenado arranque del lado EXTERIOR (lejos del "vs", como ya pasa del lado
+    // izquierdo por construcción), el orden visual de los boxes tiene que invertirse acá.
+    heroBo3RowRight: { flexDirection: 'row-reverse', marginTop: 10, alignSelf: 'flex-end', paddingRight: 4 },
+    heroBo3RowGreen: { marginTop: 8 },
+    heroBo3RowOrange: { marginTop: 8 },
+    heroBo3RowBlueBelow: { marginTop: 6 },
+    heroBo3Box: {
+      width: 26,
+      height: 12,
+      borderRadius: 3,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      marginRight: 6,
+    },
+    heroBo3Filled: { backgroundColor: c.accent, borderColor: c.accent },
+    heroBo3FilledGreen: { backgroundColor: c.status.success.solid, borderColor: c.status.success.solid },
+    heroBo3FilledOrange: { backgroundColor: c.status.warning.solid, borderColor: c.status.warning.solid },
+    subAccBlue: {
+      borderLeftWidth: 3,
+      borderLeftColor: c.accent,
+      paddingLeft: 10,
+      paddingVertical: 4,
+      marginBottom: 4,
+    },
+    subAccGreen: {
+      borderLeftWidth: 3,
+      borderLeftColor: c.status.success.solid,
+      paddingLeft: 10,
+      paddingVertical: 4,
+      marginBottom: 4,
+    },
+    subAccGreenSpaced: { marginTop: 16 },
+    subAccOrange: {
+      borderLeftWidth: 3,
+      borderLeftColor: c.status.warning.solid,
+      paddingLeft: 10,
+      paddingVertical: 4,
+      marginBottom: 4,
+    },
+    subAccOrangeSpaced: { marginTop: 16 },
+    subTitleSwissBlue: { fontSize: 14, fontWeight: '700', color: c.accent, marginBottom: 6 },
+    subTitleSwissGreen: { fontSize: 14, fontWeight: '700', color: c.status.success.text, marginBottom: 6 },
+    subTitleSwissOrange: { fontSize: 14, fontWeight: '700', color: c.status.warning.solid, marginBottom: 6 },
+    block: { paddingHorizontal: 24, paddingTop: 18 },
+    blockTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 8 },
+    sectionSubtitle: { fontSize: 14, fontWeight: '700', color: c.textBody, marginBottom: 6 },
+    sectionSubtitleSpaced: { marginTop: 14 },
+    primaryAboveRevengeWrap: { marginTop: 16, marginBottom: 4 },
+    revengeCounter: { fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 },
+    meta: { fontSize: 14, color: c.textSecondary, marginBottom: 4 },
+    matchMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+    },
+    matchStartedBy: { fontSize: 12, color: c.textSecondary, marginLeft: 6 },
+    matchChartBtn: {
+      justifyContent: 'center',
+      alignSelf: 'flex-start',
+      paddingVertical: 4,
+      paddingHorizontal: 4,
+      marginRight: 4,
+    },
+    matchChartEmoji: { fontSize: 18 },
+    matchRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginBottom: 8,
+    },
+    matchRowMain: { flex: 1, minWidth: 0 },
+    matchAbortActions: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginLeft: 'auto',
+      alignSelf: 'flex-start',
+    },
+    abortTrashBtn: { padding: 4, alignSelf: 'flex-start' },
+    abortTrashEmoji: { fontSize: 14 },
+    abortBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+      fontSize: 12,
+      fontWeight: '700',
+      overflow: 'hidden',
+    },
+    abortBadgeMuted: { backgroundColor: c.border, color: c.textSecondary },
+    abortBadgeAlert: { backgroundColor: c.status.error.subtle, color: c.status.error.solid },
+    walkoverBadge: { backgroundColor: c.status.warning.subtle, color: c.status.warning.text, marginLeft: 6 },
+    matchRowLive: { borderColor: c.accent, backgroundColor: c.status.info.subtle },
+    matchLiveTxt: { color: c.status.info.text, fontWeight: '700' },
+    matchLiveScore: { color: c.text, fontWeight: '600', fontSize: 13, marginTop: 4 },
+    matchWinner: { color: c.text, fontWeight: '600', fontSize: 13, marginTop: 2 },
+    matchDuration: { color: c.textBody, fontSize: 12, marginTop: 4, fontWeight: '500' },
+    matchTime: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+    matchTimeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
+    primaryBtn: { backgroundColor: c.accent, borderRadius: 8, alignItems: 'center', paddingVertical: 12 },
+    primaryBtnDisabled: { opacity: 0.45 },
+    primaryBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '600' },
+    resumeBtn: { backgroundColor: c.status.warning.solid },
+    resumeBtnTxt: { color: c.status.warning.onSolid },
+  });

@@ -20,6 +20,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceDiary'>;
 
@@ -57,6 +59,8 @@ function formatDiaryWhen(iso: string): string {
 }
 
 export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -190,7 +194,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -245,7 +249,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
                 multiline
                 maxLength={2000}
                 placeholder="Escribí aquí…"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
                 value={formContent}
                 onChangeText={setFormContent}
                 textAlignVertical="top"
@@ -257,7 +261,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.modalPublish} onPress={() => void submitForm()} disabled={formSaving}>
                   {formSaving ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.onAccent} />
                   ) : (
                     <Text style={styles.modalPublishTxt}>Publicar</Text>
                   )}
@@ -271,94 +275,95 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F9FAFB' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  addBtn: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-  },
-  addBtnTxt: { fontSize: 15, fontWeight: '700', color: '#2563EB' },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 28 },
-  empty: { color: '#6B7280', fontSize: 14, marginTop: 20, textAlign: 'center' },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
-  cardHeaderText: { flex: 1, marginLeft: 10, minWidth: 0 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardAuthor: { fontSize: 15, fontWeight: '700', color: '#111827', flexShrink: 1 },
-  cardTypeIcon: { fontSize: 15 },
-  cardMeta: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  cardBody: { fontSize: 15, color: '#1F2937', lineHeight: 22 },
-  modalRoot: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  modalDismiss: {
-    ...StyleSheet.absoluteFill,
-  },
-  modalKb: {
-    width: '100%',
-    maxHeight: '90%',
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 18,
-    maxHeight: '85%',
-  },
-  modalTitle: { fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 12 },
-  segmentRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  segment: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-  },
-  segmentOn: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#93C5FD' },
-  segmentTxt: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
-  segmentTxtOn: { color: '#1D4ED8' },
-  modalInput: {
-    minHeight: 140,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
-    color: '#111',
-    marginBottom: 6,
-  },
-  counter: { fontSize: 12, color: '#9CA3AF', textAlign: 'right', marginBottom: 14 },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
-  modalCancel: { paddingVertical: 10, paddingHorizontal: 14 },
-  modalCancelTxt: { fontSize: 16, color: '#6B7280', fontWeight: '600' },
-  modalPublish: {
-    backgroundColor: '#2563EB',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    minWidth: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalPublishTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.backgroundAlt },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    addBtn: {
+      marginHorizontal: 16,
+      marginTop: 16,
+      marginBottom: 8,
+      alignSelf: 'flex-start',
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+    },
+    addBtnTxt: { fontSize: 15, fontWeight: '700', color: c.accent },
+    scroll: { flex: 1 },
+    scrollContent: { paddingHorizontal: 16, paddingBottom: 28 },
+    empty: { color: c.textSecondary, fontSize: 14, marginTop: 20, textAlign: 'center' },
+    card: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: c.shadow,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.06,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    cardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+    cardHeaderText: { flex: 1, marginLeft: 10, minWidth: 0 },
+    cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    cardAuthor: { fontSize: 15, fontWeight: '700', color: c.text, flexShrink: 1 },
+    cardTypeIcon: { fontSize: 15 },
+    cardMeta: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    cardBody: { fontSize: 15, color: c.text, lineHeight: 22 },
+    modalRoot: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+      backgroundColor: c.overlay,
+    },
+    modalDismiss: {
+      ...StyleSheet.absoluteFill,
+    },
+    modalKb: {
+      width: '100%',
+      maxHeight: '90%',
+    },
+    modalCard: {
+      backgroundColor: c.background,
+      borderRadius: 14,
+      padding: 18,
+      maxHeight: '85%',
+    },
+    modalTitle: { fontSize: 17, fontWeight: '700', color: c.text, marginBottom: 12 },
+    segmentRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+    segment: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 10,
+      backgroundColor: c.backgroundAlt,
+      alignItems: 'center',
+    },
+    segmentOn: { backgroundColor: c.status.info.subtle, borderWidth: 1, borderColor: c.accent },
+    segmentTxt: { fontSize: 14, fontWeight: '600', color: c.textSecondary },
+    segmentTxtOn: { color: c.status.info.text },
+    modalInput: {
+      minHeight: 140,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 10,
+      padding: 12,
+      fontSize: 15,
+      color: c.text,
+      marginBottom: 6,
+    },
+    counter: { fontSize: 12, color: c.textMuted, textAlign: 'right', marginBottom: 14 },
+    modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+    modalCancel: { paddingVertical: 10, paddingHorizontal: 14 },
+    modalCancelTxt: { fontSize: 16, color: c.textSecondary, fontWeight: '600' },
+    modalPublish: {
+      backgroundColor: c.accent,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 10,
+      minWidth: 100,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalPublishTxt: { color: c.onAccent, fontWeight: '700', fontSize: 16 },
+  });

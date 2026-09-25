@@ -1,5 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useThemedStyles } from '../../theme';
+import type { ThemeColors } from '../../theme';
 
 export type CascadeStep = {
   title: string;
@@ -8,6 +10,7 @@ export type CascadeStep = {
 };
 
 export default function RuleTieCascadeSteps({ steps }: { steps: CascadeStep[] }) {
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.wrap}>
       {steps.map((step, i) => (
@@ -33,22 +36,23 @@ export default function RuleTieCascadeSteps({ steps }: { steps: CascadeStep[] })
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { marginBottom: 4 },
-  stepRow: { flexDirection: 'row', gap: 10 },
-  badge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  badgeTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  stepBody: { flex: 1 },
-  stepTitle: { fontSize: 14, fontWeight: '700', color: '#111', marginBottom: 3 },
-  stepDesc: { fontSize: 13, color: '#374151', lineHeight: 18, marginBottom: 3 },
-  stepExample: { fontSize: 12, color: '#6B7280', fontStyle: 'italic', marginBottom: 2 },
-  arrow: { fontSize: 14, color: '#9CA3AF', marginVertical: 2, marginLeft: 12 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    wrap: { marginBottom: 4 },
+    stepRow: { flexDirection: 'row', gap: 10 },
+    badge: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+    },
+    badgeTxt: { color: c.onAccent, fontSize: 12, fontWeight: '700' },
+    stepBody: { flex: 1 },
+    stepTitle: { fontSize: 14, fontWeight: '700', color: c.text, marginBottom: 3 },
+    stepDesc: { fontSize: 13, color: c.textBody, lineHeight: 18, marginBottom: 3 },
+    stepExample: { fontSize: 12, color: c.textSecondary, fontStyle: 'italic', marginBottom: 2 },
+    arrow: { fontSize: 14, color: c.textMuted, marginVertical: 2, marginLeft: 12 },
+  });

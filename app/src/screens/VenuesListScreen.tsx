@@ -14,6 +14,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'VenuesList'>;
 
@@ -25,6 +27,8 @@ type VenueRow = {
 };
 
 export default function VenuesListScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -98,7 +102,7 @@ export default function VenuesListScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -128,29 +132,30 @@ export default function VenuesListScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  primaryBtn: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  listWrap: { padding: 16, paddingBottom: 32 },
-  emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  empty: { color: '#666', fontSize: 15 },
-  card: {
-    backgroundColor: '#fafafa',
-    borderColor: '#eee',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-  },
-  name: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 6 },
-  meta: { fontSize: 13, color: '#666' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    primaryBtn: {
+      marginHorizontal: 16,
+      marginTop: 12,
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    primaryBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    listWrap: { padding: 16, paddingBottom: 32 },
+    emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+    empty: { color: c.textSecondary, fontSize: 15 },
+    card: {
+      backgroundColor: c.card,
+      borderColor: c.divider,
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 10,
+    },
+    name: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 6 },
+    meta: { fontSize: 13, color: c.textSecondary },
+  });

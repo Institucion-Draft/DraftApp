@@ -20,6 +20,8 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { PLAYGROUND_PRESENCE_COOLDOWN_HOURS, expireStalePresence, splitPresenceByCooldown } from '../lib/playgroundPresence';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'Playground'>;
 
@@ -75,6 +77,8 @@ async function pickRandomAvatar(): Promise<{ avatarId: string | null; isShiny: b
 }
 
 export default function PlaygroundScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   const { user } = useAuth();
   const [presence, setPresence] = useState<PresenceRow[]>([]);
@@ -267,7 +271,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -300,7 +304,7 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
           disabled={leaving}
         >
           {leaving ? (
-            <ActivityIndicator color="#DC2626" />
+            <ActivityIndicator color={colors.status.error.solid} />
           ) : (
             <Text style={styles.dangerTxt}>Salir de la sala</Text>
           )}
@@ -360,61 +364,62 @@ export default function PlaygroundScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#fff' },
-  content: { paddingBottom: 32 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  header: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 24,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-  },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 6, textAlign: 'center' },
-  subtitle: { fontSize: 14, color: '#666' },
-  block: { paddingHorizontal: 24, paddingTop: 18 },
-  blockTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 10 },
-  muted: { color: '#666', fontSize: 14 },
-  primaryBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  primaryBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  dangerBtn: {
-    backgroundColor: '#FEE2E2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  dangerTxt: { color: '#DC2626', fontSize: 15, fontWeight: '600' },
-  disabledBtn: { opacity: 0.5 },
-  participantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
-    backgroundColor: '#fafafa',
-  },
-  avatarWrap: {
-    width: 44,
-    height: 44,
-    marginRight: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  participantBody: { flex: 1, minWidth: 0 },
-  participantNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  participantName: { fontSize: 15, fontWeight: '700', color: '#111' },
-  pokemonName: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  cooldownText: { fontSize: 12, color: '#EF4444', marginTop: 2 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    scroll: { flex: 1, backgroundColor: c.background },
+    content: { paddingBottom: 32 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    header: {
+      alignItems: 'center',
+      paddingVertical: 24,
+      paddingHorizontal: 24,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    title: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 6, textAlign: 'center' },
+    subtitle: { fontSize: 14, color: c.textSecondary },
+    block: { paddingHorizontal: 24, paddingTop: 18 },
+    blockTitle: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 10 },
+    muted: { color: c.textSecondary, fontSize: 14 },
+    primaryBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    primaryBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '600' },
+    dangerBtn: {
+      backgroundColor: c.status.error.subtle,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    dangerTxt: { color: c.status.error.solid, fontSize: 15, fontWeight: '600' },
+    disabledBtn: { opacity: 0.5 },
+    participantRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 10,
+      padding: 10,
+      marginBottom: 8,
+      backgroundColor: c.card,
+    },
+    avatarWrap: {
+      width: 44,
+      height: 44,
+      marginRight: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    participantBody: { flex: 1, minWidth: 0 },
+    participantNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+    participantName: { fontSize: 15, fontWeight: '700', color: c.text },
+    pokemonName: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
+    cooldownText: { fontSize: 12, color: c.status.error.solid, marginTop: 2 },
+  });

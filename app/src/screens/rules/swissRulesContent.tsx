@@ -5,7 +5,7 @@ import RuleStandingsTable from './RuleStandingsTable';
 import RuleBracketCard from './RuleBracketCard';
 import RuleMatchupSection from './RuleMatchupSection';
 import RuleTieCascadeSteps from './RuleTieCascadeSteps';
-import { rulesStyles as rs } from './rulesStyles';
+import { useRulesStyles } from './rulesStyles';
 import {
   SWISS_SECTION1_BO13_ROWS,
   SWISS_SECTION1_BO2_ROWS,
@@ -16,6 +16,7 @@ import {
 } from './mockData';
 
 export default function SwissRulesContent() {
+  const rs = useRulesStyles();
   return (
     <View>
       {/* Sección 1 */}

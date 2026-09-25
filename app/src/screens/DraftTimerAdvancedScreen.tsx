@@ -58,6 +58,12 @@ function sameFloat(a: number, b: number): boolean {
   return a.toFixed(1) === b.toFixed(1);
 }
 
+/**
+ * GUARDA DE TEMA: esta pantalla queda SIEMPRE en su estilo claro, sin importar el modo global (las
+ * pantallas de cronómetro Config/Advanced/Sim/Preview están excluidas del modo oscuro). No importar
+ * `useTheme`/`useThemedStyles`/ThemeContext acá. El aislamiento del header, del fondo del stack, de
+ * la barra de estado y del subárbol está en `theme/lightLock.tsx` y se aplica en MainNavigator.
+ */
 export default function DraftTimerAdvancedScreen({ route, navigation }: Props) {
   const { eventId, numPlayers, timerPacks, readOnly } = route.params;
 

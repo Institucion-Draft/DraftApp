@@ -34,6 +34,8 @@ import {
 } from '../lib/seasons';
 import { getEventStatusLabel } from '../lib/labels';
 import type { EventStatus } from '../lib/database.types';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceSeason'>;
 
@@ -50,6 +52,8 @@ async function fetchSeason(seasonId: string): Promise<SeasonRow | null> {
 }
 
 export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId, seasonId } = route.params;
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -139,7 +143,7 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -234,34 +238,35 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  muted: { fontSize: 15, color: '#666', textAlign: 'center' },
-  confettiOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 },
-  header: { marginBottom: 14 },
-  title: { fontSize: 22, fontWeight: '800', color: '#111' },
-  subtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  forcedNote: { fontSize: 12, color: '#92400E', marginTop: 6, lineHeight: 17 },
-  sectionLabel: { fontSize: 13, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', marginBottom: 10 },
-  blockedCard: {
-    backgroundColor: '#FFFBEB',
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 16,
-  },
-  blockedTitle: { fontSize: 15, fontWeight: '700', color: '#92400E', marginBottom: 6 },
-  blockedBody: { fontSize: 13, color: '#78350F', marginBottom: 6, lineHeight: 18 },
-  blockedEvent: { fontSize: 13, color: '#78350F', paddingVertical: 2 },
-  blockedHint: { fontSize: 12, color: '#92400E', marginTop: 8, lineHeight: 17 },
-  blockedBtn: {
-    marginTop: 12,
-    backgroundColor: '#DC2626',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  blockedBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
+    muted: { fontSize: 15, color: c.textSecondary, textAlign: 'center' },
+    confettiOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 },
+    header: { marginBottom: 14 },
+    title: { fontSize: 22, fontWeight: '800', color: c.text },
+    subtitle: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
+    forcedNote: { fontSize: 12, color: c.status.warning.text, marginTop: 6, lineHeight: 17 },
+    sectionLabel: { fontSize: 13, fontWeight: '700', color: c.textSecondary, textTransform: 'uppercase', marginBottom: 10 },
+    blockedCard: {
+      backgroundColor: c.status.warning.subtle,
+      borderWidth: 1,
+      borderColor: c.status.warning.border,
+      borderRadius: 10,
+      padding: 14,
+      marginBottom: 16,
+    },
+    blockedTitle: { fontSize: 15, fontWeight: '700', color: c.status.warning.text, marginBottom: 6 },
+    blockedBody: { fontSize: 13, color: c.status.warning.text, marginBottom: 6, lineHeight: 18 },
+    blockedEvent: { fontSize: 13, color: c.status.warning.text, paddingVertical: 2 },
+    blockedHint: { fontSize: 12, color: c.status.warning.text, marginTop: 8, lineHeight: 17 },
+    blockedBtn: {
+      marginTop: 12,
+      backgroundColor: c.status.error.solid,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    blockedBtnText: { color: c.status.error.onSolid, fontSize: 15, fontWeight: '700' },
+  });

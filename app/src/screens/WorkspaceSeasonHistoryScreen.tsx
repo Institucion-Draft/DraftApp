@@ -4,10 +4,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceSeasonHistory'>;
 
 export default function WorkspaceSeasonHistoryScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   const [loading, setLoading] = useState(true);
   const [seasons, setSeasons] = useState<SeasonRow[]>([]);
@@ -33,7 +37,7 @@ export default function WorkspaceSeasonHistoryScreen({ navigation, route }: Prop
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -67,26 +71,27 @@ export default function WorkspaceSeasonHistoryScreen({ navigation, route }: Prop
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  empty: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', paddingVertical: 24, textAlign: 'center' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
-    gap: 10,
-  },
-  rowMain: { flex: 1 },
-  name: { fontSize: 16, fontWeight: '700', color: '#111' },
-  sub: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  badge: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  badgePending: { backgroundColor: '#FEF3C7' },
-  badgeClosed: { backgroundColor: '#E5E7EB' },
-  badgeTxt: { fontSize: 11, fontWeight: '700' },
-  badgeTxtPending: { color: '#92400E' },
-  badgeTxtClosed: { color: '#374151' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 16, paddingBottom: 40 },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.background },
+    empty: { fontSize: 14, color: c.textMuted, fontStyle: 'italic', paddingVertical: 24, textAlign: 'center' },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+      gap: 10,
+    },
+    rowMain: { flex: 1 },
+    name: { fontSize: 16, fontWeight: '700', color: c.text },
+    sub: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    badge: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+    badgePending: { backgroundColor: c.status.warning.subtle },
+    badgeClosed: { backgroundColor: c.backgroundAlt },
+    badgeTxt: { fontSize: 11, fontWeight: '700' },
+    badgeTxtPending: { color: c.status.warning.text },
+    badgeTxtClosed: { color: c.textBody },
+  });

@@ -18,6 +18,7 @@ import {
   type RankingRow,
   type RankingStatsRow,
 } from '../lib/ranking';
+import { useTheme } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'WorkspaceRanking'>;
 
@@ -30,6 +31,7 @@ type PlacementsRow = {
 };
 
 export default function WorkspaceRankingScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
   const { workspaceId } = route.params;
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<RankingRow[]>([]);
@@ -89,7 +91,7 @@ export default function WorkspaceRankingScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.loadingBox}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }

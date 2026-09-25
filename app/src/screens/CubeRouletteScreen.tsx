@@ -14,6 +14,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
@@ -27,6 +29,8 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function CubeRouletteScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { eventId } = route.params;
   const [loading, setLoading] = useState(true);
   const [isOrganizer, setIsOrganizer] = useState(false);
@@ -266,7 +270,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -355,29 +359,30 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 34 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', padding: 24 },
-  denied: { color: '#666', fontSize: 15, textAlign: 'center' },
-  title: { fontSize: 22, fontWeight: '700', color: '#111', marginBottom: 14 },
-  option: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: '#fafafa' },
-  optionActive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  optionTxt: { color: '#111', fontWeight: '600' },
-  spinBtn: { backgroundColor: '#3B82F6', borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
-  spinDisabled: { opacity: 0.5 },
-  spinTxt: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  repeatBtn: { marginTop: 10, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  repeatTxt: { color: '#3B82F6', fontWeight: '700' },
-  resultBlock: { marginTop: 6 },
-  result: { marginTop: 12, color: '#166534', fontWeight: '600' },
-  manualBlock: { marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#eee', paddingTop: 12 },
-  manualTitle: { fontSize: 15, fontWeight: '700', color: '#111', marginBottom: 8 },
-  manualOption: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, marginBottom: 8 },
-  manualOptionActive: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  manualTxt: { color: '#111' },
-  confirmBtn: { backgroundColor: '#3B82F6', borderRadius: 8, alignItems: 'center', paddingVertical: 11, marginTop: 6 },
-  confirmTxt: { color: '#fff', fontWeight: '700' },
-  backBtn: { marginTop: 18, alignItems: 'center' },
-  backTxt: { color: '#666', fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 34 },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background, padding: 24 },
+    denied: { color: c.textSecondary, fontSize: 15, textAlign: 'center' },
+    title: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 14 },
+    option: { borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: c.card },
+    optionActive: { borderColor: c.accent, backgroundColor: c.status.info.subtle },
+    optionTxt: { color: c.text, fontWeight: '600' },
+    spinBtn: { backgroundColor: c.accent, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
+    spinDisabled: { opacity: 0.5 },
+    spinTxt: { color: c.onAccent, fontWeight: '700', fontSize: 16 },
+    repeatBtn: { marginTop: 10, borderWidth: 1, borderColor: c.status.info.border, backgroundColor: c.status.info.subtle, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+    repeatTxt: { color: c.accent, fontWeight: '700' },
+    resultBlock: { marginTop: 6 },
+    result: { marginTop: 12, color: c.status.success.text, fontWeight: '600' },
+    manualBlock: { marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider, paddingTop: 12 },
+    manualTitle: { fontSize: 15, fontWeight: '700', color: c.text, marginBottom: 8 },
+    manualOption: { borderWidth: 1, borderColor: c.border, borderRadius: 8, padding: 10, marginBottom: 8 },
+    manualOptionActive: { borderColor: c.accent, backgroundColor: c.status.info.subtle },
+    manualTxt: { color: c.text },
+    confirmBtn: { backgroundColor: c.accent, borderRadius: 8, alignItems: 'center', paddingVertical: 11, marginTop: 6 },
+    confirmTxt: { color: c.onAccent, fontWeight: '700' },
+    backBtn: { marginTop: 18, alignItems: 'center' },
+    backTxt: { color: c.textSecondary, fontWeight: '600' },
+  });

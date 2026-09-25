@@ -17,6 +17,8 @@ import {
 } from '../lib/seasons';
 import { getEventStatusLabel } from '../lib/labels';
 import type { EventStatus } from '../lib/database.types';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'SeasonForceClose'>;
 
@@ -38,6 +40,8 @@ type ScreenState =
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 export default function SeasonForceCloseScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId, seasonId } = route.params;
   const { user } = useAuth();
   const [state, setState] = useState<ScreenState>({ kind: 'loading', progress: 'Cargando temporada…' });
@@ -156,7 +160,7 @@ export default function SeasonForceCloseScreen({ navigation, route }: Props) {
   if (state.kind === 'loading') {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#3B82F6" />
+        <ActivityIndicator color={colors.accent} />
         <Text style={styles.progress}>{state.progress}</Text>
       </View>
     );
@@ -232,7 +236,7 @@ export default function SeasonForceCloseScreen({ navigation, route }: Props) {
         accessibilityRole="button"
       >
         {submitting ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.status.error.onSolid} />
         ) : (
           <Text style={styles.confirmBtnText}>Cerrar temporada de todos modos</Text>
         )}
@@ -244,52 +248,53 @@ export default function SeasonForceCloseScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 16, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  progress: { marginTop: 12, fontSize: 13, color: '#6B7280', textAlign: 'center' },
-  muted: { fontSize: 15, color: '#666', textAlign: 'center', marginBottom: 16 },
-  title: { fontSize: 22, fontWeight: '800', color: '#111' },
-  lead: { fontSize: 13, color: '#4B5563', lineHeight: 19, marginTop: 6, marginBottom: 14 },
-  card: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-    backgroundColor: '#FAFAFA',
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
-  cardStatus: { fontSize: 12, color: '#6B7280', marginBottom: 6 },
-  emptyTxt: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
-  errorTxt: { fontSize: 13, color: '#B91C1C', marginTop: 4, marginBottom: 6 },
-  playerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3, gap: 8 },
-  medal: { fontSize: 18, width: 26, textAlign: 'center' },
-  playerName: { flex: 1, fontSize: 14, color: '#111' },
-  playerPts: { fontSize: 14, fontWeight: '700', color: '#3B82F6' },
-  warning: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  warningTxt: { fontSize: 13, color: '#991B1B', lineHeight: 18 },
-  confirmBtn: { backgroundColor: '#DC2626', borderRadius: 8, paddingVertical: 13, alignItems: 'center' },
-  confirmBtnDisabled: { opacity: 0.45 },
-  confirmBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  secondaryBtn: {
-    marginTop: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F3F4F6',
-  },
-  secondaryBtnText: { color: '#374151', fontSize: 14, fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { padding: 16, paddingBottom: 40 },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: c.background },
+    progress: { marginTop: 12, fontSize: 13, color: c.textSecondary, textAlign: 'center' },
+    muted: { fontSize: 15, color: c.textSecondary, textAlign: 'center', marginBottom: 16 },
+    title: { fontSize: 22, fontWeight: '800', color: c.text },
+    lead: { fontSize: 13, color: c.textBody, lineHeight: 19, marginTop: 6, marginBottom: 14 },
+    card: {
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 10,
+      backgroundColor: c.card,
+    },
+    cardTitle: { fontSize: 15, fontWeight: '700', color: c.text },
+    cardStatus: { fontSize: 12, color: c.textSecondary, marginBottom: 6 },
+    emptyTxt: { fontSize: 13, color: c.textMuted, fontStyle: 'italic' },
+    errorTxt: { fontSize: 13, color: c.status.error.text, marginTop: 4, marginBottom: 6 },
+    playerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3, gap: 8 },
+    medal: { fontSize: 18, width: 26, textAlign: 'center' },
+    playerName: { flex: 1, fontSize: 14, color: c.text },
+    playerPts: { fontSize: 14, fontWeight: '700', color: c.accent },
+    warning: {
+      backgroundColor: c.status.error.subtle,
+      borderWidth: 1,
+      borderColor: c.status.error.border,
+      borderRadius: 10,
+      padding: 12,
+      marginTop: 4,
+      marginBottom: 12,
+    },
+    warningTxt: { fontSize: 13, color: c.status.error.text, lineHeight: 18 },
+    confirmBtn: { backgroundColor: c.status.error.solid, borderRadius: 8, paddingVertical: 13, alignItems: 'center' },
+    confirmBtnDisabled: { opacity: 0.45 },
+    confirmBtnText: { color: c.status.error.onSolid, fontSize: 15, fontWeight: '700' },
+    secondaryBtn: {
+      marginTop: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.backgroundAlt,
+    },
+    secondaryBtnText: { color: c.textBody, fontSize: 14, fontWeight: '600' },
+  });

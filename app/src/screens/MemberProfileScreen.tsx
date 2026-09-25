@@ -7,10 +7,14 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import CrossEventStats from '../components/CrossEventStats';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'MemberProfile'>;
 
 export default function MemberProfileScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { userId, workspaceId, from } = route.params;
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
@@ -64,7 +68,7 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -88,20 +92,21 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 40, backgroundColor: '#fff', flexGrow: 1 },
-  avatarBlock: { alignItems: 'center', marginBottom: 20 },
-  name: { fontSize: 22, fontWeight: '700', color: '#111', textAlign: 'center', marginBottom: 14 },
-  badge: {
-    alignSelf: 'center',
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-  },
-  badgeTxt: { color: '#1D4ED8', fontSize: 14, fontWeight: '700' },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E5E7EB', marginTop: 24 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 40, backgroundColor: c.background, flexGrow: 1 },
+    avatarBlock: { alignItems: 'center', marginBottom: 20 },
+    name: { fontSize: 22, fontWeight: '700', color: c.text, textAlign: 'center', marginBottom: 14 },
+    badge: {
+      alignSelf: 'center',
+      backgroundColor: c.status.info.subtle,
+      borderWidth: 1,
+      borderColor: c.status.info.border,
+      paddingVertical: 6,
+      paddingHorizontal: 14,
+      borderRadius: 999,
+    },
+    badgeTxt: { color: c.status.info.text, fontSize: 14, fontWeight: '700' },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginTop: 24 },
+  });

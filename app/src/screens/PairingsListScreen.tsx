@@ -18,6 +18,8 @@ import type { MtgColor } from '../lib/database.types';
 import { getPairingStatusLabel } from '../lib/labels';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PairingsList'>;
 
@@ -267,6 +269,7 @@ function shortName(name: string): string {
 }
 
 function LiveMatchDuration({ startedAt }: { startedAt: string | null }) {
+  const styles = useThemedStyles(createStyles);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!startedAt) return;
@@ -280,6 +283,8 @@ function LiveMatchDuration({ startedAt }: { startedAt: string | null }) {
 }
 
 export default function PairingsListScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { eventId } = route.params;
   const isFocused = useIsFocused();
   const [myUserId, setMyUserId] = useState<string | null>(null);
@@ -1481,7 +1486,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -2090,117 +2095,118 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  tabsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
-    backgroundColor: '#fff',
-  },
-  tabBtn: { marginRight: 22, paddingBottom: 8 },
-  tabLabel: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
-  tabLabelActive: { color: '#111827', fontWeight: '800' },
-  tabUnderline: { height: 2, backgroundColor: '#3B82F6', borderRadius: 1, marginTop: 6 },
-  tabUnderlineHidden: { backgroundColor: 'transparent' },
-  listWrap: { padding: 16, paddingBottom: 30 },
-  groupWrap: { marginBottom: 12 },
-  groupHeader: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 8, marginTop: 2 },
-  tiebreakOfficialHeaderWrap: { marginBottom: 4 },
-  officialListSectionTitle: { marginTop: 18 },
-  swissRoundHeader: { marginBottom: 6 },
-  tiebreakRoundSubheader: { marginTop: 12, marginBottom: 2 },
-  bracketPhaseSubheader: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6B7280',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  bracketPlaceholderAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bracketPlaceholderQuestion: {
-    color: '#6B7280',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  tiebreakDimmed: { opacity: 0.4 },
-  tiebreakCard: {
-    backgroundColor: '#FFFBEB',
-    borderColor: '#FDE68A',
-  },
-  tiebreakCardPlayed: { opacity: 0.7 },
-  tiebreakGanoLine: {
-    alignSelf: 'stretch',
-    color: '#166534',
-    fontWeight: '600',
-    fontSize: 12,
-    textAlign: 'left',
-  },
-  emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  empty: { color: '#666', fontSize: 15 },
-  byeFooterWrap: { paddingTop: 4, paddingBottom: 8 },
-  byeCard: { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
-  byeLabel: { fontSize: 12, fontWeight: '800', color: '#166534', marginBottom: 6 },
-  byeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  byeName: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  swissRevengeStandaloneWrap: { paddingTop: 8, paddingBottom: 16 },
-  otherRevengeSectionTitle: { marginTop: 16 },
-  card: {
-    backgroundColor: '#fafafa',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  compactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
-  inlinePlayerRight: { justifyContent: 'flex-end' },
-  giantAvatarPairCard: { flexDirection: 'row', alignItems: 'center' },
-  playerRightText: { alignItems: 'flex-end' },
-  winnerAvatarWrap: { marginRight: 6 },
-  name: { fontSize: 12, color: '#111', fontWeight: '700' },
-  nameRight: { fontSize: 12, color: '#111', fontWeight: '700', textAlign: 'right' },
-  scoreWrap: { minWidth: 74, alignItems: 'center' },
-  scoreNum: { color: '#111827', fontWeight: '800', fontSize: 16 },
-  scoreNumIdle: { color: '#6B7280', fontWeight: '700', fontSize: 14 },
-  vs: { color: '#6B7280', fontWeight: '700', fontSize: 13 },
-  bo3Row: { flexDirection: 'row', marginTop: 4 },
-  bo3RowRight: { justifyContent: 'flex-end' },
-  bo3Box: {
-    width: 14,
-    height: 7,
-    borderRadius: 2,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    marginRight: 4,
-  },
-  bo3Filled: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  footer: {
-    marginTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e8e8e8',
-    paddingTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  footerLeft: { flex: 1, alignItems: 'flex-start' },
-  footerCenter: { flex: 1, alignItems: 'center' },
-  footerRight: { flex: 1 },
-  status: { color: '#3B82F6', fontWeight: '700', fontSize: 12 },
-  liveCentered: { color: '#3B82F6', fontWeight: '800', fontSize: 12, textAlign: 'center' },
-  winnerWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  winnerTxt: { color: '#166534', fontWeight: '600', fontSize: 12 },
-  liveDuration: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    tabsRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      backgroundColor: c.background,
+    },
+    tabBtn: { marginRight: 22, paddingBottom: 8 },
+    tabLabel: { fontSize: 15, fontWeight: '600', color: c.textSecondary },
+    tabLabelActive: { color: c.text, fontWeight: '800' },
+    tabUnderline: { height: 2, backgroundColor: c.accent, borderRadius: 1, marginTop: 6 },
+    tabUnderlineHidden: { backgroundColor: 'transparent' },
+    listWrap: { padding: 16, paddingBottom: 30 },
+    groupWrap: { marginBottom: 12 },
+    groupHeader: { fontSize: 16, fontWeight: '800', color: c.text, marginBottom: 8, marginTop: 2 },
+    tiebreakOfficialHeaderWrap: { marginBottom: 4 },
+    officialListSectionTitle: { marginTop: 18 },
+    swissRoundHeader: { marginBottom: 6 },
+    tiebreakRoundSubheader: { marginTop: 12, marginBottom: 2 },
+    bracketPhaseSubheader: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: c.textSecondary,
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    bracketPlaceholderAvatar: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: c.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bracketPlaceholderQuestion: {
+      color: c.textSecondary,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    tiebreakDimmed: { opacity: 0.4 },
+    tiebreakCard: {
+      backgroundColor: c.status.warning.subtle,
+      borderColor: c.status.warning.border,
+    },
+    tiebreakCardPlayed: { opacity: 0.7 },
+    tiebreakGanoLine: {
+      alignSelf: 'stretch',
+      color: c.status.success.text,
+      fontWeight: '600',
+      fontSize: 12,
+      textAlign: 'left',
+    },
+    emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+    empty: { color: c.textSecondary, fontSize: 15 },
+    byeFooterWrap: { paddingTop: 4, paddingBottom: 8 },
+    byeCard: { backgroundColor: c.status.success.subtle, borderColor: c.status.success.border },
+    byeLabel: { fontSize: 12, fontWeight: '800', color: c.status.success.text, marginBottom: 6 },
+    byeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    byeName: { fontSize: 14, fontWeight: '700', color: c.text },
+    swissRevengeStandaloneWrap: { paddingTop: 8, paddingBottom: 16 },
+    otherRevengeSectionTitle: { marginTop: 16 },
+    card: {
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      marginBottom: 8,
+    },
+    compactRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    inlinePlayer: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
+    inlinePlayerRight: { justifyContent: 'flex-end' },
+    giantAvatarPairCard: { flexDirection: 'row', alignItems: 'center' },
+    playerRightText: { alignItems: 'flex-end' },
+    winnerAvatarWrap: { marginRight: 6 },
+    name: { fontSize: 12, color: c.text, fontWeight: '700' },
+    nameRight: { fontSize: 12, color: c.text, fontWeight: '700', textAlign: 'right' },
+    scoreWrap: { minWidth: 74, alignItems: 'center' },
+    scoreNum: { color: c.text, fontWeight: '800', fontSize: 16 },
+    scoreNumIdle: { color: c.textSecondary, fontWeight: '700', fontSize: 14 },
+    vs: { color: c.textSecondary, fontWeight: '700', fontSize: 13 },
+    bo3Row: { flexDirection: 'row', marginTop: 4 },
+    bo3RowRight: { justifyContent: 'flex-end' },
+    bo3Box: {
+      width: 14,
+      height: 7,
+      borderRadius: 2,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      marginRight: 4,
+    },
+    bo3Filled: { backgroundColor: c.accent, borderColor: c.accent },
+    footer: {
+      marginTop: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.divider,
+      paddingTop: 6,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    footerLeft: { flex: 1, alignItems: 'flex-start' },
+    footerCenter: { flex: 1, alignItems: 'center' },
+    footerRight: { flex: 1 },
+    status: { color: c.accent, fontWeight: '700', fontSize: 12 },
+    liveCentered: { color: c.accent, fontWeight: '800', fontSize: 12, textAlign: 'center' },
+    winnerWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+    winnerTxt: { color: c.status.success.text, fontWeight: '600', fontSize: 12 },
+    liveDuration: { fontSize: 11, color: c.textSecondary, marginTop: 2 },
+  });

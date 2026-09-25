@@ -15,12 +15,16 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../contexts/AuthContext';
 import type { Gender } from '../lib/genderText';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = {
   onNavigateToLogin: () => void;
 };
 
 export default function SignUpScreen({ onNavigateToLogin }: Props) {
+  const { mode, colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { signUp } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -99,6 +103,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Email"
+          placeholderTextColor={colors.textMuted}
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
@@ -110,6 +115,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Contraseña (mínimo 6 caracteres)"
+          placeholderTextColor={colors.textMuted}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
@@ -119,6 +125,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Confirmar contraseña"
+          placeholderTextColor={colors.textMuted}
           value={passwordConfirm}
           onChangeText={setPasswordConfirm}
           secureTextEntry
@@ -174,6 +181,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
                   <DateTimePicker
                     value={birthDate ?? new Date(2000, 0, 1)}
                     mode="date"
+                    themeVariant={mode}
                     display="spinner"
                     maximumDate={new Date()}
                     onChange={(_event, date) => {
@@ -203,7 +211,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.onAccent} />
           ) : (
             <Text style={styles.buttonText}>Crear cuenta</Text>
           )}
@@ -223,102 +231,105 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  title: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 18,
-    textAlign: 'center',
-    color: '#666',
-    marginBottom: 40,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    marginBottom: 12,
-    backgroundColor: '#fafafa',
-  },
-  fieldLabel: { fontSize: 14, color: '#374151', fontWeight: '600', marginBottom: 8, marginTop: 4 },
-  genderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  genderBtn: {
-    width: '48%',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  genderBtnSelected: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
-  genderBtnText: { fontSize: 13, color: '#374151', fontWeight: '600' },
-  genderBtnTextSelected: { color: '#fff' },
-  dateBtn: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: '#fafafa',
-  },
-  dateBtnText: { fontSize: 16, color: '#111827' },
-  dateBtnPlaceholder: { fontSize: 16, color: '#9CA3AF' },
-  dateModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-    padding: 12,
-  },
-  dateModalCard: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  dateModalHeader: { flexDirection: 'row', justifyContent: 'flex-end' },
-  dateModalDone: { color: '#3B82F6', fontWeight: '600', fontSize: 16 },
-  button: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkContainer: {
-    marginTop: 24,
-    alignItems: 'center',
-  },
-  linkText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  linkBold: {
-    color: '#3B82F6',
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    content: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    title: {
+      fontSize: 36,
+      fontWeight: 'bold',
+      color: c.text,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    subtitle: {
+      fontSize: 18,
+      textAlign: 'center',
+      color: c.textSecondary,
+      marginBottom: 40,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      marginBottom: 12,
+      backgroundColor: c.card,
+      color: c.text,
+    },
+    fieldLabel: { fontSize: 14, color: c.textBody, fontWeight: '600', marginBottom: 8, marginTop: 4 },
+    genderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+    genderBtn: {
+      width: '48%',
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 10,
+      alignItems: 'center',
+      backgroundColor: c.background,
+    },
+    genderBtnSelected: { backgroundColor: c.accent, borderColor: c.accent },
+    genderBtnText: { fontSize: 13, color: c.textBody, fontWeight: '600' },
+    genderBtnTextSelected: { color: c.onAccent },
+    dateBtn: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      marginBottom: 12,
+      backgroundColor: c.card,
+    },
+    dateBtnText: { fontSize: 16, color: c.text },
+    dateBtnPlaceholder: { fontSize: 16, color: c.textMuted },
+    dateModalOverlay: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: 'flex-end',
+      padding: 12,
+    },
+    dateModalCard: {
+      backgroundColor: c.background,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 12,
+    },
+    dateModalHeader: { flexDirection: 'row', justifyContent: 'flex-end' },
+    dateModalDone: { color: c.accent, fontWeight: '600', fontSize: 16 },
+    button: {
+      backgroundColor: c.accent,
+      paddingVertical: 14,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    buttonDisabled: {
+      backgroundColor: c.textMuted,
+    },
+    buttonText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    linkContainer: {
+      marginTop: 24,
+      alignItems: 'center',
+    },
+    linkText: {
+      fontSize: 14,
+      color: c.textSecondary,
+    },
+    linkBold: {
+      color: c.accent,
+      fontWeight: '600',
+    },
+  });

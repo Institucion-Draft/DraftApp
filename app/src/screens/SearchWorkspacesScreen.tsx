@@ -19,6 +19,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'SearchWorkspaces'>;
 
@@ -42,6 +44,8 @@ function escapeIlikePattern(s: string): string {
 }
 
 export default function SearchWorkspacesScreen({ navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { user } = useAuth();
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -253,7 +257,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
       <TextInput
         style={styles.search}
         placeholder="Buscar por nombre…"
-        placeholderTextColor="#999"
+        placeholderTextColor={colors.textMuted}
         value={query}
         onChangeText={setQuery}
         autoCapitalize="none"
@@ -263,7 +267,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
 
       {searching ? (
         <View style={styles.searchingBox}>
-          <ActivityIndicator color="#3B82F6" />
+          <ActivityIndicator color={colors.accent} />
         </View>
       ) : null}
 
@@ -313,7 +317,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
               value={joinMessage}
               onChangeText={setJoinMessage}
               placeholder="Ej.: Juego con ustedes los viernes…"
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.textMuted}
               multiline
               maxLength={JOIN_MSG_MAX}
               editable={!joinSubmitting}
@@ -340,7 +344,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
                 disabled={joinSubmitting}
               >
                 {joinSubmitting ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.onAccent} />
                 ) : (
                   <Text style={styles.modalConfirmText}>Enviar solicitud</Text>
                 )}
@@ -353,199 +357,202 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  search: {
-    marginHorizontal: 16,
-    marginVertical: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-  },
-  searchingBox: {
-    paddingVertical: 8,
-  },
-  hintBox: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  hintText: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-  },
-  listEmpty: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#666',
-    fontSize: 15,
-  },
-  card: {
-    backgroundColor: '#fafafa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  cardAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    marginRight: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  cardAvatarPh: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E0E7FF',
-  },
-  cardAvatarLetter: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#4338CA',
-  },
-  cardBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#111',
-    marginBottom: 4,
-  },
-  cardDesc: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  tag: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  tagMember: {
-    backgroundColor: '#DCFCE7',
-  },
-  tagMemberText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#15803D',
-  },
-  tagPending: {
-    backgroundColor: '#FEF9C3',
-  },
-  tagPendingText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#A16207',
-  },
-  joinBtn: {
-    alignSelf: 'flex-start',
-    marginTop: 6,
-    backgroundColor: '#3B82F6',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-  },
-  joinBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 8,
-  },
-  modalHint: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    minHeight: 100,
-    textAlignVertical: 'top',
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-  },
-  modalCounter: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  modalCancel: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  modalCancelText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalConfirm: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    minWidth: 140,
-    alignItems: 'center',
-    marginLeft: 12,
-  },
-  modalConfirmDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  modalConfirmText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    search: {
+      marginHorizontal: 16,
+      marginVertical: 12,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      backgroundColor: c.card,
+      color: c.text,
+    },
+    searchingBox: {
+      paddingVertical: 8,
+    },
+    hintBox: {
+      paddingHorizontal: 24,
+      paddingTop: 24,
+    },
+    hintText: {
+      fontSize: 15,
+      color: c.textSecondary,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    listContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 24,
+    },
+    listEmpty: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+      justifyContent: 'center',
+    },
+    emptyText: {
+      textAlign: 'center',
+      color: c.textSecondary,
+      fontSize: 15,
+    },
+    card: {
+      backgroundColor: c.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.divider,
+      padding: 14,
+      marginBottom: 12,
+    },
+    cardRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    cardAvatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 10,
+      marginRight: 12,
+      backgroundColor: c.backgroundAlt,
+    },
+    cardAvatarPh: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.status.info.subtle,
+    },
+    cardAvatarLetter: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: c.status.info.text,
+    },
+    cardBody: {
+      flex: 1,
+      minWidth: 0,
+    },
+    cardTitle: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: c.text,
+      marginBottom: 4,
+    },
+    cardDesc: {
+      fontSize: 14,
+      color: c.textSecondary,
+      lineHeight: 20,
+      marginBottom: 8,
+    },
+    tag: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 6,
+      marginTop: 4,
+    },
+    tagMember: {
+      backgroundColor: c.status.success.subtle,
+    },
+    tagMemberText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.status.success.text,
+    },
+    tagPending: {
+      backgroundColor: c.status.warning.subtle,
+    },
+    tagPendingText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.status.warning.text,
+    },
+    joinBtn: {
+      alignSelf: 'flex-start',
+      marginTop: 6,
+      backgroundColor: c.accent,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 8,
+    },
+    joinBtnText: {
+      color: c.onAccent,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      backgroundColor: c.background,
+      borderRadius: 12,
+      padding: 20,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: c.text,
+      marginBottom: 8,
+    },
+    modalHint: {
+      fontSize: 14,
+      color: c.textSecondary,
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    modalInput: {
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      padding: 12,
+      minHeight: 100,
+      textAlignVertical: 'top',
+      fontSize: 16,
+      backgroundColor: c.card,
+      color: c.text,
+    },
+    modalCounter: {
+      fontSize: 12,
+      color: c.textMuted,
+      textAlign: 'right',
+      marginTop: 4,
+      marginBottom: 16,
+    },
+    modalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+    },
+    modalCancel: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    modalCancelText: {
+      color: c.textSecondary,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    modalConfirm: {
+      backgroundColor: c.accent,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+      minWidth: 140,
+      alignItems: 'center',
+      marginLeft: 12,
+    },
+    modalConfirmDisabled: {
+      backgroundColor: c.textMuted,
+    },
+    modalConfirmText: {
+      color: c.onAccent,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  });

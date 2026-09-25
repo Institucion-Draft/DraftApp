@@ -14,10 +14,13 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventCheckIn'>;
 
 /** Mazo: solo W/U/B/R/G (sin incoloro en la app). */
+// Chips de color MTG (W/U/B/R/G): contenido, fijos en ambos modos (fondo y texto propios de cada color).
 const DECK_COLOR_OPTIONS: { key: MtgColor; bg: string; text: string }[] = [
   { key: 'W', bg: '#F8FAFC', text: '#111827' },
   { key: 'U', bg: '#DBEAFE', text: '#1E3A8A' },
@@ -39,6 +42,8 @@ function sameColorSet(a: MtgColor[], b: MtgColor[]): boolean {
 }
 
 export default function EventCheckInScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const {
     eventId,
     returnTo = 'EventDetail',
@@ -323,7 +328,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -401,7 +406,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
           onPress={() => void persistWizard({ withEvaluation: true })}
           disabled={saving}
         >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
+          {saving ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.secondaryBtn, saving && styles.saveBtnDisabled]}
@@ -438,45 +443,46 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
         onPress={() => void persistEditColorsOnly()}
         disabled={saving || editSaveDisabled}
       >
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
+        {saving ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.saveBtnTxt}>Guardar</Text>}
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  scroll: { padding: 24, paddingBottom: 38 },
-  title: { fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 14 },
-  label: { fontSize: 15, color: '#111', fontWeight: '600', marginBottom: 10 },
-  colorsWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 24 },
-  colorPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  colorPillActive: { borderColor: '#3B82F6', borderWidth: 2 },
-  colorTxt: { fontSize: 14, fontWeight: '700' },
-  starsWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 },
-  starBtn: { padding: 4, marginRight: 4 },
-  star: { fontSize: 28, color: '#D1D5DB' },
-  starActive: { color: '#F59E0B' },
-  saveBtn: { backgroundColor: '#3B82F6', borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
-  saveBtnDisabled: { backgroundColor: '#9CA3AF' },
-  saveBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  secondaryBtn: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  secondaryBtnTxt: { color: '#374151', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    scroll: { padding: 24, paddingBottom: 38 },
+    title: { fontSize: 20, fontWeight: '700', color: c.text, marginBottom: 14 },
+    label: { fontSize: 15, color: c.text, fontWeight: '600', marginBottom: 10 },
+    colorsWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 24 },
+    colorPill: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      marginRight: 8,
+      marginBottom: 8,
+    },
+    colorPillActive: { borderColor: c.accent, borderWidth: 2 },
+    colorTxt: { fontSize: 14, fontWeight: '700' },
+    starsWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 },
+    starBtn: { padding: 4, marginRight: 4 },
+    star: { fontSize: 28, color: c.borderStrong },
+    starActive: { color: c.status.warning.solid },
+    saveBtn: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+    saveBtnDisabled: { backgroundColor: c.textMuted },
+    saveBtnTxt: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    secondaryBtn: {
+      marginTop: 12,
+      borderWidth: 1,
+      borderColor: c.borderStrong,
+      borderRadius: 8,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: c.card,
+    },
+    secondaryBtnTxt: { color: c.textBody, fontSize: 16, fontWeight: '600' },
+  });

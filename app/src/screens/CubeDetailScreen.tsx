@@ -17,6 +17,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeDetail'>;
 
@@ -34,6 +36,8 @@ type CubeStatsRow = {
 };
 
 export default function CubeDetailScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { cubeId } = route.params;
   const [row, setRow] = useState<CubeStatsRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,7 +123,7 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -175,36 +179,37 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  muted: { color: '#666', fontSize: 15 },
-  scroll: { padding: 24, paddingBottom: 40, alignItems: 'center' },
-  avatar: { width: 92, height: 92, borderRadius: 16, backgroundColor: '#f3f4f6', marginBottom: 14 },
-  avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E0E7FF' },
-  avatarTxt: { fontSize: 36, fontWeight: '700', color: '#4338CA' },
-  title: { fontSize: 24, fontWeight: '700', color: '#111', marginBottom: 14, textAlign: 'center' },
-  item: { fontSize: 15, color: '#444', marginBottom: 6, alignSelf: 'stretch' },
-  section: { alignSelf: 'stretch', marginTop: 18, marginBottom: 8, fontSize: 16, fontWeight: '700', color: '#111' },
-  notes: {
-    alignSelf: 'stretch',
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 21,
-    backgroundColor: '#fafafa',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 10,
-    padding: 12,
-  },
-  linkBtn: {
-    marginTop: 20,
-    alignSelf: 'stretch',
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 13,
-    alignItems: 'center',
-  },
-  linkBtnText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  editTop: { color: '#3B82F6', fontSize: 16, fontWeight: '600' },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    muted: { color: c.textSecondary, fontSize: 15 },
+    scroll: { padding: 24, paddingBottom: 40, alignItems: 'center' },
+    avatar: { width: 92, height: 92, borderRadius: 16, backgroundColor: c.backgroundAlt, marginBottom: 14 },
+    avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: c.status.info.subtle },
+    avatarTxt: { fontSize: 36, fontWeight: '700', color: c.status.info.text },
+    title: { fontSize: 24, fontWeight: '700', color: c.text, marginBottom: 14, textAlign: 'center' },
+    item: { fontSize: 15, color: c.textBody, marginBottom: 6, alignSelf: 'stretch' },
+    section: { alignSelf: 'stretch', marginTop: 18, marginBottom: 8, fontSize: 16, fontWeight: '700', color: c.text },
+    notes: {
+      alignSelf: 'stretch',
+      fontSize: 14,
+      color: c.textSecondary,
+      lineHeight: 21,
+      backgroundColor: c.card,
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: 10,
+      padding: 12,
+    },
+    linkBtn: {
+      marginTop: 20,
+      alignSelf: 'stretch',
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 13,
+      alignItems: 'center',
+    },
+    linkBtnText: { color: c.onAccent, fontWeight: '600', fontSize: 16 },
+    editTop: { color: c.accent, fontSize: 16, fontWeight: '600' },
+  });

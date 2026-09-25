@@ -19,6 +19,8 @@ import type { EventType, EventStatus } from '../lib/database.types';
 import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { useTheme, useThemedStyles } from '../theme';
+import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventsList'>;
 
@@ -41,6 +43,8 @@ function relationOne<T>(rel: T | T[] | null | undefined): T | null {
 }
 
 export default function EventsListScreen({ navigation, route }: Props) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -303,7 +307,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -421,139 +425,142 @@ export default function EventsListScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  primaryBtn: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  listWrap: { padding: 16, paddingBottom: 32 },
-  emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  empty: { color: '#666', fontSize: 15 },
-  card: {
-    backgroundColor: '#fafafa',
-    borderColor: '#eee',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-  },
-  row: { flexDirection: 'row', alignItems: 'flex-start' },
-  avatar: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#f3f4f6', marginRight: 10 },
-  avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E0E7FF' },
-  avatarTxt: { fontSize: 18, fontWeight: '700', color: '#4338CA' },
-  body: { flex: 1, minWidth: 0 },
-  name: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 4 },
-  meta: { fontSize: 12, color: '#666', marginBottom: 2 },
-  todayBadge: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    backgroundColor: '#F59E0B',
-    borderRadius: 6,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-  },
-  todayBadgeTxt: { color: '#fff', fontWeight: '700', fontSize: 11 },
-  countdown: { marginTop: 8, fontSize: 12, fontWeight: '600', color: '#3B82F6' },
-  champCol: {
-    marginLeft: 8,
-    alignItems: 'center',
-    maxWidth: 76,
-  },
-  champAvatarWrap: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  champAvatarWrap2HG: {
-    width: 64,
-    height: 38,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  champAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 2,
-    borderColor: '#3B82F6',
-  },
-  champAvatarSmall: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 2,
-    borderColor: '#3B82F6',
-  },
-  champAvatarShinyRing: {
-    borderColor: '#FBBF24',
-    borderWidth: 2.5,
-  },
-  shinyCupMark: {
-    position: 'absolute',
-    top: -10,
-    alignSelf: 'center',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  shinyCupMarkTxt: {
-    fontSize: 14,
-    lineHeight: 16,
-    textShadowColor: 'rgba(251, 191, 36, 0.8)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 4,
-  },
-  champBadge: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#FBBF24',
-    borderWidth: 1,
-    borderColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  champBadgeSmall: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 15,
-    height: 15,
-    borderRadius: 7,
-    backgroundColor: '#FBBF24',
-    borderWidth: 1,
-    borderColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  champBadgeSmallText: {
-    color: '#fff',
-    fontSize: 8,
-    fontWeight: '800',
-    lineHeight: 10,
-  },
-  champBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 12,
-  },
-  champName: {
-    fontSize: 11,
-    color: '#6B7280',
-    marginTop: 2,
-    textAlign: 'center',
-    maxWidth: 76,
-  },
-});
+const createStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
+    primaryBtn: {
+      marginHorizontal: 16,
+      marginTop: 12,
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    primaryBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    listWrap: { padding: 16, paddingBottom: 32 },
+    emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+    empty: { color: c.textSecondary, fontSize: 15 },
+    card: {
+      backgroundColor: c.card,
+      borderColor: c.divider,
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+    },
+    row: { flexDirection: 'row', alignItems: 'flex-start' },
+    avatar: { width: 46, height: 46, borderRadius: 10, backgroundColor: c.backgroundAlt, marginRight: 10 },
+    avatarPh: { justifyContent: 'center', alignItems: 'center', backgroundColor: c.status.info.subtle },
+    avatarTxt: { fontSize: 18, fontWeight: '700', color: c.status.info.text },
+    body: { flex: 1, minWidth: 0 },
+    name: { fontSize: 16, fontWeight: '700', color: c.text, marginBottom: 4 },
+    meta: { fontSize: 12, color: c.textSecondary, marginBottom: 2 },
+    todayBadge: {
+      alignSelf: 'flex-start',
+      marginTop: 8,
+      backgroundColor: c.status.warning.solid,
+      borderRadius: 6,
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+    },
+    todayBadgeTxt: { color: c.status.warning.onSolid, fontWeight: '700', fontSize: 11 },
+    countdown: { marginTop: 8, fontSize: 12, fontWeight: '600', color: c.accent },
+    champCol: {
+      marginLeft: 8,
+      alignItems: 'center',
+      maxWidth: 76,
+    },
+    champAvatarWrap: {
+      width: 38,
+      height: 38,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    champAvatarWrap2HG: {
+      width: 64,
+      height: 38,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    champAvatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      borderWidth: 2,
+      borderColor: c.accent,
+    },
+    champAvatarSmall: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      borderWidth: 2,
+      borderColor: c.accent,
+    },
+    champAvatarShinyRing: {
+      borderColor: '#FBBF24',
+      borderWidth: 2.5,
+    },
+    shinyCupMark: {
+      position: 'absolute',
+      top: -10,
+      alignSelf: 'center',
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+    },
+    shinyCupMarkTxt: {
+      fontSize: 14,
+      lineHeight: 16,
+      textShadowColor: 'rgba(251, 191, 36, 0.8)',
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: 4,
+    },
+    // Insignia dorada de campeón (y aro/brillo shiny): color de contenido fijo (medalla), igual en
+    // ambos modos; solo el aro que la separa del avatar toma el fondo de la pantalla.
+    champBadge: {
+      position: 'absolute',
+      right: 0,
+      bottom: 0,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: '#FBBF24',
+      borderWidth: 1,
+      borderColor: c.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    champBadgeSmall: {
+      position: 'absolute',
+      right: 0,
+      bottom: 0,
+      width: 15,
+      height: 15,
+      borderRadius: 7,
+      backgroundColor: '#FBBF24',
+      borderWidth: 1,
+      borderColor: c.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    champBadgeSmallText: {
+      color: c.onAccent,
+      fontSize: 8,
+      fontWeight: '800',
+      lineHeight: 10,
+    },
+    champBadgeText: {
+      color: c.onAccent,
+      fontSize: 10,
+      fontWeight: '800',
+      lineHeight: 12,
+    },
+    champName: {
+      fontSize: 11,
+      color: c.textSecondary,
+      marginTop: 2,
+      textAlign: 'center',
+      maxWidth: 76,
+    },
+  });
