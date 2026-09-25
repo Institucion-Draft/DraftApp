@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import RankingTable from '../components/RankingTable';
+import UnseenDot from '../components/UnseenDot';
 import SeasonPodium from '../components/SeasonPodium';
 import { fetchPointTiers, type PointTier } from '../lib/pointConfig';
 import {
@@ -33,6 +34,7 @@ import {
   type UnfinishedEvent,
 } from '../lib/seasons';
 import { getEventStatusLabel } from '../lib/labels';
+import { hasUnseenAchievements } from '../lib/achievements';
 import type { EventStatus } from '../lib/database.types';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -63,6 +65,7 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [unfinished, setUnfinished] = useState<UnfinishedEvent[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [achievementsUnseen, setAchievementsUnseen] = useState(false);
 
   const load = useCallback(async () => {
     let seasonRow = await fetchSeason(seasonId);
@@ -79,13 +82,15 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
       if (closed === 'closed') seasonRow = (await fetchSeason(seasonId)) ?? seasonRow;
     }
 
-    const [statsRes, pointsRes, positionsRes, seasonTiers, organizer, blockers] = await Promise.all([
+    const [statsRes, pointsRes, positionsRes, seasonTiers, organizer, blockers, unseen] = await Promise.all([
       supabase.from('v_season_player_stats').select(RANKING_STATS_COLUMNS).eq('season_id', seasonId),
       supabase.from('v_season_points').select(`user_id, points, ${PRODEC_POINTS_COLUMNS}`).eq('season_id', seasonId),
       supabase.from('v_season_positions').select('user_id, position').eq('season_id', seasonId).lte('position', 3),
       fetchPointTiers(seasonRow.point_config_id),
       user?.id ? fetchIsWorkspaceOrganizer(workspaceId, user.id) : Promise.resolve(false),
       seasonRow.phase === 'finishing' ? fetchUnfinishedEvents(seasonId) : Promise.resolve([] as UnfinishedEvent[] | null),
+      // Indicador personal: solo mira los logros del usuario actual en esta temporada.
+      user?.id ? hasUnseenAchievements(seasonId, user.id) : Promise.resolve(false),
     ]);
 
     const stats = (statsRes.data ?? []) as RankingStatsRow[];
@@ -109,6 +114,7 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
     setSeason(seasonRow);
     setTiers(seasonTiers);
     setIsOrganizer(organizer);
+    setAchievementsUnseen(unseen);
     setUnfinished(blockers ?? []);
     setRows(buildRankingRows(stats, pointsByUser, medalsByUser, namesByUser, prodecByUserFromRows(pointsRows)));
     setLoading(false);
@@ -159,8 +165,21 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
   const header = (
     <View>
       <View style={styles.header}>
-        <Text style={styles.title}>{season.name}</Text>
-        <Text style={styles.subtitle}>{phaseSubtitle(season)}</Text>
+        <View style={styles.titleRow}>
+          <View style={styles.titleWrap}>
+            <Text style={styles.title}>{season.name}</Text>
+            <Text style={styles.subtitle}>{phaseSubtitle(season)}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.achievementsBtn}
+            onPress={() => navigation.navigate('Achievements', { workspaceId, seasonId })}
+            accessibilityRole="button"
+            accessibilityLabel={achievementsUnseen ? 'Logros, hay novedades sin ver' : 'Logros'}
+          >
+            <Text style={styles.achievementsBtnText}>🎯 Logros</Text>
+            {achievementsUnseen ? <UnseenDot style={styles.achievementsDot} /> : null}
+          </TouchableOpacity>
+        </View>
         {season.phase === 'closed' && season.closed_forced ? (
           <Text style={styles.forcedNote}>
             Cierre forzado: incluye los podios asegurados de eventos que quedaron inconclusos.
@@ -245,6 +264,18 @@ const createStyles = (c: ThemeColors) =>
     muted: { fontSize: 15, color: c.textSecondary, textAlign: 'center' },
     confettiOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50 },
     header: { marginBottom: 14 },
+    titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+    titleWrap: { flex: 1, minWidth: 0 },
+    achievementsBtn: {
+      backgroundColor: c.achievement.subtle,
+      borderWidth: 1,
+      borderColor: c.achievement.border,
+      borderRadius: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+    },
+    achievementsBtnText: { fontSize: 14, fontWeight: '700', color: c.achievement.text },
+    achievementsDot: { position: 'absolute', top: -6, right: -6 },
     title: { fontSize: 22, fontWeight: '800', color: c.text },
     subtitle: { fontSize: 13, color: c.textSecondary, marginTop: 2 },
     forcedNote: { fontSize: 12, color: c.status.warning.text, marginTop: 6, lineHeight: 17 },

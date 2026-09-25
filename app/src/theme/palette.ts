@@ -67,6 +67,14 @@ export type ThemeColors = {
    */
   organizer: StatusColors;
 
+  /**
+   * Logros de temporada (dorado metálico). Misma forma que un estado. Recuadro del mensaje de
+   * logro en la bitácora, medallas conseguidas y acentos dorados de las pantallas de Logros.
+   * Se diferencia de `status.warning` (ámbar de advertencia) por tener más amarillo y menos
+   * naranja: `solid` es oro (#d4af37) y no ámbar (#f59e0b), y `text` es oliva dorado, no marrón.
+   */
+  achievement: StatusColors;
+
   /** Fondo semitransparente detrás de modales. */
   overlay: string;
   /** Color de sombra (iOS shadowColor). */
@@ -99,6 +107,8 @@ export const lightColors: ThemeColors = {
 
   organizer: { subtle: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9', solid: '#7c3aed', onSolid: '#ffffff' },
 
+  achievement: { subtle: '#fbf6dd', border: '#d9c36b', text: '#6b5200', solid: '#d4af37', onSolid: '#111111' },
+
   overlay: 'rgba(0,0,0,0.45)',
   shadow: '#000000',
 };
@@ -128,6 +138,8 @@ export const darkColors: ThemeColors = {
   },
 
   organizer: { subtle: '#2e2150', border: '#4a3a80', text: '#c4b5fd', solid: '#9770f7', onSolid: '#0e1116' },
+
+  achievement: { subtle: '#2a2510', border: '#6f5d1c', text: '#efd97a', solid: '#e0bf4a', onSolid: '#0e1116' },
 
   overlay: 'rgba(0,0,0,0.6)',
   shadow: '#000000',

@@ -52,6 +52,8 @@ import DraftTimerSimScreen from '../screens/DraftTimerSimScreen';
 import DraftTimerPreviewScreen from '../screens/DraftTimerPreviewScreen';
 import DraftTimerScreen from '../screens/DraftTimerScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import AchievementsScreen from '../screens/AchievementsScreen';
+import AchievementDetailScreen from '../screens/AchievementDetailScreen';
 import { LIGHT_LOCKED_OPTIONS, lightLockedLayout, useTheme } from '../theme';
 import type { MainStackParamList } from './mainStackParams';
 
@@ -132,6 +134,16 @@ export default function MainStackNavigator() {
           name="WorkspaceSeasonHistory"
           component={WorkspaceSeasonHistoryScreen}
           options={{ title: 'Historial de temporadas', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="Achievements"
+          component={AchievementsScreen}
+          options={{ title: 'Logros', headerBackTitle: 'Atrás' }}
+        />
+        <Stack.Screen
+          name="AchievementDetail"
+          component={AchievementDetailScreen}
+          options={{ title: 'Logro', headerBackTitle: 'Atrás' }}
         />
         <Stack.Screen
           name="SeasonForceClose"

@@ -9,6 +9,19 @@ export type MainStackParamList = {
   WorkspaceRanking: { workspaceId: string };
   WorkspaceSeason: { workspaceId: string; seasonId: string };
   WorkspaceSeasonHistory: { workspaceId: string };
+  Achievements: { workspaceId: string; seasonId: string };
+  /**
+   * `userId` = de quién es el logro que se mira (puede no ser el usuario actual: se llega desde un
+   * mensaje de bitácora de otra persona). `from`/`eventId` solo definen el "atrás" jerárquico.
+   */
+  AchievementDetail: {
+    achievementId: string;
+    seasonId: string;
+    userId: string;
+    workspaceId: string;
+    from?: 'Achievements' | 'EventDiary';
+    eventId?: string;
+  };
   SeasonForceClose: { workspaceId: string; seasonId: string };
   PlayerPointsDetail: { userId: string; workspaceId: string; playerName?: string; seasonId?: string };
   SearchWorkspaces: undefined;
