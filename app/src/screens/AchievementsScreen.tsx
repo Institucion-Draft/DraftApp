@@ -137,7 +137,7 @@ export default function AchievementsScreen({ navigation, route }: Props) {
                   }
                 >
                   <View style={styles.hook} />
-                  <AchievementMedal slot={d.icon_slot} unlocked={unlocked} size={56} />
+                  <AchievementMedal code={d.code} unlocked={unlocked} size={56} />
                   <Text style={[styles.medalName, !unlocked && styles.medalNameOff]} numberOfLines={2}>
                     {shownName}
                   </Text>
@@ -166,7 +166,7 @@ export default function AchievementsScreen({ navigation, route }: Props) {
             activeOpacity={0.7}
             accessibilityRole="button"
           >
-            <AchievementMedal slot={d.icon_slot} unlocked={unlocked} size={48} />
+            <AchievementMedal code={d.code} unlocked={unlocked} size={48} />
             <View style={styles.listBody}>
               <Text style={[styles.listName, !unlocked && styles.listNameOff]} numberOfLines={2}>
                 {shownName}

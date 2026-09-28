@@ -94,7 +94,7 @@ export default function AchievementDetailScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
-      <AchievementMedal slot={definition.icon_slot} unlocked={unlocked} size={104} />
+      <AchievementMedal code={definition.code} unlocked={unlocked} size={120} shape="square" />
       <Text style={[styles.name, !unlocked && styles.nameOff]}>{shownName}</Text>
       {shownDescription ? <Text style={styles.description}>{shownDescription}</Text> : null}
       {unlocked && unlock ? (
