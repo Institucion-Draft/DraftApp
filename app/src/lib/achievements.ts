@@ -211,6 +211,7 @@ export type EventAchievementItem = {
   userName: string;
   achievementName: string;
   iconSlot: number;
+  code: string;
 };
 
 type EventAchievementRow = {
@@ -221,8 +222,8 @@ type EventAchievementRow = {
   unlocked_at: string;
   users: { display_name: string; username: string } | { display_name: string; username: string }[] | null;
   achievement_definitions:
-    | { name: string; icon_slot: number }
-    | { name: string; icon_slot: number }[]
+    | { name: string; icon_slot: number; code: string }
+    | { name: string; icon_slot: number; code: string }[]
     | null;
 };
 
@@ -243,7 +244,7 @@ export async function fetchEventAchievementItems(eventId: string): Promise<Event
       achievement_id,
       unlocked_at,
       users (display_name, username),
-      achievement_definitions (name, icon_slot)
+      achievement_definitions (name, icon_slot, code)
     `
     )
     .eq('source_event_id', eventId)
@@ -264,6 +265,7 @@ export async function fetchEventAchievementItems(eventId: string): Promise<Event
       userName: u?.display_name?.trim() || u?.username || 'Jugador',
       achievementName: d?.name ?? 'un logro',
       iconSlot: d?.icon_slot ?? 1,
+      code: d?.code ?? '',
     };
   });
 }

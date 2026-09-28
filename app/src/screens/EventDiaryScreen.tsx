@@ -437,7 +437,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
       accessibilityLabel={`${item.userName} obtuvo un logro - ${item.achievementName}`}
     >
       <View style={styles.achievementRow}>
-        <AchievementMedal slot={item.iconSlot} unlocked size={40} />
+        <AchievementMedal code={item.code} unlocked size={40} />
         <View style={styles.cardHeaderText}>
           <Text style={styles.achievementTitle}>
             {item.userName} obtuvo un logro - <Text style={styles.achievementName}>{item.achievementName}</Text>
