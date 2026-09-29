@@ -195,3 +195,11 @@ Video corto generado con IA que termine visualmente en el mismo gráfico que hoy
 - Si se muestra siempre o solo la primera vez (flag en AsyncStorage)
 - Herramienta de generación del video
 - Peso del archivo en el bundle
+
+## Pestaña de estadísticas de Gigante de Dos Cabezas en el perfil de jugador
+
+Hoy 2HG está totalmente ausente de cualquier stat agregada del jugador, ya que se excluye de `CrossEventStats`. Idea: una pestaña nueva en el perfil de jugador dedicada a stats de 2HG.
+
+**A definir**:
+- Qué datos mostrar: partidas jugadas en equipo, victorias/derrotas, compañeros frecuentes, rivales frecuentes
+- Cómo atribuir stats a ambos integrantes del equipo, dado que en 2HG solo el miembro A tiene fila en `event_participants`
