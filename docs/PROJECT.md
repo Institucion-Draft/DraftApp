@@ -161,7 +161,7 @@ Por estar trabajando solo, el ruleset de protección de main está disabled (Set
 
 Todas calculadas on-the-fly (sin tabla persistida ni trigger), mismo patrón en todo el proyecto: SELECT + combinar del lado del cliente.
 
-- `v_player_workspace_stats`, `v_player_color_stats`, `v_player_streaks`, `v_head_to_head_stats`, `v_player_tg_stats`, `v_cube_stats`, `v_color_performance`, `v_participant_event_placement`: stats agregadas por jugador/workspace (la última, de fase regular únicamente — ver limitación en `BUGS_AND_REVIEW.md`)
+- `v_player_workspace_stats`, `v_player_color_stats`, `v_player_streaks`, `v_head_to_head_stats`, `v_player_tg_stats`, `v_cube_stats`, `v_color_performance`, `v_participant_event_placement`: stats agregadas por jugador/workspace (la última da el puesto de cada jugador en el evento: 1°-4° del bracket real en swiss y round robin con top — grupo `round_robin_topcut`/`swiss_topcut` vigente —, y desde 5° por rank de fase regular (winrate BO3 → partidas en round robin, swiss_points en swiss); sin 2HG)
 - `v_rr_no_top_regular_rank`: ranking de fase regular de round robin sin top, con desempate real cuando hubo disputa
 - `v_workspace_points`, `v_workspace_points_breakdown`, `v_workspace_placements`: Ranking Global (puntos de torneo + 4 columnas de ProDeC al final)
 - `v_event_final_positions`, `v_event_season`, `v_seasons`, `v_season_positions`, `v_season_points`, `v_season_points_breakdown`, `v_season_player_stats`: equivalentes de Temporada de las vistas de arriba

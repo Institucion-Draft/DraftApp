@@ -27,3 +27,11 @@ En el perfil de un jugador (dentro del workspace), el historial de "últimos dra
 Investigar dónde vive ese historial en PlayerProfile o pantalla equivalente, y qué fuente de datos usa - probablemente hay que hacerlo consistente con eventPodium.ts (ya extraído y validado en la sesión de Temporadas) en vez de leer directo de standings de fase regular.
 
 **Resuelto.** `CrossEventStats.tsx` (usado por `MemberProfileScreen`/`MyProfileScreen`) ahora llama a `fetchEventPodiums` (lote, en `lib/eventPodium.ts`) para obtener el 1°/2°/3° real de cada evento del historial — la misma fuente que ya usan `StandingsScreen` y el cierre de temporada. Híbrido acordado: si el jugador quedó en el podio (1-3), se usa esa posición; si no, se mantiene el `placement` que ya traía `v_participant_event_placement` (rank por winrate de fase regular), sin tocar. Validado con el set de 18 escenarios de podio ya usados en la sesión de Temporadas más una prueba nueva de fetch en lote (varios eventos a la vez, sin contaminación cruzada).
+
+## [RESUELTO] Perfil de jugador: "últimos drafts jugados" incluía eventos two_headed_giant
+
+**Resuelto** en la migración `0126`: `v_participant_event_placement` (y `v_head_to_head_stats`, `v_player_streaks`, `v_player_color_stats`) ahora filtran `event_type <> 'two_headed_giant'`.
+
+## [RESUELTO] Perfil de jugador: posición incorrecta para quien no llega al podio en round robin con top
+
+**Resuelto** en la migración `0126`: `v_participant_event_placement` ahora usa el bracket real (`round_robin_topcut`/`swiss_topcut`, no superseded) también en round robin con top, así el perdedor del 3°/4° queda 4° y el resto desde 5°. Caso que lo destapó: Eli en "Último Draft de Invierno" (salía 2°, es 4°).
