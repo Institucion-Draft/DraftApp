@@ -130,7 +130,6 @@ select
   bo3_completed,
   matches_won,
   matches_completed,
-  total_players,
   case
     -- Swiss con bracket completo: puestos 1-4 del bracket
     when competition_format = 'swiss' and bracket_placement is not null then bracket_placement
@@ -138,7 +137,8 @@ select
     when competition_format = 'swiss'                                    then swiss_rank
     -- Round-robin: por BO3 win rate → match win rate
     else                                                                      rr_rank
-  end as placement
+  end as placement,
+  total_players
 from with_ranks;
 
 grant select on public.v_participant_event_placement to anon, authenticated;
@@ -146,7 +146,8 @@ grant select on public.v_participant_event_placement to anon, authenticated;
 
 -- ── 2. v_head_to_head_stats ──────────────────────────────────────────────────
 
-create or replace view public.v_head_to_head_stats as
+drop view if exists public.v_head_to_head_stats;
+create view public.v_head_to_head_stats as
 select
   ep_me.user_id,
   ep_opp.user_id                                                                  as opponent_user_id,
@@ -173,7 +174,8 @@ grant select on public.v_head_to_head_stats to anon, authenticated;
 
 -- ── 3. v_player_streaks ───────────────────────────────────────────────────────
 
-create or replace view public.v_player_streaks as
+drop view if exists public.v_player_streaks;
+create view public.v_player_streaks as
 with ordered_results as (
   select
     ep.user_id,

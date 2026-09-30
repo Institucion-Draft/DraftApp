@@ -12,13 +12,15 @@ Necesita una revisión completa de reglas y situaciones. Casos identificados has
 
 **Pendiente:** mapear todos los casos límite de "me voy" (en todos los formatos: round_robin sin/con top, swiss) y decidir para cada uno si el comportamiento actual es el correcto o necesita ajuste.
 
-## Drift en historial de migraciones
+## [RESUELTO] Drift entre el historial de migraciones y la base real
 
-0042 no puede rejugarse desde cero contra una base vacía (`v_participant_event_placement` cambia de columnas de forma incompatible con una migración posterior: 0041 la crea con la columna `placement` y 0042 la reemplaza con `create or replace view` con otra lista de columnas, lo que Postgres rechaza). No afecta la base real (que ya tiene todo aplicado en orden), pero rompería un intento de reconstruir el schema desde cero (ej. clonar a un ambiente nuevo).
+**Resuelto.** Las 127 migraciones ahora se reconstruyen desde cero sin errores (verificado con PGlite, no con Supabase real) y el resultado coincide con prod en lo que se tocó. Cambios, todos inocuos para prod (las migraciones viejas ya estaban aplicadas y prod no tiene tabla `schema_migrations`, así que no hay checksums):
 
-## Drift: constraint `events_type_valid` no incluye 'two_headed_giant'
+- **0042:** `v_participant_event_placement` tenía `total_players, placement` (orden invertido respecto de 0041 y de prod), y `v_head_to_head_stats` / `v_player_streaks` chocaban con las versiones de 0001. Se corrigió el orden y las dos últimas pasan a `drop view if exists` + `create view`, como hace 0043.
+- **0041:** `v_player_color_stats` ahora se crea con el CTE `color_winrates` y las columnas `pairings_played` y `bo3_winrate`, que en prod existían pero nunca estuvieron en el repo. Sin eso, el chequeo de 0126 (espera 2 subselects de `draft_events`) fallaba al reconstruir.
+- **0127 (nueva):** deja en el historial el estado real de prod en `draft_events`: constraint `events_type_valid` con `draft`, `tournament`, `pepidraft` y `two_headed_giant`; borra los constraints huérfanos de 0001 (`events_format_valid`, `events_champion_decision_valid`, que una base reconstruida conservaba y rechazaban `champion_decided_by = 'tiebreak'`/`'polemica'`); y `turn_tracking_enabled` con default `false` (0030 lo dejaba en `true`). Idempotente y sin efecto en prod.
 
-`draft_events.event_type` se restringe en 0003 a `('draft', 'tournament', 'pepidraft')` y ninguna migración posterior lo amplía, pero la app crea eventos con `event_type = 'two_headed_giant'` (Gigante de Dos Cabezas, 0051 en adelante) y toda la lógica de estadísticas los excluye por ese valor. Eso implica que la base real tiene ese constraint modificado o eliminado a mano, fuera del historial de migraciones. Igual que el drift de 0042, no afecta la base real pero un schema reconstruido desde cero rechazaría la creación de eventos 2HG. Detectado al escribir el test de ProDeC (Fase E).
+Pendiente: la prueba de reconstrucción usó stubs de `auth`/`storage`, no Supabase real, y no se compararon tablas, índices ni policies contra prod (solo las vistas y el constraint tocados).
 
 ## [RESUELTO] Historial de posiciones en el perfil de jugador muestra la posición de fase liga, no la final del torneo
 
