@@ -93,6 +93,32 @@ totals as (
     sum(times_played) as total_color_picks
   from color_counts
   group by user_id, workspace_id
+),
+-- Winrate por color (BO3 jugados / ganados). En la base real la vista ya tenía estas columnas
+-- (agregadas fuera del historial); se incorporan acá para que 0116 y 0126 la encuentren igual.
+color_winrates as (
+  select
+    ep.user_id,
+    de.workspace_id,
+    pc.color,
+    count(distinct p.id) filter (
+      where p.official_winner_participant_id is not null
+        and (p.participant_a_id = ep.id or p.participant_b_id = ep.id)
+    ) as pairings_played,
+    count(distinct p.id) filter (
+      where p.official_winner_participant_id = ep.id
+    ) as pairings_won
+  from public.participant_colors pc
+  join public.event_participants ep
+    on ep.id = pc.participant_id
+  join public.draft_events de
+    on de.id = ep.event_id
+   and de.deleted_at is null
+  left join public.pairings p
+    on p.event_id = ep.event_id
+   and (p.participant_a_id = ep.id or p.participant_b_id = ep.id)
+  where ep.role = 'player'
+  group by ep.user_id, de.workspace_id, pc.color
 )
 select
   cc.user_id,
@@ -100,8 +126,15 @@ select
   cc.color,
   cc.times_played,
   t.total_color_picks,
-  round(cc.times_played::numeric / t.total_color_picks * 100, 1) as percentage
+  round(cc.times_played::numeric / t.total_color_picks * 100, 1) as percentage,
+  cwr.pairings_played,
+  case
+    when cwr.pairings_played > 0
+    then round(cwr.pairings_won::numeric / cwr.pairings_played * 100, 1)
+    else null
+  end as bo3_winrate
 from color_counts cc
-join totals t using (user_id, workspace_id);
+join totals t using (user_id, workspace_id)
+join color_winrates cwr using (user_id, workspace_id, color);
 
 grant select on public.v_player_color_stats to anon, authenticated;
