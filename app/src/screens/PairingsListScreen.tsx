@@ -215,6 +215,43 @@ function sortOfficialItemsForDisplay(a: ItemView, b: ItemView, currentUserId: st
   return `${a.aName} ${a.bName}`.localeCompare(`${b.aName} ${b.bName}`, 'es', { sensitivity: 'base' });
 }
 
+/** Progreso de un pairing de fase de liga, independiente de la partida en curso: virgen (sin
+ * partidas con ganador real), comenzado-no-decidido (alguna partida ganada pero sin resultado
+ * oficial) o decidido (ganador oficial o empate). Mismo criterio de victorias que las píldoras
+ * (sin walkover). */
+function leagueProgress(it: ItemView): 'virgin' | 'started' | 'decided' {
+  if (it.official_winner_participant_id != null || it.isDraw) return 'decided';
+  return it.winsA + it.winsB > 0 ? 'started' : 'virgin';
+}
+
+/** Orden entre categorías de fase de liga: en vivo, por definirse (virgen y comenzado juntos; el
+ * triángulo los distingue), decidido. */
+function rankLeagueItem(it: ItemView): number {
+  if (it.status === 'in_progress') return 0;
+  return leagueProgress(it) === 'decided' ? 2 : 1;
+}
+
+/** Solo fase de liga round_robin (no Suizo, no 2HG). Dentro de cada categoría: propios primero,
+ * por nombre del rival tal como se muestra (derecha tras swapSides); luego ajenos, agrupados por
+ * el menor alfabéticamente de los dos nombres (el orden a/b de la base es arbitrario para cruces
+ * ajenos) y de desempate el mayor. */
+function sortLeagueItemsForDisplay(a: ItemView, b: ItemView, currentUserId: string | null): number {
+  const r = rankLeagueItem(a) - rankLeagueItem(b);
+  if (r !== 0) return r;
+  if (a.mine !== b.mine) return a.mine ? -1 : 1;
+  const cmp = (x: string, y: string) => x.localeCompare(y, 'es', { sensitivity: 'base' });
+  if (a.mine) {
+    const rivalA = currentUserId && a.bUserId === currentUserId ? a.aName : a.bName;
+    const rivalB = currentUserId && b.bUserId === currentUserId ? b.aName : b.bName;
+    return cmp(rivalA, rivalB);
+  }
+  const keys = (it: ItemView): [string, string] =>
+    cmp(it.aName, it.bName) <= 0 ? [it.aName, it.bName] : [it.bName, it.aName];
+  const [minA, maxA] = keys(a);
+  const [minB, maxB] = keys(b);
+  return cmp(minA, minB) || cmp(maxA, maxB);
+}
+
 function buildSwissOfficialFlatRows(
   items: ItemView[],
   currentSwissRound: number,
@@ -613,7 +650,12 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       };
     });
 
-    mapped.sort((a, b) => sortOfficialItemsForDisplay(a, b, currentUserId));
+    // Fase de liga round_robin (no Suizo, no 2HG): criterio propio. El resto, igual que antes.
+    if (competitionFormat === 'round_robin' && eventFlags?.event_type !== 'two_headed_giant') {
+      mapped.sort((a, b) => sortLeagueItemsForDisplay(a, b, currentUserId));
+    } else {
+      mapped.sort((a, b) => sortOfficialItemsForDisplay(a, b, currentUserId));
+    }
 
     const pairingById = new Map(pairingsAll.map((p) => [p.id, p]));
     const revengeMapped: RevengeItemView[] = [];
@@ -1330,10 +1372,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const renderOfficialPairingCard = useCallback(
     (item: ItemView) => {
       const isGiantEvent = eventType === 'two_headed_giant';
-      const swapSides =
-        !!myUserId &&
-        (item.bUserId === myUserId ||
-          (isGiantEvent && item.bMemberBUserId === myUserId));
+      // Cruces ajenos de fase de liga round_robin (no Suizo, no 2HG): a la izquierda siempre el
+      // menor alfabéticamente, igual que la clave de agrupamiento de sortLeagueItemsForDisplay.
+      const leagueOther = competitionFormat === 'round_robin' && !isGiantEvent && !item.mine;
+      const swapSides = leagueOther
+        ? item.aName.localeCompare(item.bName, 'es', { sensitivity: 'base' }) > 0
+        : !!myUserId &&
+          (item.bUserId === myUserId ||
+            (isGiantEvent && item.bMemberBUserId === myUserId));
       const leftUserId = swapSides ? item.bUserId : item.aUserId;
       const rightUserId = swapSides ? item.aUserId : item.bUserId;
       const leftPid = swapSides ? item.participant_b_id : item.participant_a_id;
@@ -1352,6 +1398,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const winsRight = swapSides ? item.winsA : item.winsB;
       const liveL = swapSides ? item.liveScoreB : item.liveScoreA;
       const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
+      // Marca de progreso: solo fase de liga round_robin (no Suizo, no 2HG). En vivo no lleva marca;
+      // virgen tampoco.
+      const showProgressMark = competitionFormat === 'round_robin' && !isGiantEvent;
+      const progress = leagueProgress(item);
+      const progressMarkColor =
+        !showProgressMark || item.status === 'in_progress'
+          ? null
+          : progress === 'decided'
+            ? colors.pairingProgress.decided
+            : progress === 'started'
+              ? colors.pairingProgress.undecided
+              : null;
       return (
         <TouchableOpacity
           style={styles.card}
@@ -1475,12 +1533,16 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
               )}
             </View>
-            <View style={styles.footerRight} />
+            <View style={[styles.footerRight, styles.footerRightMark]}>
+              {progressMarkColor ? (
+                <View style={[styles.progressTriangle, { borderRightColor: progressMarkColor }]} />
+              ) : null}
+            </View>
           </View>
         </TouchableOpacity>
       );
     },
-    [navigation, myUserId, eventType]
+    [navigation, myUserId, eventType, competitionFormat, officialBo1, colors, styles]
   );
 
   if (loading) {
@@ -2204,6 +2266,17 @@ const createStyles = (c: ThemeColors) =>
     footerLeft: { flex: 1, alignItems: 'flex-start' },
     footerCenter: { flex: 1, alignItems: 'center' },
     footerRight: { flex: 1 },
+    // Triángulo rectángulo 12x12 con el ángulo recto en la esquina inferior derecha. El footer ya
+    // mide ≥ 18px (texto de 12 + 6 de padding), así que no agranda la card.
+    footerRightMark: { alignItems: 'flex-end', justifyContent: 'center', height: 12 },
+    progressTriangle: {
+      width: 0,
+      height: 0,
+      borderStyle: 'solid',
+      borderTopWidth: 12,
+      borderRightWidth: 12,
+      borderTopColor: 'transparent',
+    },
     status: { color: c.accent, fontWeight: '700', fontSize: 12 },
     liveCentered: { color: c.accent, fontWeight: '800', fontSize: 12, textAlign: 'center' },
     winnerWrap: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
