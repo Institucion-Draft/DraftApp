@@ -75,6 +75,14 @@ export type ThemeColors = {
    */
   achievement: StatusColors;
 
+  /**
+   * Marca de progreso de un enfrentamiento de fase de liga (triángulo en la card de
+   * PairingsListScreen). Mismos tonos que el NewsTicker del Life Tracker: `undecided` (ámbar) =
+   * ya se jugó alguna partida pero el pairing no tiene resultado oficial; `decided` (violeta) =
+   * pairing con resultado oficial. Son colores de forma/ícono sobre `card`, no de texto/fondo.
+   */
+  pairingProgress: { undecided: string; decided: string };
+
   /** Fondo semitransparente detrás de modales. */
   overlay: string;
   /** Color de sombra (iOS shadowColor). */
@@ -109,6 +117,10 @@ export const lightColors: ThemeColors = {
 
   achievement: { subtle: '#fbf6dd', border: '#d9c36b', text: '#6b5200', solid: '#d4af37', onSolid: '#111111' },
 
+  // Contraste contra card (#fafafa): ámbar 3.05:1, violeta 6.81:1. Es un elemento gráfico (no
+  // texto), por eso alcanza el umbral de 3:1 y el ámbar puede ser vívido.
+  pairingProgress: { undecided: '#d97706', decided: '#6d28d9' },
+
   overlay: 'rgba(0,0,0,0.45)',
   shadow: '#000000',
 };
@@ -140,6 +152,9 @@ export const darkColors: ThemeColors = {
   organizer: { subtle: '#2e2150', border: '#4a3a80', text: '#c4b5fd', solid: '#9770f7', onSolid: '#0e1116' },
 
   achievement: { subtle: '#2a2510', border: '#6f5d1c', text: '#efd97a', solid: '#e0bf4a', onSolid: '#0e1116' },
+
+  // Hex exactos del NewsTicker (LifeTrackerScreen). Contraste contra card (#212934): 8.79:1 / 8.30:1.
+  pairingProgress: { undecided: '#FBBF24', decided: '#D8B4FE' },
 
   overlay: 'rgba(0,0,0,0.6)',
   shadow: '#000000',
