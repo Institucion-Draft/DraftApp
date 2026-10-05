@@ -15,6 +15,7 @@ import type { NativeStackScreenProps, NativeStackNavigationProp } from '@react-n
 import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
+import { normalizeCompetitionFormat } from '../lib/eventMode';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import {
@@ -402,7 +403,7 @@ async function fetchEventTickerContext(
   if (eventRes.error || pairingsRes.error || participantsRes.error) return null;
 
   const rawCompetitionFormat = (eventRes.data as { competition_format?: string | null } | null)?.competition_format;
-  const competitionFormat = rawCompetitionFormat === 'swiss' ? 'swiss' : 'round_robin';
+  const competitionFormat = normalizeCompetitionFormat(rawCompetitionFormat);
   const pairingRows = (pairingsRes.data ?? []) as {
     id: string;
     participant_a_id: string;

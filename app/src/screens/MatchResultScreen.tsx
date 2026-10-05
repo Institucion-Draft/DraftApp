@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
+import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -92,7 +93,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
-  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin_bo1_top4: el oficial es a una sola partida. */
   const [officialBo1, setOfficialBo1] = useState(false);
   /** match_format del evento ('bo1'/'bo2'/'bo3'): usado para detectar el empate BO2 de round_robin. */
@@ -258,7 +259,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
     setIsGiantEvent(eventFlags?.event_type === 'two_headed_giant');
     setMatchFormat(eventFlags?.match_format ?? null);
-    const fmt = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    const fmt = normalizeCompetitionFormat(eventFlags?.competition_format);
     setCompetitionFormat(fmt);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4.
