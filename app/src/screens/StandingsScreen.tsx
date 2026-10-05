@@ -23,6 +23,7 @@ import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import ColorFlag from '../components/ColorFlag';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import {
   computePodium,
   computeFinalStandingsWithTiebreakSplit,
@@ -677,7 +678,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
-  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** True cuando el evento es swiss con match_format='bo2' (competitionFormat ya viene mapeado a 'swiss' para cualquier BO; este flag distingue matices de display). */
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
@@ -825,7 +826,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const hasTop4 = rawFmt === 'round_robin' && rawTopSize === 4;
     // Los puntos ya vienen calculados por swiss_points_of (unificada en 0094) en la columna
     // swiss_points, para cualquier match_format de swiss.
-    const fmt = rawFmt === 'swiss' ? 'swiss' : 'round_robin';
+    const fmt = normalizeCompetitionFormat(rawFmt);
     setCompetitionFormat(fmt);
     // isSwissBo2: antes derivaba de competition_format='swiss_bo2' (valor propio); desde 0096
     // swiss_bo2 se unificó en competition_format='swiss' + match_format='bo2'.

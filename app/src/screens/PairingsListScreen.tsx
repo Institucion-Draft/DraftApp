@@ -16,6 +16,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getPairingStatusLabel } from '../lib/labels';
+import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { useTheme, useThemedStyles } from '../theme';
@@ -330,7 +331,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [officialByeByRound, setOfficialByeByRound] = useState<Record<number, OfficialByeCard[]>>({});
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
   const [swissRevengeStandalone, setSwissRevengeStandalone] = useState<SwissRevengeStandaloneRow[]>([]);
-  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (una
    * píldora por jugador). Distinto de isRoundRobinTop4 (título "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
@@ -424,7 +425,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       event_type?: string | null;
     } | null;
     setEventType(eventFlags?.event_type ?? null);
-    const competitionFormat = eventFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin';
+    const competitionFormat = normalizeCompetitionFormat(eventFlags?.competition_format);
     setCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título "Fase todos contra

@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
+import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -273,7 +274,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [pairingHadSwissTopcutBracket, setPairingHadSwissTopcutBracket] = useState(false);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
-  const [competitionFormat, setCompetitionFormat] = useState<'round_robin' | 'swiss'>('round_robin');
+  const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (1 sola
    * píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
@@ -407,7 +408,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     setTopcutFormat(tf === 'bo1' || tf === 'sf_bo1_f_bo3' || tf === 'bo3' ? tf : 'bo3');
     const turnTrackOn = !!evFlags?.turn_tracking_enabled;
     setTurnTrackingEnabled(turnTrackOn);
-    setCompetitionFormat(evFlags?.competition_format === 'swiss' ? 'swiss' : 'round_robin');
+    setCompetitionFormat(normalizeCompetitionFormat(evFlags?.competition_format));
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4 — "todos contra todos con top4" ya no es
     // un competition_format aparte.

@@ -19,6 +19,7 @@ import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
+import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { useCanManageEvent } from '../hooks/useCanManageEvent';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -221,7 +222,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   >('tiebreak');
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
-  const [eventCompetitionFormat, setEventCompetitionFormat] = useState<'swiss' | 'round_robin'>('round_robin');
+  const [eventCompetitionFormat, setEventCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin o swiss con match_format='bo1': el oficial de la fase regular es a una
    * sola partida (1 sola píldora). Distinto de isRoundRobinTop4 (título/tratamiento visual). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
@@ -587,7 +588,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const rawCompetitionFormat = (evRow as { competition_format?: string | null } | null)?.competition_format;
     const rawTopSize = (evRow as { top_size?: number | null } | null)?.top_size ?? null;
     const rawMatchFormat = (evRow as { match_format?: string | null } | null)?.match_format;
-    const competitionFormat = rawCompetitionFormat === 'swiss' ? 'swiss' : 'round_robin';
+    const competitionFormat = normalizeCompetitionFormat(rawCompetitionFormat);
     setEventCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4. isRoundRobinTop4 (título/tratamiento

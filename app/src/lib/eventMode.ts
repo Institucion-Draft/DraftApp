@@ -1,16 +1,44 @@
 import type { EventType } from './database.types';
 import { getEventTypeLabel } from './labels';
 
-/** Formatos de competición conocidos. Para sumar uno nuevo alcanza con agregar una entrada. */
-const COMPETITION_FORMAT_LABELS: Record<string, string> = {
+/** Valores válidos de draft_events.competition_format. */
+export const COMPETITION_FORMATS = ['round_robin', 'swiss', 'zones_knockout', 'knockout'] as const;
+export type CompetitionFormat = (typeof COMPETITION_FORMATS)[number];
+
+export function isCompetitionFormat(value: unknown): value is CompetitionFormat {
+  return typeof value === 'string' && (COMPETITION_FORMATS as readonly string[]).includes(value);
+}
+
+/**
+ * Normaliza el competition_format crudo de la base. Un valor desconocido se trata como
+ * 'round_robin' (comportamiento histórico) pero avisa en desarrollo. null/undefined (query que
+ * no trajo la columna) se tratan como 'round_robin' sin avisar.
+ */
+export function normalizeCompetitionFormat(raw: string | null | undefined): CompetitionFormat {
+  if (isCompetitionFormat(raw)) return raw;
+  if (raw != null && __DEV__) {
+    console.error(`[competition_format] valor desconocido "${raw}", se trata como 'round_robin'.`);
+  }
+  return 'round_robin';
+}
+
+/** Etiqueta base de cada formato. El Record obliga a sumar una entrada al agregar un formato. */
+const COMPETITION_FORMAT_LABELS: Record<CompetitionFormat, string> = {
   round_robin: 'Todos contra todos',
   swiss: 'Suizo',
+  zones_knockout: 'Copa (grupos + llaves)',
+  knockout: 'Copa (sólo llaves)',
 };
+
+export function getCompetitionFormatBaseLabel(format: CompetitionFormat): string {
+  return COMPETITION_FORMAT_LABELS[format];
+}
 
 /**
  * Modalidad de juego de un evento: "Todos contra todos · BO2", "Todos contra todos · BO1 + Top 4",
  * "Suizo · BO3 + Top 4", "Gigante de Dos Cabezas · Todos contra todos · BO3".
- * Los datos que falten se omiten; vacío si el evento no tiene nada cargado.
+ * Los datos que falten se omiten; vacío si el evento no tiene nada cargado. Los formatos Copa
+ * muestran sólo la etiqueta base (el detalle de zonas, clasificados y BO se define después).
  */
 export function formatEventMode(
   eventType: string | null,
@@ -22,8 +50,9 @@ export function formatEventMode(
   if (eventType === 'two_headed_giant') {
     parts.push(getEventTypeLabel(eventType as EventType));
   }
-  const formatLabel = competitionFormat ? COMPETITION_FORMAT_LABELS[competitionFormat] : undefined;
-  if (formatLabel) parts.push(formatLabel);
+  const known = isCompetitionFormat(competitionFormat) ? competitionFormat : null;
+  if (known) parts.push(COMPETITION_FORMAT_LABELS[known]);
+  if (known === 'zones_knockout' || known === 'knockout') return parts.join(' · ');
 
   let tail = matchFormat ? matchFormat.toUpperCase() : '';
   if (topSize && topSize > 0) tail = tail ? `${tail} + Top ${topSize}` : `Top ${topSize}`;

@@ -18,14 +18,17 @@ import type { EventStatus, EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import {
+  getCompetitionFormatBaseLabel,
+  normalizeCompetitionFormat,
+  type CompetitionFormat,
+} from '../lib/eventMode';
 import { useCanManageEvent } from '../hooks/useCanManageEvent';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EditEvent'>;
 type SimpleOption = { id: string; name: string };
-
-type CompetitionFormat = 'round_robin' | 'swiss';
 
 /** Antes exclusivo de swiss_bo2 (0045), generalizado a cualquier match_format de swiss (0096). */
 const SWISS_ROUNDS_OPTIONS = [3, 4, 5] as const;
@@ -39,12 +42,22 @@ const TOPCUT_FORMAT_OPTIONS: { value: TopcutFormat; label: string }[] = [
 const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 function getCompetitionFormatLabel(f: CompetitionFormat, topSize: number | null): string {
-  // Suizo siempre tiene top4 (fijo, Fase 6.6) — topSize===4 debería ser siempre cierto acá,
-  // pero se chequea igual por si un evento viejo no llegó a migrarse.
-  if (f === 'swiss') return topSize === 4 ? 'Suizo + Top 4' : 'Suizo';
-  // round_robin + top_size=4: antes competition_format='round_robin_bo1_top4' (0076).
-  if (f === 'round_robin' && topSize === 4) return 'Todos vs todos + Top 4';
-  return 'Todos contra todos';
+  switch (f) {
+    case 'swiss':
+      // Suizo siempre tiene top4 (fijo, Fase 6.6) — topSize===4 debería ser siempre cierto acá,
+      // pero se chequea igual por si un evento viejo no llegó a migrarse.
+      return topSize === 4 ? 'Suizo + Top 4' : 'Suizo';
+    case 'round_robin':
+      // round_robin + top_size=4: antes competition_format='round_robin_bo1_top4' (0076).
+      return topSize === 4 ? 'Todos vs todos + Top 4' : 'Todos contra todos';
+    case 'zones_knockout':
+    case 'knockout':
+      return getCompetitionFormatBaseLabel(f);
+    default: {
+      const unreachable: never = f;
+      return unreachable;
+    }
+  }
 }
 
 function getMatchFormatLabel(mf: string | null): string {
@@ -151,8 +164,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const row = data as any;
       setWorkspaceId(row.workspace_id);
       setName(row.name);
-      const rawCf = (row.competition_format as string | null | undefined) ?? 'round_robin';
-      const cf: CompetitionFormat = rawCf === 'swiss' ? 'swiss' : 'round_robin';
+      const cf = normalizeCompetitionFormat(row.competition_format as string | null | undefined);
       setCompetitionFormat(cf);
       const ts = typeof row.top_size === 'number' ? row.top_size : null;
       setTopSize(ts);
