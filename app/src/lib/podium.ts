@@ -15,6 +15,11 @@ export type PodiumPlayer = {
   matchesWon: number;
   matchesCompleted: number;
   matchWinRate: number;
+  /**
+   * Puntos de tabla de round_robin BO2: 3 por enfrentamiento ganado (walkover incluido), 1 por
+   * empate, 0 por perdido. Misma cuenta que la tabla de StandingsScreen; solo se usa en BO2.
+   */
+  bo2Points?: number;
   /** Banquito individual (p. ej. Copa Polémica vs reconocimiento en el mismo peldaño). */
   onStool?: boolean;
 };
@@ -235,17 +240,32 @@ function podiumPolemicaMode(
   return { steps, spectators, isFinal: s1.length > 0 };
 }
 
-/** Dos peldaños (2º y 3º) sólo por WR BO3 observado sobre `poolSeed`. */
-function podiumNextTwoStepsFromPool(poolSeed: PodiumPlayer[]): {
+/** Todos los del pool con el máximo de puntos de tabla BO2 (empate exacto comparte escalón). */
+function topBo2PointsTier(pool: PodiumPlayer[]): PodiumPlayer[] {
+  if (pool.length === 0) return [];
+  let top = -Infinity;
+  for (const p of pool) top = Math.max(top, p.bo2Points ?? 0);
+  return pool.filter((p) => (p.bo2Points ?? 0) === top);
+}
+
+/**
+ * Dos peldaños (2º y 3º) sobre `poolSeed`: por WR BO3 observado, o por puntos de tabla BO2
+ * (3/1/0) si `byPoints`.
+ */
+function podiumNextTwoStepsFromPool(
+  poolSeed: PodiumPlayer[],
+  byPoints = false
+): {
   s2: PodiumPlayer[];
   s3: PodiumPlayer[];
   spectators: PodiumPlayer[];
 } {
+  const topTier = byPoints ? topBo2PointsTier : topBo3RationalTier;
   let pool = [...poolSeed];
-  const s2 = topBo3RationalTier(pool);
+  const s2 = topTier(pool);
   const rm2 = new Set(s2.map((p) => p.participantId));
   pool = pool.filter((p) => !rm2.has(p.participantId));
-  const s3 = topBo3RationalTier(pool);
+  const s3 = topTier(pool);
   const rm3 = new Set(s3.map((p) => p.participantId));
   pool = pool.filter((p) => !rm3.has(p.participantId));
   return { s2, s3, spectators: pool };
@@ -266,18 +286,123 @@ function podiumDeclaredChampionMode(
   return { steps, spectators, isFinal };
 }
 
+/** Tope de pairings pendientes para enumerar todos los resultados posibles (3^n escenarios). */
+const BO2_SECURE_MAX_PENDING = 12;
+
+/** Resultados posibles de un pairing BO2 pendiente, como [puntos A, puntos B]: gana A, empate, gana B. */
+const BO2_PENDING_OUTCOMES: ReadonlyArray<readonly [number, number]> = [
+  [3, 0],
+  [1, 1],
+  [0, 3],
+];
+
+/**
+ * 2° y 3° asegurados de un round_robin BO2 con campeón declarado. Ordena por puntos de tabla
+ * (3/1/0), con empate exacto compartiendo escalón y el siguiente inmediato (dense rank, igual
+ * que v_rr_no_top_regular_rank). La regla es POR JUGADOR: se muestra en el 2° (3°) solo si en
+ * TODOS los resultados posibles de los pairings pendientes (cada uno: gana A 3-0, empate 1-1,
+ * gana B 0-3) queda en ese mismo puesto, sin contar al campeón. Que otro jugador pueda sumarse
+ * al mismo puesto no impide mostrar al que ya lo tiene asegurado. Cada puesto se evalúa por
+ * separado. Devuelve null si hay más pendientes que BO2_SECURE_MAX_PENDING (no se puede
+ * verificar: el caller muestra solo el 1°).
+ */
+function bo2SecuredSteps(
+  pool: PodiumPlayer[],
+  remaining: PairingRemain[]
+): { s2: PodiumPlayer[]; s3: PodiumPlayer[] } | null {
+  const idx = new Map(pool.map((p, i) => [p.participantId, i]));
+  // Un lado fuera del pool (el campeón) no suma a nadie; su rival sí puede sumar.
+  const pending = remaining
+    .filter((r) => !r.isBlocked)
+    .map((r) => ({ a: idx.get(r.participantAId) ?? -1, b: idx.get(r.participantBId) ?? -1 }))
+    .filter((r) => r.a >= 0 || r.b >= 0);
+  if (pending.length > BO2_SECURE_MAX_PENDING) return null;
+
+  const pts = pool.map((p) => p.bo2Points ?? 0);
+  const always2 = pool.map(() => true);
+  const always3 = pool.map(() => true);
+
+  const classify = () => {
+    let top = -Infinity;
+    for (const v of pts) if (v > top) top = v;
+    let second = -Infinity;
+    for (const v of pts) if (v < top && v > second) second = v;
+    for (let i = 0; i < pts.length; i++) {
+      if (pts[i] !== top) always2[i] = false;
+      if (pts[i] !== second) always3[i] = false;
+    }
+  };
+
+  const visit = (i: number) => {
+    if (i === pending.length) {
+      classify();
+      return;
+    }
+    const { a, b } = pending[i]!;
+    for (const [pa, pb] of BO2_PENDING_OUTCOMES) {
+      if (a >= 0) pts[a]! += pa;
+      if (b >= 0) pts[b]! += pb;
+      visit(i + 1);
+      if (a >= 0) pts[a]! -= pa;
+      if (b >= 0) pts[b]! -= pb;
+    }
+  };
+  visit(0);
+
+  return {
+    s2: pool.filter((_, i) => always2[i]),
+    s3: pool.filter((_, i) => always3[i]),
+  };
+}
+
+/**
+ * round_robin BO2 con campeón declarado: 1° el campeón; 2° y 3° solo cuando están asegurados
+ * (ver bo2SecuredSteps). Sin banquitos (topPlayerOnStool): el desempate por winrate BO3 no
+ * aplica a un orden por puntos.
+ */
+function podiumDeclaredChampionBo2Mode(
+  participants: PodiumPlayer[],
+  champion: PodiumPlayer,
+  remaining: PairingRemain[]
+): PodiumState {
+  const pool = participants.filter((p) => p.participantId !== champion.participantId);
+  const secured = bo2SecuredSteps(pool, remaining) ?? { s2: [], s3: [] };
+  const onPodium = new Set([...secured.s2, ...secured.s3].map((p) => p.participantId));
+  const step = (rank: 1 | 2 | 3, players: PodiumPlayer[]): PodiumStep => ({
+    rank,
+    players,
+    topPlayerOnStool: null,
+  });
+  return {
+    steps: [step(1, [champion]), step(2, secured.s2), step(3, secured.s3)],
+    spectators: pool.filter((p) => !onPodium.has(p.participantId)),
+    isFinal: !hasUnblockedPending(remaining) && secured.s2.length > 0 && secured.s3.length > 0,
+  };
+}
+
 /**
  * Estados finales cerrados sin BO3 jugables pendientes:
  * tres peldaños por mejor WR BO3 sucesivos; resto espectadores.
  */
-function podiumSettledMode(participants: PodiumPlayer[], remaining: PairingRemain[]): PodiumState {
+function podiumSettledMode(
+  participants: PodiumPlayer[],
+  remaining: PairingRemain[],
+  byPoints = false
+): PodiumState {
   let pool = [...participants];
-  const s1 = topBo3RationalTier(pool);
+  const s1 = byPoints ? topBo2PointsTier(pool) : topBo3RationalTier(pool);
   const rm1 = new Set(s1.map((p) => p.participantId));
   pool = pool.filter((p) => !rm1.has(p.participantId));
-  const { s2, s3, spectators } = podiumNextTwoStepsFromPool(pool);
+  const { s2, s3, spectators } = podiumNextTwoStepsFromPool(pool, byPoints);
 
-  const steps = buildStepsWithStools(s1, s2, s3);
+  // En BO2 (por puntos) no hay banquito: su desempate es por winrate BO3.
+  const steps = byPoints
+    ? ([
+        { rank: 1, players: s1, topPlayerOnStool: null },
+        { rank: 2, players: s2, topPlayerOnStool: null },
+        { rank: 3, players: s3, topPlayerOnStool: null },
+      ] as PodiumStep[])
+    : buildStepsWithStools(s1, s2, s3);
   const allClosed = !hasUnblockedPending(remaining);
   const isFinal = allClosed && s1.length > 0 && s2.length > 0 && s3.length > 0;
   return { steps, spectators, isFinal };
@@ -482,7 +607,8 @@ function podiumFirstPlaceTiebreakResolvedMode(
   champion: PodiumPlayer,
   group: ActiveTiebreakGroupPodiumInput,
   bracketMatches: BracketMatchPodiumInput[],
-  remaining: PairingRemain[]
+  remaining: PairingRemain[],
+  byPoints = false
 ): PodiumState {
   const finalRow = bracketMatches.find((m) => m.bracket_phase === 'final');
   const semiRows = bracketMatches.filter((m) => m.bracket_phase === 'semi');
@@ -532,7 +658,8 @@ function podiumFirstPlaceTiebreakResolvedMode(
   }
 
   // Grupo de 2 (sin fase 'semi'): el 3er puesto no lo decide este grupo — se completa con el
-  // mismo criterio genérico que un campeón declarado sin desempate (mejor WR BO3 del resto).
+  // mismo criterio genérico que un campeón declarado sin desempate (mejor WR BO3 del resto; en
+  // BO2, mayor cantidad de puntos de tabla, con empate exacto compartiendo el puesto).
   if (s2.length === 0 || s3.length === 0) {
     // podiumNextTwoStepsFromPool asume que el pool arranca en el 2do puesto (su propio s2 =
     // 1ra tanda del pool). Si el 2do puesto YA está resuelto (grupo de 2: final sin semis), el
@@ -540,7 +667,7 @@ function podiumFirstPlaceTiebreakResolvedMode(
     // puesto real, no filled.s3 (que sería un 4to escalón que este podio de 3 pasos no representa).
     const s2AlreadyDecided = s2.length > 0;
     const poolRest = participants.filter((p) => !decidedPids.has(p.participantId));
-    const filled = podiumNextTwoStepsFromPool(poolRest);
+    const filled = podiumNextTwoStepsFromPool(poolRest, byPoints);
     if (s2.length === 0) s2 = filled.s2;
     if (s3.length === 0) {
       const thirdPlaceTier = s2AlreadyDecided ? filled.s2 : filled.s3;
@@ -1008,6 +1135,21 @@ export function resolveFourthPlaceDisputeOrder(
   return order;
 }
 
+/**
+ * Cierre manual del organizador en round_robin BO2: el campeón es el de más puntos de tabla
+ * (3 ganado, 1 empate, 0 perdido), sin desempate acá — un empate exacto por el 1° devuelve 'tie'
+ * y el caller avisa que no se puede determinar un campeón. `players` ya viene filtrado por
+ * elegibilidad (enfrentamientos resueltos mínimos).
+ */
+export function pickBo2ManualChampion(
+  players: { userId: string; points: number }[]
+): { status: 'ok'; userId: string } | { status: 'tie' } {
+  let top = -Infinity;
+  for (const p of players) top = Math.max(top, p.points);
+  const leaders = players.filter((p) => p.points === top);
+  return leaders.length === 1 ? { status: 'ok', userId: leaders[0]!.userId } : { status: 'tie' };
+}
+
 export function computePodium(
   participants: PodiumPlayer[],
   pairingsRemaining: PairingRemain[],
@@ -1020,7 +1162,9 @@ export function computePodium(
   recognitionWinners?: string[] | null,
   bracketMatches?: BracketMatchPodiumInput[] | null,
   competitionFormat?: string | null,
-  topSize?: number | null
+  topSize?: number | null,
+  matchFormat?: string | null,
+  eventStatus?: string | null
 ): PodiumState {
   // round_robin + top_size=4 (antes 'round_robin_bo1_top4', ver 0076): el único podio válido
   // sale del bracket (podiumBracketFinalMode). Sin bracket creado todavía, podio vacío — nunca
@@ -1089,7 +1233,8 @@ export function computePodium(
       champ,
       activeTiebreakGroup,
       bracketMatches ?? [],
-      pairingsRemaining
+      pairingsRemaining,
+      competitionFormat === 'round_robin' && matchFormat === 'bo2'
     );
   }
 
@@ -1131,11 +1276,35 @@ export function computePodium(
 
   if (championUserId != null && String(championUserId).trim() !== '') {
     const champ = participants.find((p) => p.userId === championUserId);
-    if (champ) return podiumDeclaredChampionMode(participants, champ, pairingsRemaining);
+    if (champ) {
+      if (competitionFormat === 'round_robin' && matchFormat === 'bo2') {
+        return podiumDeclaredChampionBo2Mode(participants, champ, pairingsRemaining);
+      }
+      return podiumDeclaredChampionMode(participants, champ, pairingsRemaining);
+    }
   }
 
   if (hasUnblockedPending(pairingsRemaining)) {
+    // round_robin BO2 sin campeón declarado: ningún puesto hasta que se declare el campeón (la
+    // proyección por winrate de podiumPendingMode no aplica a un orden por puntos). Un evento
+    // cerrado (completed/concluded) conserva el comportamiento de siempre.
+    if (
+      competitionFormat === 'round_robin' &&
+      matchFormat === 'bo2' &&
+      eventStatus !== 'completed' &&
+      eventStatus !== 'concluded'
+    ) {
+      return {
+        steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+        spectators: participants,
+        isFinal: false,
+      };
+    }
     return podiumPendingMode(participants, pairingsRemaining, totalPlayers);
   }
-  return podiumSettledMode(participants, pairingsRemaining);
+  return podiumSettledMode(
+    participants,
+    pairingsRemaining,
+    competitionFormat === 'round_robin' && matchFormat === 'bo2'
+  );
 }

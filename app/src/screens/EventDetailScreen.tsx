@@ -33,6 +33,7 @@ import {
   type PairingSummary,
 } from '../lib/tiebreakLeaders';
 import { generateEventPairings } from '../lib/generateEventPairings';
+import { pickBo2ManualChampion } from '../lib/podium';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
@@ -804,7 +805,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     // Fetch pairings with participant sides
     const pairingsRes = await supabase
       .from('pairings')
-      .select('id, participant_a_id, participant_b_id, official_winner_participant_id')
+      .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw')
       .eq('event_id', event.id);
     if (pairingsRes.error) {
       Alert.alert('Error', pairingsRes.error.message ?? 'No se pudieron cargar los enfrentamientos.');
@@ -826,7 +827,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       return;
     }
 
-    type PairingRow = { id: string; participant_a_id: string; participant_b_id: string; official_winner_participant_id: string | null };
+    type PairingRow = {
+      id: string;
+      participant_a_id: string;
+      participant_b_id: string;
+      official_winner_participant_id: string | null;
+      official_draw?: boolean | null;
+    };
     type MatchRow = { pairing_id: string; winner_participant_id: string | null };
 
     const pairings = (pairingsRes.data ?? []) as PairingRow[];
@@ -844,7 +851,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       matchesWon: number;
       matchesCompleted: number;
       opponentIds: string[];
+      /** Puntos de tabla BO2 (3 ganado, 1 empate, 0 perdido). Solo se usa en round_robin BO2. */
+      points: number;
     };
+    const isRoundRobinBo2 = event.competition_format === 'round_robin' && event.match_format === 'bo2';
 
     const statsMap = new Map<string, Stats>();
     for (const p of participants) {
@@ -856,17 +866,21 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         matchesWon: 0,
         matchesCompleted: 0,
         opponentIds: [],
+        points: 0,
       });
     }
 
     for (const pr of pairings) {
-      const hasWinner = pr.official_winner_participant_id != null;
+      const isDraw = isRoundRobinBo2 && pr.official_winner_participant_id == null && pr.official_draw === true;
+      // BO2: el empate 1-1 también es un enfrentamiento resuelto (cuenta como completado).
+      const hasWinner = pr.official_winner_participant_id != null || isDraw;
       const aStats = statsMap.get(pr.participant_a_id);
       const bStats = statsMap.get(pr.participant_b_id);
       if (aStats) {
         if (hasWinner) {
           aStats.bo3Completed += 1;
           if (pr.official_winner_participant_id === pr.participant_a_id) aStats.bo3Won += 1;
+          aStats.points += isDraw ? 1 : pr.official_winner_participant_id === pr.participant_a_id ? 3 : 0;
         }
         aStats.opponentIds.push(pr.participant_b_id);
       }
@@ -874,6 +888,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         if (hasWinner) {
           bStats.bo3Completed += 1;
           if (pr.official_winner_participant_id === pr.participant_b_id) bStats.bo3Won += 1;
+          bStats.points += isDraw ? 1 : pr.official_winner_participant_id === pr.participant_b_id ? 3 : 0;
         }
         bStats.opponentIds.push(pr.participant_a_id);
       }
@@ -903,6 +918,22 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
     if (eligible.length === 0) {
       Alert.alert('Sin datos suficientes', 'Ningún jugador tiene enfrentamientos suficientes para armar el podio.');
+      return;
+    }
+
+    // round_robin BO2: el campeón sale de los puntos de tabla (3/1/0), igual que Standings; un
+    // empate en puntos por el 1° no se resuelve acá (mismo aviso que el resto de los formatos).
+    if (isRoundRobinBo2) {
+      const pick = pickBo2ManualChampion(eligible);
+      if (pick.status === 'tie') {
+        Alert.alert('Empate máximo por el primer lugar', 'No se puede determinar un campeón.');
+        return;
+      }
+      await patchEvent({
+        status: 'concluded',
+        event_ended_at: new Date().toISOString(),
+        champion_user_id: pick.userId,
+      });
       return;
     }
 
