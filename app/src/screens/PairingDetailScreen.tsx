@@ -1110,10 +1110,30 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const dispLiveL = inProgressLives ? (swapSides ? inProgressLives.b : inProgressLives.a) : 0;
   const dispLiveR = inProgressLives ? (swapSides ? inProgressLives.a : inProgressLives.b) : 0;
   const eventIsCancelled = draftEventStatus === 'cancelled';
-  // Mismo criterio que el guard de startMatch() (Fase 1): si alguno de los dos lados se fue,
-  // el botón no debe ni mostrarse habilitado — antes solo el handler bloqueaba, dejando el
-  // botón visualmente tappeable aunque no pudiera crear nada.
-  const startBlockedByLeftEvent = Boolean(a?.left_event_at || b?.left_event_at);
+  // Tipo de la partida que crearía "Iniciar": única fuente para el guard de startMatch() y para
+  // el estado del botón, así no pueden divergir.
+  const nextMatchType: 'draft' | 'revenge' | 'tiebreak' =
+    isTiebreakPending && (isBracketGroup || pairing.tiebreak_winner_participant_id == null)
+      ? 'tiebreak'
+      : competitionFormat === 'swiss' &&
+          (pairing.swiss_round == null ||
+            currentSwissRound == null ||
+            pairing.swiss_round !== currentSwissRound)
+        ? 'revenge'
+        : !officialResolved &&
+            (competitionFormat !== 'swiss' ||
+              (pairing.swiss_round != null &&
+                currentSwissRound != null &&
+                pairing.swiss_round === currentSwissRound))
+          ? 'draft'
+          : 'revenge';
+  // Si alguno de los dos lados se fue (left_event_at), no se pueden iniciar partidas oficiales ni
+  // de desempate/bracket (las resuelve el walkover). Las venganzas se juegan fuera del día del
+  // torneo, así que sí: tanto iniciar una nueva como retomar una venganza en curso.
+  const startsRevenge = inProgressMatch
+    ? inProgressMatch.match_type === 'revenge'
+    : nextMatchType === 'revenge';
+  const startBlockedByLeftEvent = Boolean(a?.left_event_at || b?.left_event_at) && !startsRevenge;
   const startDisabled = eventIsCancelled || startBlockedByLeftEvent;
 
   const swissOfficialPendingThisRound =
@@ -1154,13 +1174,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Evento cancelado', 'No se pueden iniciar partidas en un evento cancelado.');
       return;
     }
-    // Nadie puede iniciar una partida nueva (oficial, venganza o cualquier otra) en un pairing
-    // donde alguno de los dos lados se marcó como left_event_at — está fuera del evento. Sin
-    // excepción todavía para pairings linkeados a un bracket real (Fase 1).
-    if (a?.left_event_at || b?.left_event_at) {
+    // Partidas oficiales y de desempate/bracket: no se inician en un pairing donde alguno de los
+    // dos lados se marcó como left_event_at (las resuelve el walkover). Venganzas: sí se pueden.
+    if (startBlockedByLeftEvent) {
       Alert.alert(
         'No se puede iniciar',
-        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas en este enfrentamiento.'
+        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas oficiales ni de desempate en este enfrentamiento.'
       );
       return;
     }
@@ -1206,27 +1225,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     }
 
     const nextNumber = (matches[matches.length - 1]?.match_number ?? 0) + 1;
-    let matchType: 'draft' | 'revenge' | 'tiebreak';
-    if (isTiebreakPending && (isBracketGroup || pairing.tiebreak_winner_participant_id == null)) {
-      matchType = 'tiebreak';
-    } else if (
-      competitionFormat === 'swiss' &&
-      (pairing.swiss_round == null ||
-        currentSwissRound == null ||
-        pairing.swiss_round !== currentSwissRound)
-    ) {
-      matchType = 'revenge';
-    } else if (
-      !officialResolved &&
-      (competitionFormat !== 'swiss' ||
-        (pairing.swiss_round != null &&
-          currentSwissRound != null &&
-          pairing.swiss_round === currentSwissRound))
-    ) {
-      matchType = 'draft';
-    } else {
-      matchType = 'revenge';
-    }
+    const matchType = nextMatchType;
     const tiebreakRound =
       matchType === 'tiebreak' ? activeTiebreakGroup?.round_number ?? 1 : undefined;
     const { data, error } = await supabase

@@ -405,8 +405,25 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     match.match_type === 'tiebreak' &&
     bracketTiebreakWinsNeeded != null &&
     Math.max(tiebreakWinsA, tiebreakWinsB) < bracketTiebreakWinsNeeded;
+  // Tipo de la partida que crearía la revancha (única fuente para el botón y para createRematch).
+  const rematchType =
+    match.match_type === 'tiebreak'
+      ? 'tiebreak'
+      : competitionFormat === 'swiss' &&
+          (pairing.swiss_round == null ||
+            currentSwissRound == null ||
+            pairing.swiss_round !== currentSwissRound)
+        ? 'revenge'
+        : pairing.official_winner_participant_id || officialResolvedByBo1
+          ? 'revenge'
+          : match.match_type === 'two_headed_giant'
+            ? 'two_headed_giant'
+            : 'draft';
+  // Alguien que se fue (left_event_at) no puede jugar partidas oficiales ni de desempate, pero sí
+  // venganzas (se juegan fuera del día del torneo).
+  const rematchBlockedByLeftEvent = Boolean(pa?.left_event_at || pb?.left_event_at) && rematchType !== 'revenge';
   const showRematchBtn =
-    !(pa?.left_event_at || pb?.left_event_at) &&
+    !rematchBlockedByLeftEvent &&
     (bracketTiebreakSeriesStillOpen ||
       (match.match_type !== 'tiebreak' && (
         match.match_type === 'revenge' ||
@@ -446,12 +463,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   }
 
   const createRematch = async () => {
-    // Nadie puede iniciar una partida nueva (revancha/tiebreak/lo que sea) en un pairing donde
-    // alguno de los dos lados se marcó como left_event_at — está fuera del evento.
-    if (pa?.left_event_at || pb?.left_event_at) {
+    // Oficiales y desempates: no se inician si alguno de los dos se marcó como ido. Venganzas: sí.
+    if (rematchBlockedByLeftEvent) {
       Alert.alert(
         'No se puede iniciar',
-        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas en este enfrentamiento.'
+        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas oficiales ni de desempate en este enfrentamiento.'
       );
       return;
     }
@@ -464,19 +480,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       return;
     }
     const number = (countRes.count ?? 0) + 1;
-    const type =
-      match.match_type === 'tiebreak'
-        ? 'tiebreak'
-        : competitionFormat === 'swiss' &&
-            (pairing.swiss_round == null ||
-              currentSwissRound == null ||
-              pairing.swiss_round !== currentSwissRound)
-          ? 'revenge'
-          : pairing.official_winner_participant_id || officialResolvedByBo1
-            ? 'revenge'
-            : match.match_type === 'two_headed_giant'
-              ? 'two_headed_giant'
-              : 'draft';
+    const type = rematchType;
     const insRes = await supabase
       .from('matches')
       .insert({ pairing_id: pairing.id, match_number: number, match_type: type, started_at: new Date().toISOString() })
