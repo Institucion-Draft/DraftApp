@@ -17,7 +17,8 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { EventType, EventStatus } from '../lib/database.types';
 import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
-import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { getEventStatusLabel } from '../lib/labels';
+import { formatEventMode } from '../lib/eventMode';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -31,6 +32,9 @@ type EventRow = {
   scheduled_for: string;
   status: EventStatus;
   event_type: EventType;
+  competition_format: string | null;
+  match_format: string | null;
+  top_size: number | null;
   cube_id: string | null;
   venue_id: string | null;
   champion_user_id: string | null;
@@ -76,7 +80,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
     const [eventsRes, cubesRes, venuesRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('id, name, avatar_path, scheduled_for, status, event_type, cube_id, venue_id, champion_user_id, has_shiny_participant')
+        .select('id, name, avatar_path, scheduled_for, status, event_type, competition_format, match_format, top_size, cube_id, venue_id, champion_user_id, has_shiny_participant')
         .eq('workspace_id', workspaceId)
         .is('deleted_at', null)
         .order('scheduled_for', { ascending: false }),
@@ -314,9 +318,6 @@ export default function EventsListScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('CreateEvent', { workspaceId })}>
-        <Text style={styles.primaryBtnText}>+ Crear evento</Text>
-      </TouchableOpacity>
       <FlatList
         data={items}
         keyExtractor={(it) => it.id}
@@ -354,7 +355,10 @@ export default function EventsListScreen({ navigation, route }: Props) {
                     })}
                   </Text>
                   <Text style={styles.meta}>Estado: {getEventStatusLabel(item.status)}</Text>
-                  <Text style={styles.meta}>Tipo: {getEventTypeLabel(item.event_type)}</Text>
+                  <Text style={styles.meta}>
+                    Modalidad:{' '}
+                    {formatEventMode(item.event_type, item.competition_format, item.top_size, item.match_format) || '—'}
+                  </Text>
                   <Text style={styles.meta}>Cubo: {item.cube_id ? cubeMap[item.cube_id] ?? '—' : 'Sin definir'}</Text>
                   <Text style={styles.meta}>Sede: {item.venue_id ? venueMap[item.venue_id] ?? '—' : 'Sin definir'}</Text>
                   <Text style={styles.meta}>Participantes: {(participantCounts[item.id] ?? 0) * (item.event_type === 'two_headed_giant' ? 2 : 1)}</Text>
@@ -429,15 +433,6 @@ const createStyles = (c: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
-    primaryBtn: {
-      marginHorizontal: 16,
-      marginTop: 12,
-      backgroundColor: c.accent,
-      borderRadius: 8,
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-    primaryBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
     listWrap: { padding: 16, paddingBottom: 32 },
     emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     empty: { color: c.textSecondary, fontSize: 15 },
