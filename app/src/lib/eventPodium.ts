@@ -98,6 +98,7 @@ export function buildPodiumPlayers(
     const ec = playerPairings.filter(
       (pr) => pr.official_winner_participant_id != null || pr.official_draw === true
     ).length;
+    const ee = playerPairings.filter((pr) => pr.official_draw === true).length;
     return {
       participantId: pid,
       userId,
@@ -110,6 +111,7 @@ export function buildPodiumPlayers(
       matchesWon: pgOff,
       matchesCompleted: pjOff,
       matchWinRate: pjOff > 0 ? pgOff / pjOff : 0,
+      bo2Points: eg * 3 + ee,
     };
   });
 }
@@ -241,6 +243,8 @@ type RawEventRow = {
   recognition_winners?: string[] | null;
   competition_format?: string | null;
   top_size?: number | null;
+  match_format?: string | null;
+  status?: string | null;
 };
 
 /**
@@ -276,7 +280,7 @@ export async function fetchEventPodiums(eventIds: string[]): Promise<Map<string,
       .in('event_id', ids),
     supabase
       .from('draft_events')
-      .select('id, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, competition_format, top_size')
+      .select('id, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, competition_format, top_size, match_format, status')
       .in('id', ids),
     supabase
       .from('event_tiebreak_groups')
@@ -397,7 +401,9 @@ export async function fetchEventPodiums(eventIds: string[]): Promise<Map<string,
       (ev.recognition_winners ?? []) as string[],
       bracketMatches,
       ev.competition_format ?? null,
-      ev.top_size ?? null
+      ev.top_size ?? null,
+      ev.match_format ?? null,
+      ev.status ?? null
     );
     out.set(ev.id, { podium, playerCount: eventParticipants.length });
   }

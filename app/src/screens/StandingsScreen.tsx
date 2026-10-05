@@ -1098,7 +1098,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
         recognitionWinners,
         podiumBracketMatches,
         rawFmt,
-        rawTopSize
+        rawTopSize,
+        rawMatchFormat,
+        eventStatus
       )
     );
 
