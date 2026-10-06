@@ -5,6 +5,7 @@
  * cómo manejar el rollback y los alerts según el resultado.
  */
 import { supabase } from './supabase';
+import { normalizeCompetitionFormat } from './eventMode';
 
 type PairingInsert = {
   event_id: string;
@@ -35,6 +36,19 @@ export async function generateEventPairings(eventId: string): Promise<GeneratePa
   const evRow = evRes.data as { competition_format?: string | null; match_format?: string | null };
   const competitionFormat = evRow.competition_format ?? 'round_robin';
   const matchFormat = evRow.match_format ?? 'bo3';
+
+  // Copa (sólo llaves): no hay todos contra todos. Un RPC idempotente sortea y guarda el bracket
+  // (si ya existe no lo vuelve a sortear). Si falla, el caller revierte el evento a 'drafting'.
+  if (normalizeCompetitionFormat(competitionFormat) === 'knockout') {
+    const drawRes = await supabase.rpc('draw_knockout_bracket', { p_event_id: eventId });
+    if (drawRes.error) {
+      if (__DEV__) {
+        console.error('[generatePairings] Error draw_knockout_bracket', drawRes.error);
+      }
+      return { ok: false, message: drawRes.error.message ?? 'No se pudo sortear las llaves.' };
+    }
+    return { ok: true, message: 'Se sortearon las llaves.' };
+  }
 
   const partsRes = await supabase
     .from('event_participants')

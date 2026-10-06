@@ -69,7 +69,8 @@ export type TiebreakMatchPodiumInput = {
 
 /** Fila de event_tiebreak_bracket_matches; usada para reconstruir el podio del bracket de 4. */
 export type BracketMatchPodiumInput = {
-  bracket_phase: 'semi' | 'final' | 'third_place';
+  /** round_of_16 y quarter: sólo Copa (group_origin='knockout_bracket'); el podio sólo lee final y third_place. */
+  bracket_phase: 'round_of_16' | 'quarter' | 'semi' | 'final' | 'third_place';
   participant_a_id: string;
   participant_b_id: string;
   winner_participant_id: string | null;
@@ -1178,6 +1179,16 @@ export function computePodium(
     };
   }
 
+  // Copa (sólo llaves): el único podio válido sale del bracket (group_origin='knockout_bracket').
+  // Sin grupo todavía (draft sin sortear), podio vacío — nunca proyectar desde pairings.
+  if (competitionFormat === 'knockout' && activeTiebreakGroup == null) {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: participants,
+      isFinal: false,
+    };
+  }
+
   if (participants.length === 0) {
     return {
       steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
@@ -1253,7 +1264,9 @@ export function computePodium(
         participants,
         activeTiebreakGroup,
         bracketMatches ?? [],
-        pairingsRemaining
+        // Copa: sus pairings son sólo de llaves y nunca tienen resultado oficial; si contaran como
+        // pendientes, isFinal no se cumpliría jamás. La final y el 3er puesto resueltos alcanzan.
+        competitionFormat === 'knockout' ? [] : pairingsRemaining
       );
     } else {
       if (noGroupChampion) {

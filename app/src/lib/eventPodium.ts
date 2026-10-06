@@ -65,7 +65,7 @@ export type PodiumTiebreakGroupRow = {
 export type PodiumGroupParticipant = { participant_id: string; user_id: string; seed: number };
 
 type RawBracketMatchQueryRow = {
-  bracket_phase: 'semi' | 'final' | 'third_place';
+  bracket_phase: 'round_of_16' | 'quarter' | 'semi' | 'final' | 'third_place';
   participant_a_id: string;
   participant_b_id: string;
   winner_participant_id: string | null;
