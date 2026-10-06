@@ -59,3 +59,13 @@ export function formatEventMode(
   if (tail) parts.push(tail);
   return parts.join(' · ');
 }
+
+/** Copa (sólo llaves): cantidad de jugadores inscriptos admitida (el servidor valida lo mismo). */
+export const KNOCKOUT_MIN_PLAYERS = 8;
+export const KNOCKOUT_MAX_PLAYERS = 16;
+
+/** null si la cantidad sirve para una Copa (sólo llaves); si no, el motivo para mostrar. */
+export function knockoutPlayerCountProblem(playerCount: number): string | null {
+  if (playerCount >= KNOCKOUT_MIN_PLAYERS && playerCount <= KNOCKOUT_MAX_PLAYERS) return null;
+  return `que haya entre ${KNOCKOUT_MIN_PLAYERS} y ${KNOCKOUT_MAX_PLAYERS} jugadores inscriptos (hay ${playerCount})`;
+}

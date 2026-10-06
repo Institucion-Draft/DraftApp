@@ -26,6 +26,7 @@ import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   getTwoWayTieFirstPlaceParticipantIds,
@@ -801,6 +802,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const concludeEvent = async () => {
     if (!event) return;
+    // Copa: el campeón sale de la final del bracket; este cierre calcula por reglas de liga.
+    const concludeFormat = normalizeCompetitionFormat(event.competition_format);
+    if (concludeFormat === 'knockout' || concludeFormat === 'zones_knockout') {
+      Alert.alert('No disponible', 'El cierre manual no está disponible para las Copas.');
+      return;
+    }
 
     // Fetch pairings with participant sides
     const pairingsRes = await supabase
@@ -1147,8 +1154,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const missingParticipants = participantCount < 1;
   const missingGiantRandomization =
     event?.event_type === 'two_headed_giant' && !event?.giant_randomization_done;
+  // Copa (sólo llaves): 8 a 16 jugadores (el servidor lo vuelve a validar al pasar a 'drafting').
+  const knockoutCountProblem =
+    normalizeCompetitionFormat(event?.competition_format) === 'knockout'
+      ? knockoutPlayerCountProblem(participantCount)
+      : null;
   const startDraftDisabled =
-    missingCube || missingVenue || missingParticipants || missingGiantRandomization;
+    missingCube || missingVenue || missingParticipants || missingGiantRandomization || knockoutCountProblem != null;
   const missingStartRequirements: string[] = [];
   if (missingCube) missingStartRequirements.push('seleccionar el cubo');
   if (missingVenue) missingStartRequirements.push('seleccionar la sede');
@@ -1158,6 +1170,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   if (missingGiantRandomization) {
     missingStartRequirements.push('sortear los equipos primero');
   }
+  if (knockoutCountProblem) missingStartRequirements.push(knockoutCountProblem);
   const startDraftDisabledHint = missingStartRequirements.length
     ? `Falta ${missingStartRequirements.join(', ')}`
     : '';
@@ -1305,6 +1318,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup.group_type !== 'fourth_place' &&
     activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup.group_origin !== 'round_robin_topcut' &&
+    activeTiebreakGroup.group_origin !== 'knockout_bracket' &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
@@ -1316,6 +1330,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup?.group_type !== 'fourth_place' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&
+    activeTiebreakGroup?.group_origin !== 'knockout_bracket' &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));
 
@@ -2023,6 +2038,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           >
             <Text style={styles.concludeTxt}>Dar por concluido</Text>
           </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {canManageEvent && normalizeCompetitionFormat(event.competition_format) === 'knockout' && event.status === 'playing' ? (
+        <View style={styles.block}>
+          <Text style={styles.muted}>El cierre manual no está disponible para las Copas: el campeón sale de la final.</Text>
         </View>
       ) : null}
 

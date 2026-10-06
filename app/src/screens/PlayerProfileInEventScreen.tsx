@@ -969,9 +969,14 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
     }
 
-    const confirmation = isSelfAction
-      ? `Si te marcás como ${leftWord}, no vas a poder revertirlo vos mismo (solo el organizer puede). Tus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`
-      : `Vas a marcar a ${actorName} como ${leftWord} del evento. Sus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`;
+    const isKnockout = eventCompetitionFormat === 'knockout';
+    const confirmation = isKnockout
+      ? isSelfAction
+        ? `Si te marcás como ${leftWord}, tu rival avanza por walkover y no se puede revertir en una Copa. ¿Confirmás?`
+        : `Vas a marcar a ${actorName} como ${leftWord} del evento. Su rival avanza por walkover y no se puede revertir en una Copa. ¿Confirmás?`
+      : isSelfAction
+        ? `Si te marcás como ${leftWord}, no vas a poder revertirlo vos mismo (solo el organizer puede). Tus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`
+        : `Vas a marcar a ${actorName} como ${leftWord} del evento. Sus enfrentamientos pendientes dejan de trabar el cierre del torneo. ¿Confirmás?`;
     Alert.alert(isSelfAction ? 'Me estoy yendo' : markAsLeftLabel, confirmation, [
       { text: 'Cancelar', style: 'cancel' },
       {
@@ -983,6 +988,20 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             .eq('id', participantId);
           if (error) {
             Alert.alert('Error', error.message ?? 'No se pudo marcar como ido.');
+            return;
+          }
+          // Copa (sólo llaves): un único RPC de servidor resuelve todo el walkover de las llaves.
+          // Va ANTES de apply_walkover_for_participant, que trata como "fase regular" cualquier
+          // pairing sin resolver y le daría walkovers a cruces de llaves.
+          if (isKnockout) {
+            const knockoutRes = await supabase.rpc('apply_knockout_walkover', {
+              p_participant_id: participantId,
+            });
+            if (knockoutRes.error) {
+              Alert.alert('Error', knockoutRes.error.message ?? 'No se pudo resolver la salida en las llaves.');
+              return;
+            }
+            await load();
             return;
           }
           // Resuelve por abandono los pairings de fase regular todavía pendientes de esta
@@ -2103,7 +2122,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.leftEventText}>
                 Te marcaste como {leftWord} el {formatLeftEventAt(leftEventAt)}
               </Text>
-              {canManageEvent ? (
+              {canManageEvent && eventCompetitionFormat !== 'knockout' ? (
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
                   <Text style={styles.primaryBtnTxt}>Revertir</Text>
                 </TouchableOpacity>
@@ -2120,9 +2139,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               <Text style={styles.leftEventText}>
                 {displayName} se marcó como {leftWord} el {formatLeftEventAt(leftEventAt)}
               </Text>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
-                <Text style={styles.primaryBtnTxt}>Revertir</Text>
-              </TouchableOpacity>
+              {eventCompetitionFormat !== 'knockout' ? (
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => void revertLeft()}>
+                  <Text style={styles.primaryBtnTxt}>Revertir</Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : (
             <TouchableOpacity style={styles.secondaryBtn} onPress={() => void markAsLeft(false)}>
