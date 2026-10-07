@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
-import * as ScreenOrientation from 'expo-screen-orientation';
+import { releaseLandscape, requestLandscape } from '../lib/screenOrientationPolicy';
 import Svg, { Line, Polyline, Circle, Text as SvgText, Rect } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
@@ -61,9 +61,10 @@ export default function LifeChartScreen({ route }: Props) {
   const [winnerParticipantId, setWinnerParticipantId] = useState<string | null>(null);
 
   useEffect(() => {
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    // Se registra el pedido para que la guarda global no lo corrija; ambos pasos esperan al sistema.
+    void requestLandscape();
     return () => {
-      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      void releaseLandscape();
     };
   }, []);
 
