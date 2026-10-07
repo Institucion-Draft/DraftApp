@@ -235,3 +235,7 @@ Hoy cada evento es a la vez un draft y una competencia. La idea es separarlos: u
 - A qué temporada pertenece cada competencia
 - La rotación de avatares, que hoy es por evento
 - Cómo conviven con los eventos ya existentes
+
+## Toggle de "otra competencia del mismo draft" al crear un evento
+
+Alternativa más simple y menos radical a "Desacoplar el evento de draft del evento de competencia" (entrada anterior). Al crear un evento nuevo, en configuración avanzada, un toggle "¿Es otra competencia de un mismo draft?". Si está activo, al evento nuevo se le fijan los datos del draft ya hecho (tiempo de draft, cubo) y se omite la parte del draft. La sede NO se fija, porque puede cambiar. A evaluar cuando lleguemos a la sesión de diseño draft/competencia, antes de zonas.

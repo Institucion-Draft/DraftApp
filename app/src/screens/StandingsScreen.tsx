@@ -15,7 +15,6 @@ import Svg, { Path } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
@@ -23,6 +22,7 @@ import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
 import KnockoutBracket from '../components/KnockoutBracket';
+import { releaseLandscape as releaseLandscapeLock, requestLandscape } from '../lib/screenOrientationPolicy';
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
   buildKnockoutBracketModel,
@@ -741,12 +741,12 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const applyLandscape = useCallback(() => {
     if (!knockoutRef.current || landscapeLockedRef.current || !navigation.isFocused()) return;
     landscapeLockedRef.current = true;
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    void requestLandscape();
   }, [navigation]);
   const releaseLandscape = useCallback(() => {
     if (!landscapeLockedRef.current) return;
     landscapeLockedRef.current = false;
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    void releaseLandscapeLock();
   }, []);
   // Foco: bloquea; pérdida de foco (incluida la navegación a otra pantalla): restaura.
   useFocusEffect(

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { ThemeProvider, useTheme } from './src/theme';
+import { startPortraitGuard } from './src/lib/screenOrientationPolicy';
 
 function AppContent() {
   const { loading } = useAuth();
@@ -22,6 +23,9 @@ function AppContent() {
 }
 
 export default function App() {
+  // Guarda global de orientación: la app es vertical salvo las pantallas que piden landscape.
+  useEffect(() => startPortraitGuard(), []);
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>
