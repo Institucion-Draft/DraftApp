@@ -239,3 +239,13 @@ Hoy cada evento es a la vez un draft y una competencia. La idea es separarlos: u
 ## Toggle de "otra competencia del mismo draft" al crear un evento
 
 Alternativa más simple y menos radical a "Desacoplar el evento de draft del evento de competencia" (entrada anterior). Al crear un evento nuevo, en configuración avanzada, un toggle "¿Es otra competencia de un mismo draft?". Si está activo, al evento nuevo se le fijan los datos del draft ya hecho (tiempo de draft, cubo) y se omite la parte del draft. La sede NO se fija, porque puede cambiar. A evaluar cuando lleguemos a la sesión de diseño draft/competencia, antes de zonas.
+
+## Copa: segunda oportunidad y Copa desde 4 jugadores
+
+Dos ideas relacionadas para la Copa: una segunda copa en paralelo para quienes caen en su primer partido, y bajar el mínimo de jugadores de la Copa.
+
+- **Copa 2da oportunidad:** quien pierde su primer partido en la copa principal (sea octavos, cuartos, etc.) pasa a una segunda copa en paralelo. Solo se arma si hay 4 o más jugadores que perdieron su primer partido; si no, no se crea. Se sortea recién cuando todos los primeros partidos de la copa principal están resueltos (con 12 jugadores entran entre 4 y 8: los 4 de octavos más los de bye que pierdan en cuartos). Misma lógica de byes que la copa principal, entra a la ronda que corresponde por cantidad. Con una Copa de 4 jugadores no se crea (sería el partido del 3er y 4to puesto).
+- **Grupos + Copa:** los que no clasifican a la copa principal van a la 2da oportunidad (mismo mínimo de 4).
+- **Venganzas:** mientras la 2da oportunidad no está sorteada, los eliminados pueden jugar venganzas. Una partida que arranca como venganza termina como venganza; los partidos oficiales de la 2da oportunidad aparecen recién cuando se sortea.
+- **UI:** ambas copas en paralelo con una pestaña por copa en Cruces de copa; en Enfrentamientos, una pestaña por copa más una pestaña general de venganzas.
+- **Copa desde 4 jugadores:** bajar el mínimo de 8 a 4 jugadores en la validación, `draw_knockout_bracket` (casos de 4 jugadores = semis directas, y 5 a 7 = cuartos con byes), nombres de ronda y modelo del cuadro. En grupos + Copa el límite de 4 a 16 se aplica a los que entran al cuadro, no al total del evento.
