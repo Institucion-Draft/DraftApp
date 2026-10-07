@@ -55,6 +55,7 @@ type TodayEvent = {
   status: string;
   event_type: string | null;
   competition_format: string | null;
+  topcut_format?: string | null;
   top_size: number | null;
   match_format: string | null;
 };
@@ -196,7 +197,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     end.setDate(end.getDate() + 1);
     const { data, error } = await supabase
       .from('draft_events')
-      .select('id, name, status, event_type, competition_format, top_size, match_format')
+      .select('id, name, status, event_type, competition_format, top_size, match_format, topcut_format')
       .eq('workspace_id', workspaceId)
       .is('deleted_at', null)
       .neq('status', 'cancelled')
@@ -357,7 +358,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
                     <Text style={styles.todayBadgeText}>HOY</Text>
                   </Animated.View>
                   <Text style={styles.todaySub} numberOfLines={1}>
-                    {formatEventMode(e.event_type, e.competition_format, e.top_size, e.match_format)}
+                    {formatEventMode(e.event_type, e.competition_format, e.top_size, e.match_format, e.topcut_format)}
                   </Text>
                 </View>
               </View>

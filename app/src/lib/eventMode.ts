@@ -37,14 +37,16 @@ export function getCompetitionFormatBaseLabel(format: CompetitionFormat): string
 /**
  * Modalidad de juego de un evento: "Todos contra todos · BO2", "Todos contra todos · BO1 + Top 4",
  * "Suizo · BO3 + Top 4", "Gigante de Dos Cabezas · Todos contra todos · BO3".
- * Los datos que falten se omiten; vacío si el evento no tiene nada cargado. Los formatos Copa
- * muestran sólo la etiqueta base (el detalle de zonas, clasificados y BO se define después).
+ * Los datos que falten se omiten; vacío si el evento no tiene nada cargado. Copa (sólo llaves)
+ * suma el formato de las llaves: "Copa (sólo llaves) · BO1". Copa (grupos + llaves) muestra sólo la
+ * etiqueta base (su detalle se define cuando exista su pantalla de creación).
  */
 export function formatEventMode(
   eventType: string | null,
   competitionFormat: string | null,
   topSize: number | null,
-  matchFormat: string | null
+  matchFormat: string | null,
+  topcutFormat?: string | null
 ): string {
   const parts: string[] = [];
   if (eventType === 'two_headed_giant') {
@@ -52,7 +54,12 @@ export function formatEventMode(
   }
   const known = isCompetitionFormat(competitionFormat) ? competitionFormat : null;
   if (known) parts.push(COMPETITION_FORMAT_LABELS[known]);
-  if (known === 'zones_knockout' || known === 'knockout') return parts.join(' · ');
+  if (known === 'knockout') {
+    // Copa (sólo llaves): el formato de las llaves (topcut_format) va en la etiqueta.
+    if (topcutFormat === 'bo1' || topcutFormat === 'bo3') parts.push(topcutFormat.toUpperCase());
+    return parts.join(' · ');
+  }
+  if (known === 'zones_knockout') return parts.join(' · ');
 
   let tail = matchFormat ? matchFormat.toUpperCase() : '';
   if (topSize && topSize > 0) tail = tail ? `${tail} + Top ${topSize}` : `Top ${topSize}`;

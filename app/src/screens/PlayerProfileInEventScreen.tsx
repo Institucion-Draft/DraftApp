@@ -20,6 +20,11 @@ import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstP
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
+import {
+  KNOCKOUT_BRACKET_ORIGIN,
+  bracketPhaseSingularName,
+  type BracketPhase,
+} from '../lib/knockoutRounds';
 import { useCanManageEvent } from '../hooks/useCanManageEvent';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -119,7 +124,14 @@ type BracketBmRow = {
   winner_participant_id: string | null;
 };
 
-type MataPhaseBuckets = { semi: OfficialH2HRow[]; final: OfficialH2HRow[]; third: OfficialH2HRow[] };
+type MataPhaseBuckets = {
+  /** Octavos y cuartos sólo existen en la Copa (sólo llaves). */
+  roundOf16: OfficialH2HRow[];
+  quarter: OfficialH2HRow[];
+  semi: OfficialH2HRow[];
+  final: OfficialH2HRow[];
+  third: OfficialH2HRow[];
+};
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
@@ -139,7 +151,7 @@ function findPairingBetween(pairings: PairingRow[], pid: string, oid: string): P
 /** Alineado con `public.topcut_wins_needed` (migración 0039) y con PairingDetailScreen.tsx. */
 function topcutWinsNeededClient(
   format: string | null | undefined,
-  phase: 'semi' | 'final' | 'third_place'
+  phase: BracketPhase
 ): number {
   const f = format ?? 'bo3';
   if (f === 'bo1') return 1;
@@ -218,7 +230,12 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [workspaceStreak, setWorkspaceStreak] = useState<Array<'V' | 'D'>>([]);
   const [profileInTiebreakGroup, setProfileInTiebreakGroup] = useState(false);
   const [profileTiebreakGroupOrigin, setProfileTiebreakGroupOrigin] = useState<
-    'tiebreak' | 'swiss_topcut' | 'round_robin_topcut' | 'round_robin_fourth_place' | 'round_robin_first_place'
+    | 'tiebreak'
+    | 'swiss_topcut'
+    | 'round_robin_topcut'
+    | 'round_robin_fourth_place'
+    | 'round_robin_first_place'
+    | 'knockout_bracket'
   >('tiebreak');
   const [profileTiebreakRows, setProfileTiebreakRows] = useState<TiebreakProfileRow[]>([]);
   const [profileTiebreakGroupRound, setProfileTiebreakGroupRound] = useState(1);
@@ -607,8 +624,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         ? rawTopcutFormat
         : 'bo3'
     );
+    // Copa (sólo llaves): los cruces oficiales son los de la sección de llaves; no hay lista regular.
     const officialH2hFiltered =
-      competitionFormat === 'swiss'
+      competitionFormat === 'knockout'
+        ? []
+        : competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
             if (!row.pairingId) return false;
             // Mostrar empates resueltos aunque no tengan partidas individuales jugadas.
@@ -678,7 +698,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       // Fuente de verdad de membresía y de los cruces para 'bracket' (fase mata-mata suiza o
       // bracket real de top4): event_tiebreak_bracket_matches.
       const isBracketSourced =
-        (tgOrigin === 'swiss_topcut' || tgOrigin === 'round_robin_topcut') && tgType === 'bracket';
+        (tgOrigin === 'swiss_topcut' || tgOrigin === 'round_robin_topcut' || tgOrigin === KNOCKOUT_BRACKET_ORIGIN) &&
+        tgType === 'bracket';
 
       if (isBracketSourced) {
         const bmRes = await supabase
@@ -697,7 +718,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               ? 'swiss_topcut'
               : tgOrigin === 'round_robin_topcut'
                 ? 'round_robin_topcut'
-                : 'tiebreak'
+                : tgOrigin === KNOCKOUT_BRACKET_ORIGIN
+                  ? 'knockout_bracket'
+                  : 'tiebreak'
           );
           setProfileTiebreakGroupRound(tgRound);
 
@@ -705,6 +728,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           // El rival, la fase y el resultado salen del bracket match, NO del pairing
           // (que en swiss BO2 [match_format='bo2'] puede estar compartido con la ronda suiza y apuntar a
           // otro jugador). El pairing solo se usa para contar el marcador parcial.
+          const roundOf16Rows: OfficialH2HRow[] = [];
+          const quarterRows: OfficialH2HRow[] = [];
           const semiRows: OfficialH2HRow[] = [];
           const finalRows: OfficialH2HRow[] = [];
           const thirdRows: OfficialH2HRow[] = [];
@@ -714,8 +739,12 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             if (bm.participant_a_id === participantId) oppId = bm.participant_b_id;
             else if (bm.participant_b_id === participantId) oppId = bm.participant_a_id;
             else continue;
-            const phase =
-              bm.bracket_phase === 'semi' || bm.bracket_phase === 'final' || bm.bracket_phase === 'third_place'
+            const phase: BracketPhase | null =
+              bm.bracket_phase === 'round_of_16' ||
+              bm.bracket_phase === 'quarter' ||
+              bm.bracket_phase === 'semi' ||
+              bm.bracket_phase === 'final' ||
+              bm.bracket_phase === 'third_place'
                 ? bm.bracket_phase
                 : null;
             if (!phase) continue;
@@ -755,9 +784,24 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               opponentIsWalkoverLoser,
               selfIsWalkoverLoser,
             };
-            (phase === 'semi' ? semiRows : phase === 'final' ? finalRows : thirdRows).push(row);
+            (phase === 'round_of_16'
+              ? roundOf16Rows
+              : phase === 'quarter'
+                ? quarterRows
+                : phase === 'semi'
+                  ? semiRows
+                  : phase === 'final'
+                    ? finalRows
+                    : thirdRows
+            ).push(row);
           }
-          setProfileMataByPhase({ semi: semiRows, final: finalRows, third: thirdRows });
+          setProfileMataByPhase({
+            roundOf16: roundOf16Rows,
+            quarter: quarterRows,
+            semi: semiRows,
+            final: finalRows,
+            third: thirdRows,
+          });
           setProfileTiebreakRows([]);
         }
       } else {
@@ -1603,6 +1647,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       if (eventCompetitionFormat === 'swiss') return null;
       // round_robin_topcut se muestra con la sección de fases (swissMataBracketSection).
       if (profileTiebreakGroupOrigin === 'round_robin_topcut') return null;
+      if (profileTiebreakGroupOrigin === 'knockout_bracket') return null;
       return (
         <>
           <Text style={styles.sectionTitle}>
@@ -1756,14 +1801,18 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const swissMataBracketSection = () => {
       if (
         !profileInTiebreakGroup ||
-        (profileTiebreakGroupOrigin !== 'swiss_topcut' && profileTiebreakGroupOrigin !== 'round_robin_topcut')
+        (profileTiebreakGroupOrigin !== 'swiss_topcut' &&
+          profileTiebreakGroupOrigin !== 'round_robin_topcut' &&
+          profileTiebreakGroupOrigin !== 'knockout_bracket')
       ) {
         return null;
       }
+      // Copa (sólo llaves): sin el header superior; quedan los de cada instancia. Los demás formatos lo conservan.
+      const showMataHeader = eventCompetitionFormat !== 'knockout';
       if (!profileMataByPhase) {
         return (
           <>
-            <Text style={styles.sectionTitle}>Fase mata-mata</Text>
+            {showMataHeader ? <Text style={styles.sectionTitle}>Fase mata-mata</Text> : null}
             {profileTiebreakRows.length === 0 ? (
               <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
             ) : (
@@ -1773,14 +1822,34 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         );
       }
       const total =
-        profileMataByPhase.semi.length + profileMataByPhase.final.length + profileMataByPhase.third.length;
+        profileMataByPhase.roundOf16.length +
+        profileMataByPhase.quarter.length +
+        profileMataByPhase.semi.length +
+        profileMataByPhase.final.length +
+        profileMataByPhase.third.length;
       return (
         <>
-          <Text style={styles.sectionTitle}>Fase mata-mata</Text>
+          {showMataHeader ? <Text style={styles.sectionTitle}>Fase mata-mata</Text> : null}
           {total === 0 ? (
             <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
           ) : (
             <>
+              {profileMataByPhase.roundOf16.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('round_of_16')}</Text>
+                  {profileMataByPhase.roundOf16.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'round_of_16') < 2)
+                  )}
+                </>
+              ) : null}
+              {profileMataByPhase.quarter.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('quarter')}</Text>
+                  {profileMataByPhase.quarter.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'quarter') < 2)
+                  )}
+                </>
+              ) : null}
               {profileMataByPhase.semi.length > 0 ? (
                 <>
                   <Text style={styles.profilePhaseSubtitle}>Semifinal</Text>
@@ -1889,9 +1958,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {swissMataBracketSection()}
             {fourthPlaceMataSection()}
             {tiebreakRoundRobinCards()}
-            <Text style={styles.sectionTitle}>
-              {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
-            </Text>
+            {eventCompetitionFormat === 'knockout' ? null : (
+              <Text style={styles.sectionTitle}>
+                {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+              </Text>
+            )}
             {officialH2h.map((row) => officialPairingCard(row, 'blue'))}
           </>
         )}

@@ -17,6 +17,13 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
 import { getPairingStatusLabel } from '../lib/labels';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
+import { countSeriesWins } from '../lib/bracketSeries';
+import {
+  KNOCKOUT_BRACKET_ORIGIN,
+  bracketPhaseSortKey,
+  bracketPhaseTitle,
+  type BracketPhase,
+} from '../lib/knockoutRounds';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { useTheme, useThemedStyles } from '../theme';
@@ -31,6 +38,8 @@ type PairingRow = {
   official_winner_participant_id: string | null;
   official_draw: boolean | null;
   swiss_round: number | null;
+  /** 'bracket' en los cruces de llaves de la Copa (se muestran en su sección, no como cruces regulares). */
+  stage?: string | null;
 };
 
 type ParticipantRow = {
@@ -92,8 +101,6 @@ type DbMatchRow = {
   is_walkover: boolean | null;
 };
 
-type BracketPhase = 'semi' | 'final' | 'third_place';
-
 type TiebreakOfficialItem = {
   id: string;
   /** Pairing real al que apunta (si existe). Null cuando aún no está linkeado. */
@@ -124,6 +131,9 @@ type TiebreakOfficialItem = {
   /** Victorias parciales dentro de la llave (BO3): para mostrar "Va A-B" antes de que se decida. */
   bracketWinsA: number;
   bracketWinsB: number;
+  /** Partidas ganadas de verdad (sin walkover) por cada lado de la serie: píldoras y marca de la Copa. */
+  seriesWinsA: number;
+  seriesWinsB: number;
 };
 
 type TiebreakOfficialRoundBlock = {
@@ -140,7 +150,8 @@ type TiebreakOfficialSection = {
     | 'swiss_topcut'
     | 'round_robin_topcut'
     | 'round_robin_fourth_place'
-    | 'round_robin_first_place';
+    | 'round_robin_first_place'
+    | 'knockout_bracket';
 };
 
 type RevengeItemView = {
@@ -223,6 +234,13 @@ function sortOfficialItemsForDisplay(a: ItemView, b: ItemView, currentUserId: st
 function leagueProgress(it: ItemView): 'virgin' | 'started' | 'decided' {
   if (it.official_winner_participant_id != null || it.isDraw) return 'decided';
   return it.winsA + it.winsB > 0 ? 'started' : 'virgin';
+}
+
+/** Progreso de un cruce de la Copa: decidido (serie cerrada), comenzado-no-decidido (alguna partida
+ * ganada de verdad, sólo BO3) o virgen. Mismos tokens que la fase de liga. */
+function knockoutProgress(it: TiebreakOfficialItem): 'virgin' | 'started' | 'decided' {
+  if (it.tiebreakWinnerParticipantId != null) return 'decided';
+  return it.seriesWinsA + it.seriesWinsB > 0 ? 'started' : 'virgin';
 }
 
 /** Orden entre categorías de fase de liga: en vivo, por definirse (virgen y comenzado juntos; el
@@ -335,6 +353,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (una
    * píldora por jugador). Distinto de isRoundRobinTop4 (título "Fase todos contra todos"). */
   const [officialBo1, setOfficialBo1] = useState(false);
+  /** Copa: las llaves son BO3 (píldoras en la fila); en BO1 no hay marcador parcial. */
+  const [knockoutBo3, setKnockoutBo3] = useState(false);
   /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
   const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   const [eventType, setEventType] = useState<string | null>(null);
@@ -371,13 +391,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, event_type'
+          'status, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, event_type, topcut_format'
         )
         .eq('id', eventId)
         .maybeSingle(),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage')
         .eq('event_id', eventId),
       supabase
         .from('event_participants')
@@ -425,6 +445,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       event_type?: string | null;
     } | null;
     setEventType(eventFlags?.event_type ?? null);
+    setKnockoutBo3(
+      eventFlags?.competition_format === 'knockout' &&
+        (eventFlags as { topcut_format?: string | null } | null)?.topcut_format === 'bo3'
+    );
     const competitionFormat = normalizeCompetitionFormat(eventFlags?.competition_format);
     setCompetitionFormat(competitionFormat);
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
@@ -477,10 +501,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       }
     }
 
-    const pairingsForOfficial: PairingRow[] =
+    // Los pairings de la Copa (stage = 'bracket') se muestran UNA vez, en la sección de llaves; nunca
+    // como cruce regular pendiente. En el resto de los formatos stage es null y no cambia nada.
+    const pairingsForOfficial: PairingRow[] = (
       competitionFormat === 'swiss'
         ? pairingsAll.filter((p) => p.swiss_round != null)
-        : pairingsAll;
+        : pairingsAll
+    ).filter((p) => p.stage !== 'bracket');
 
     const participants = (participantsRes.data ?? []) as ParticipantRow[];
     const pMap = new Map<string, ParticipantRow>(participants.map((p) => [p.id, p]));
@@ -849,8 +876,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             | 'swiss_topcut'
             | 'round_robin_topcut'
             | 'round_robin_fourth_place'
-            | 'round_robin_first_place' =
-            ag.group_origin === 'swiss_topcut'
+            | 'round_robin_first_place'
+            | 'knockout_bracket' =
+            ag.group_origin === KNOCKOUT_BRACKET_ORIGIN
+              ? 'knockout_bracket'
+              : ag.group_origin === 'swiss_topcut'
               ? 'swiss_topcut'
               : ag.group_origin === 'round_robin_topcut'
                 ? 'round_robin_topcut'
@@ -973,6 +1003,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               bracketPhase,
               bracketWinsA,
               bracketWinsB,
+              seriesWinsA: 0,
+              seriesWinsB: 0,
             };
           };
 
@@ -981,7 +1013,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           // la tabla y su semántica de fila (siempre ambos participantes concretos — los
           // placeholders sin resolver nunca llegan a esta tabla, ver 0071/0072) son idénticas;
           // solo cambia qué título de sección y qué origin se les asigna más abajo.
-          const phaseOrder: Record<BracketPhase, number> = { final: 0, third_place: 1, semi: 2 };
           const itemForBracketRow = (
             bm: {
               id: string;
@@ -1009,6 +1040,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
                 // Marcador parcial: contar matches tiebreak ganados por cada lado dentro del
                 // pairing compartido, asignados según los participantes del bracket match.
+                const seriesMatches = pairing
+                  ? safeMatches.filter((m) => m.pairing_id === pairing.id && m.match_type === 'tiebreak')
+                  : [];
                 const bracketWinsA = pairing
                   ? safeMatches.filter(
                       (m) =>
@@ -1085,6 +1119,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   bracketPhase: bm.bracket_phase,
                   bracketWinsA,
                   bracketWinsB,
+                  seriesWinsA: countSeriesWins(seriesMatches, bm.participant_a_id),
+                  seriesWinsB: countSeriesWins(seriesMatches, bm.participant_b_id),
                 };
               };
 
@@ -1106,7 +1142,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               winner_participant_id: string | null;
             }[];
             const sortedBracketRows = [...bracketRows].sort(
-              (x, y) => phaseOrder[x.bracket_phase] - phaseOrder[y.bracket_phase]
+              (x, y) =>
+                bracketPhaseSortKey(x.bracket_phase, groupOrigin) - bracketPhaseSortKey(y.bracket_phase, groupOrigin)
             );
             const tbItems: TiebreakOfficialItem[] = [];
             for (const bm of sortedBracketRows) {
@@ -1114,6 +1151,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 ? pairingsAll.find((p) => p.id === bm.pairing_id) ?? null
                 : null;
               tbItems.push(itemForBracketRow(bm, pairing));
+            }
+            // Copa: dentro de cada ronda, en vivo → por jugar (vírgenes y comenzados) → finalizados.
+            // El sort es estable: el resto del orden (creación) se conserva.
+            if (groupOrigin === KNOCKOUT_BRACKET_ORIGIN) {
+              const rank = (it: TiebreakOfficialItem) =>
+                it.status === 'in_progress' ? 0 : it.status === 'completed' ? 2 : 1;
+              tbItems.sort(
+                (x, y) =>
+                  bracketPhaseSortKey(x.bracketPhase!, groupOrigin) -
+                    bracketPhaseSortKey(y.bracketPhase!, groupOrigin) || rank(x) - rank(y)
+              );
             }
             return tbItems;
           };
@@ -1587,6 +1635,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               <View style={styles.tiebreakOfficialHeaderWrap}>
                 {tiebreakOfficialSections.map((section, sectionIdx) => (
                   <View key={`tb-section-${section.groupOrigin}-${sectionIdx}`}>
+                {section.groupOrigin === 'knockout_bracket' ? null : (
                 <Text style={styles.groupHeader}>
                   {section.groupOrigin === 'swiss_topcut' ||
                   section.groupOrigin === 'round_robin_topcut'
@@ -1597,17 +1646,19 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                         ? 'Desempate por el 1er puesto'
                         : 'Desempate'}
                 </Text>
+                )}
                 {section.rounds.map((block) => {
                   const isBracket = section.kind === 'bracket';
                   const itemsToRender = block.items;
-                  const firstIdByPhase: Record<BracketPhase, string | null> = isBracket
-                    ? {
-                        final: itemsToRender.find((it) => it.bracketPhase === 'final')?.id ?? null,
-                        third_place:
-                          itemsToRender.find((it) => it.bracketPhase === 'third_place')?.id ?? null,
-                        semi: itemsToRender.find((it) => it.bracketPhase === 'semi')?.id ?? null,
+                  // Primera card de cada ronda (lleva el subtítulo de la ronda encima).
+                  const firstIdByPhase: Partial<Record<BracketPhase, string>> = {};
+                  if (isBracket) {
+                    for (const it of itemsToRender) {
+                      if (it.bracketPhase && firstIdByPhase[it.bracketPhase] === undefined) {
+                        firstIdByPhase[it.bracketPhase] = it.id;
                       }
-                    : { final: null, third_place: null, semi: null };
+                    }
+                  }
                   const renderPlayerSide = (opts: {
                     side: 'a' | 'b';
                     userId: string;
@@ -1615,6 +1666,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     name: string;
                     unknown: boolean;
                     dim: boolean;
+                    /** Partidas ganadas en la serie (sólo Copa BO3); null = sin píldoras. */
+                    seriesWins?: number | null;
                   }) => {
                     const sideContainer =
                       opts.side === 'a'
@@ -1639,12 +1692,21 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       />
                     );
                     const nameLabel = opts.unknown ? '?' : opts.name;
+                    // Mismas píldoras que renderOfficialPairingCard (fase de liga), debajo del nombre.
+                    const pills =
+                      opts.seriesWins != null ? (
+                        <View style={opts.side === 'a' ? styles.bo3Row : [styles.bo3Row, styles.bo3RowRight]}>
+                          <View style={[styles.bo3Box, opts.seriesWins >= 1 && styles.bo3Filled]} />
+                          <View style={[styles.bo3Box, opts.seriesWins >= 2 && styles.bo3Filled]} />
+                        </View>
+                      ) : null;
                     if (opts.side === 'a') {
                       return (
                         <View style={sideContainer}>
                           {opts.unknown ? placeholderAvatar : realAvatar}
                           <View>
                             <Text style={styles.name}>{nameLabel}</Text>
+                            {pills}
                           </View>
                         </View>
                       );
@@ -1653,6 +1715,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       <View style={sideContainer}>
                         <View style={styles.playerRightText}>
                           <Text style={styles.nameRight}>{nameLabel}</Text>
+                          {pills}
                         </View>
                         {opts.unknown ? placeholderAvatar : realAvatar}
                       </View>
@@ -1682,6 +1745,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       const rightUnknown = swapSides ? it.aUnknown : it.bUnknown;
                       const liveL = swapSides ? it.liveScoreB : it.liveScoreA;
                       const liveR = swapSides ? it.liveScoreA : it.liveScoreB;
+                      const seriesWinsLeft = swapSides ? it.seriesWinsB : it.seriesWinsA;
+                      const seriesWinsRight = swapSides ? it.seriesWinsA : it.seriesWinsB;
+                      const isKnockoutSection = section.groupOrigin === KNOCKOUT_BRACKET_ORIGIN;
+                      const showSeriesPills = isKnockoutSection && knockoutBo3;
                       const dimLeft =
                         it.dimLoserSide == null
                           ? false
@@ -1694,6 +1761,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                           : swapSides
                             ? it.dimLoserSide === 'a'
                             : it.dimLoserSide === 'b';
+                      // Copa: misma marca que la fase de liga. En vivo y virgen no llevan marca.
+                      const knockoutProgressValue =
+                        section.groupOrigin === 'knockout_bracket' ? knockoutProgress(it) : null;
+                      const knockoutMarkColor =
+                        knockoutProgressValue == null || it.status === 'in_progress'
+                          ? null
+                          : knockoutProgressValue === 'decided'
+                            ? colors.pairingProgress.decided
+                            : knockoutProgressValue === 'started'
+                              ? colors.pairingProgress.undecided
+                              : null;
                       const inner = (
                         <>
                           <View style={styles.compactRow}>
@@ -1704,6 +1782,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                               name: leftName,
                               unknown: leftUnknown,
                               dim: dimLeft,
+                              seriesWins: showSeriesPills ? seriesWinsLeft : null,
                             })}
                             <View style={styles.scoreWrap}>
                               {it.status === 'in_progress' ? (
@@ -1721,6 +1800,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                               name: rightName,
                               unknown: rightUnknown,
                               dim: dimRight,
+                              seriesWins: showSeriesPills ? seriesWinsRight : null,
                             })}
                           </View>
                           <View style={styles.footer}>
@@ -1728,7 +1808,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                               {it.inProgressMatchStartedAt ? (
                                 <LiveMatchDuration startedAt={it.inProgressMatchStartedAt} />
                               ) : it.tiebreakWinnerName ? (
-                                <Text style={styles.tiebreakGanoLine}>Gano: {it.tiebreakWinnerName}</Text>
+                                <Text style={styles.tiebreakGanoLine}>Ganó: {it.tiebreakWinnerName}</Text>
                               ) : isBracket && (it.bracketWinsA + it.bracketWinsB) > 0 ? (
                                 // Marcador parcial dentro de la llave BO3 (ej: "Va 1-0").
                                 <Text style={styles.tiebreakGanoLine}>
@@ -1741,13 +1821,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                                 <Text style={styles.liveCentered}>● EN VIVO</Text>
                               ) : it.status === 'completed' ? (
                                 <Text style={styles.status}>{getPairingStatusLabel('completed')}</Text>
-                              ) : isBracket ? (
-                                <Text style={styles.status}>Por jugar</Text>
                               ) : (
                                 <Text style={styles.status}>{getPairingStatusLabel(it.status)}</Text>
                               )}
                             </View>
-                            <View style={styles.footerRight} />
+                            {knockoutMarkColor ? (
+                              <View style={[styles.footerRight, styles.footerRightMark]}>
+                                <View style={[styles.progressTriangle, { borderRightColor: knockoutMarkColor }]} />
+                              </View>
+                            ) : (
+                              <View style={styles.footerRight} />
+                            )}
                           </View>
                         </>
                       );
@@ -1779,11 +1863,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       );
                       const phaseSubheader: { label: string; firstId: string | null } | null =
                         isBracket && it.bracketPhase
-                          ? it.bracketPhase === 'final'
-                            ? { label: 'Final', firstId: firstIdByPhase.final }
-                            : it.bracketPhase === 'third_place'
-                              ? { label: '3er y 4to puesto', firstId: firstIdByPhase.third_place }
-                              : { label: 'Semifinales', firstId: firstIdByPhase.semi }
+                          ? {
+                              label: bracketPhaseTitle(it.bracketPhase),
+                              firstId: firstIdByPhase[it.bracketPhase] ?? null,
+                            }
                           : null;
                       if (phaseSubheader && phaseSubheader.firstId === it.id) {
                         return (
@@ -1800,7 +1883,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 })}
                   </View>
                 ))}
-                {!isSwissOfficialSectioned ? (
+                {!isSwissOfficialSectioned && competitionFormat !== 'knockout' ? (
                   <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>
                     {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
                   </Text>

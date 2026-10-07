@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat } from '../lib/eventMode';
+import { KNOCKOUT_BRACKET_ORIGIN, bracketPhaseTickerName, type BracketPhase } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import {
@@ -210,14 +211,14 @@ type EventTickerContext = {
   matchFormat: string;
   nameByParticipantId: Map<string, string>;
   pairingById: Map<string, EventTickerPairing>;
-  bracketPhaseByPairingId: Map<string, 'semi' | 'final' | 'third_place'>;
+  bracketPhaseByPairingId: Map<string, BracketPhase>;
   bracketPairingIds: Set<string>;
   matches: EventTickerMatch[];
 };
 
 function topcutWinsNeededTicker(
   format: string | null | undefined,
-  phase: 'semi' | 'final' | 'third_place'
+  phase: BracketPhase
 ): number {
   const f = format ?? 'bo3';
   if (f === 'bo1') return 1;
@@ -225,10 +226,8 @@ function topcutWinsNeededTicker(
   return 2;
 }
 
-function bracketPhaseTickerLabel(phase: 'semi' | 'final' | 'third_place'): string {
-  if (phase === 'semi') return 'SEMIFINAL';
-  if (phase === 'final') return 'FINAL';
-  return '3ER PUESTO';
+function bracketPhaseTickerLabel(phase: BracketPhase): string {
+  return bracketPhaseTickerName(phase);
 }
 
 /** Mismo texto que getMatchFormatLabel (EditEventScreen) y los selectores de CreateEventScreen. */
@@ -393,7 +392,7 @@ async function fetchEventTickerContext(
       .from('event_tiebreak_groups')
       .select('id')
       .eq('event_id', eventId)
-      .in('group_origin', ['swiss_topcut', 'round_robin_topcut'])
+      .in('group_origin', ['swiss_topcut', 'round_robin_topcut', KNOCKOUT_BRACKET_ORIGIN])
       .in('status', ['active', 'resolved'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -433,7 +432,7 @@ async function fetchEventTickerContext(
     );
   }
 
-  const bracketPhaseByPairingId = new Map<string, 'semi' | 'final' | 'third_place'>();
+  const bracketPhaseByPairingId = new Map<string, BracketPhase>();
   const bracketPairingIds = new Set<string>();
   const tgId = (tgRes.data as { id?: string } | null)?.id;
   if (tgId && !tgRes.error) {
@@ -449,7 +448,7 @@ async function fetchEventTickerContext(
         );
         if (!pid) continue;
         bracketPairingIds.add(pid);
-        bracketPhaseByPairingId.set(pid, (row as { bracket_phase: 'semi' | 'final' | 'third_place' }).bracket_phase);
+        bracketPhaseByPairingId.set(pid, (row as { bracket_phase: BracketPhase }).bracket_phase);
       }
     }
   }
@@ -1448,7 +1447,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const isSwissTopcutBracketTiebreak =
       matchRow.match_type === 'tiebreak' &&
       tg?.group_type === 'bracket' &&
-      (tg.group_origin === 'swiss_topcut' || tg.group_origin === 'round_robin_topcut');
+      (tg.group_origin === 'swiss_topcut' ||
+        tg.group_origin === 'round_robin_topcut' ||
+        tg.group_origin === KNOCKOUT_BRACKET_ORIGIN);
     if (isSwissTopcutBracketTiebreak) {
       const bmr = await supabase
         .from('event_tiebreak_bracket_matches')
