@@ -82,7 +82,7 @@ function topcutWinsNeededClient(
 export default function MatchResultScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const { matchId } = route.params;
+  const { matchId, fromStandings } = route.params;
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<MatchRow | null>(null);
   const [pairing, setPairing] = useState<PairingRow | null>(null);
@@ -352,9 +352,12 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   useLayoutEffect(() => {
     if (!pairing) return;
     navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', { pairingId: pairing.id }),
+      headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', {
+        pairingId: pairing.id,
+        ...(fromStandings ? { fromStandings: true } : {}),
+      }),
     });
-  }, [navigation, pairing?.id]);
+  }, [navigation, pairing?.id, fromStandings]);
 
   if (loading || !match || !pairing || !pa || !pb) {
     return (
@@ -489,7 +492,10 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       Alert.alert('Error', insRes.error?.message ?? 'No se pudo iniciar la revancha.');
       return;
     }
-    navigation.replace('LifeTracker', { matchId: insRes.data.id as string });
+    navigation.replace('LifeTracker', {
+      matchId: insRes.data.id as string,
+      ...(fromStandings ? { fromStandings: true } : {}),
+    });
   };
 
   return (
