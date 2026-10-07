@@ -108,11 +108,12 @@ export function bracketPhaseSortKey(phase: BracketPhase, groupOrigin: string | n
 
 /**
  * Rondas que tiene una Copa (sólo llaves) con n jugadores, en orden cronológico. Espeja el
- * sorteo de draw_knockout_bracket (0130): 8 jugadores arrancan en cuartos; de 9 a 16, en octavos.
- * El 3er puesto va siempre al final.
+ * sorteo de draw_knockout_bracket (0133): 4 jugadores arrancan en semifinales; de 5 a 8, en cuartos;
+ * de 9 a 16, en octavos. El 3er puesto va siempre al final.
  */
 export function knockoutRoundsForPlayers(playerCount: number): BracketPhase[] {
-  if (playerCount < 8 || playerCount > 16) return [];
-  const first: BracketPhase[] = playerCount === 8 ? ['quarter'] : ['round_of_16', 'quarter'];
+  if (playerCount < 4 || playerCount > 16) return [];
+  const first: BracketPhase[] =
+    playerCount <= 4 ? [] : playerCount <= 8 ? ['quarter'] : ['round_of_16', 'quarter'];
   return [...first, 'semi', 'final', 'third_place'];
 }

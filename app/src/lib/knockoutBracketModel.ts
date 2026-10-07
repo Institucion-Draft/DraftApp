@@ -107,9 +107,9 @@ export type KnockoutLink = {
 };
 
 export type KnockoutLayout = {
-  /** Columnas totales: 2 * niveles por mitad + 1 (la final al medio). */
+  /** Columnas totales: 2 * niveles por mitad + 1 (la final al medio): 3, 5 o 7. */
   cols: number;
-  /** Niveles (rondas) de cada mitad: 2 con 8 jugadores (cuartos, semi); 3 con 9 a 16. */
+  /** Niveles (rondas) de cada mitad: 1 con 4 jugadores (semi); 2 con 5 a 8 (cuartos, semi); 3 con 9 a 16. */
   levels: number;
   finalCol: number;
   boxes: KnockoutBox[];
