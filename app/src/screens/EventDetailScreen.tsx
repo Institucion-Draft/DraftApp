@@ -1154,7 +1154,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const missingParticipants = participantCount < 1;
   const missingGiantRandomization =
     event?.event_type === 'two_headed_giant' && !event?.giant_randomization_done;
-  // Copa (sólo llaves): 8 a 16 jugadores (el servidor lo vuelve a validar al pasar a 'drafting').
+  // Copa (sólo llaves): 4 a 16 jugadores (el servidor lo vuelve a validar al pasar a 'drafting').
   const knockoutCountProblem =
     normalizeCompetitionFormat(event?.competition_format) === 'knockout'
       ? knockoutPlayerCountProblem(participantCount)

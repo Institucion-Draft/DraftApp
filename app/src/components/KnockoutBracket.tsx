@@ -37,6 +37,8 @@ type Props = {
 const GAP_X = 8;
 /** Ancho mínimo legible de una tarjeta. Por debajo se scrollea en horizontal. */
 const MIN_CARD_W = 64;
+/** Ancho máximo de una tarjeta: con pocas columnas (4 jugadores) no se estira a lo ancho de la pantalla. */
+const MAX_CARD_W = 200;
 /** Desde este ancho el avatar ocupa todo el alto de su mitad; por debajo se achica para dejarle lugar al texto. */
 const WIDE_CARD_W = 118;
 /** Diámetro máximo del avatar en tarjetas angostas (16 jugadores). */
@@ -80,7 +82,7 @@ export default function KnockoutBracket({ model, names, seriesWins, bo3, viewpor
   // Columnas: sólo depende del árbol (5 con 8 jugadores, 7 con 9 a 16).
   const cols = layoutKnockoutBracket(model, 10, 0, 0).cols;
   const fitW = Math.floor((availW - (cols - 1) * GAP_X) / cols);
-  const cardW = Math.max(MIN_CARD_W, fitW);
+  const cardW = Math.min(MAX_CARD_W, Math.max(MIN_CARD_W, fitW));
   const wide = cardW >= WIDE_CARD_W;
 
   // La mitad mide lo que pide su bloque de texto (nombre + píldoras) o el mínimo de la densidad, el mayor.

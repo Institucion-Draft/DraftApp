@@ -68,7 +68,7 @@ export function formatEventMode(
 }
 
 /** Copa (sólo llaves): cantidad de jugadores inscriptos admitida (el servidor valida lo mismo). */
-export const KNOCKOUT_MIN_PLAYERS = 8;
+export const KNOCKOUT_MIN_PLAYERS = 4;
 export const KNOCKOUT_MAX_PLAYERS = 16;
 
 /** null si la cantidad sirve para una Copa (sólo llaves); si no, el motivo para mostrar. */
