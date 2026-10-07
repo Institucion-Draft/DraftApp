@@ -5,6 +5,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
+import type { BracketPhase } from '../lib/knockoutRounds';
+import { resolveRematchType } from '../lib/matchTypeRules';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -28,6 +30,8 @@ type PairingRow = {
   participant_a_id: string;
   participant_b_id: string;
   swiss_round: number | null;
+  /** 'bracket' en los cruces de llaves de la Copa; null en el resto de los formatos. */
+  stage: string | null;
   official_winner_participant_id: string | null;
   official_draw: boolean;
   tiebreak_winner_participant_id: string | null;
@@ -67,7 +71,7 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 /** Alineado con `public.topcut_wins_needed` (migración 0039). */
 function topcutWinsNeededClient(
   format: string | null | undefined,
-  phase: 'semi' | 'final' | 'third_place'
+  phase: BracketPhase
 ): number {
   const f = format ?? 'bo3';
   if (f === 'bo1') return 1;
@@ -121,7 +125,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     const pRes = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, swiss_round, official_winner_participant_id, official_draw, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, swiss_round, stage, official_winner_participant_id, official_draw, tiebreak_winner_participant_id, super_cup_winner_participant_id, super_cup_resolved_at, revenge_cup_winner_participant_id, revenge_cup_resolved_at'
       )
       .eq('id', m.pairing_id)
       .maybeSingle();
@@ -299,7 +303,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         if (!bmRes.error && bmRes.data) {
           const rows = bmRes.data as {
             group_id: string;
-            bracket_phase: 'semi' | 'final' | 'third_place';
+            bracket_phase: BracketPhase;
             pairing_id: string | null;
             participant_a_id: string;
             participant_b_id: string;
@@ -406,19 +410,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     bracketTiebreakWinsNeeded != null &&
     Math.max(tiebreakWinsA, tiebreakWinsB) < bracketTiebreakWinsNeeded;
   // Tipo de la partida que crearía la revancha (única fuente para el botón y para createRematch).
-  const rematchType =
-    match.match_type === 'tiebreak'
-      ? 'tiebreak'
-      : competitionFormat === 'swiss' &&
-          (pairing.swiss_round == null ||
-            currentSwissRound == null ||
-            pairing.swiss_round !== currentSwissRound)
-        ? 'revenge'
-        : pairing.official_winner_participant_id || officialResolvedByBo1
-          ? 'revenge'
-          : match.match_type === 'two_headed_giant'
-            ? 'two_headed_giant'
-            : 'draft';
+  const rematchType = resolveRematchType({
+    currentMatchType: match.match_type,
+    competitionFormat,
+    swissRound: pairing.swiss_round,
+    currentSwissRound,
+    officialDecided: Boolean(pairing.official_winner_participant_id || officialResolvedByBo1),
+    pairingStage: pairing.stage,
+  });
   // Alguien que se fue (left_event_at) no puede jugar partidas oficiales ni de desempate, pero sí
   // venganzas (se juegan fuera del día del torneo).
   const rematchBlockedByLeftEvent = Boolean(pa?.left_event_at || pb?.left_event_at) && rematchType !== 'revenge';

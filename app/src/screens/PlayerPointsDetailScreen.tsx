@@ -11,6 +11,7 @@ import {
   tierRangeLabel,
   type PointTier,
 } from '../lib/pointConfig';
+import { formatEventMode } from '../lib/eventMode';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -62,6 +63,8 @@ type EventPoints = {
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 function formatMode(competitionFormat: string | null, topSize: number | null): string {
+  // Copa (sólo llaves): etiqueta compartida (la vista no trae topcut_format, así que sin BO).
+  if (competitionFormat === 'knockout') return formatEventMode(null, competitionFormat, topSize, null);
   if (competitionFormat === 'swiss') return 'Rondas suizas + Top 4';
   if (competitionFormat === 'round_robin') {
     return topSize === 4 ? 'Todos contra todos + Top 4' : 'Todos contra todos';

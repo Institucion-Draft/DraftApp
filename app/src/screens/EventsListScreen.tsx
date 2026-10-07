@@ -35,6 +35,7 @@ type EventRow = {
   competition_format: string | null;
   match_format: string | null;
   top_size: number | null;
+  topcut_format: string | null;
   cube_id: string | null;
   venue_id: string | null;
   champion_user_id: string | null;
@@ -80,7 +81,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
     const [eventsRes, cubesRes, venuesRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('id, name, avatar_path, scheduled_for, status, event_type, competition_format, match_format, top_size, cube_id, venue_id, champion_user_id, has_shiny_participant')
+        .select('id, name, avatar_path, scheduled_for, status, event_type, competition_format, match_format, top_size, topcut_format, cube_id, venue_id, champion_user_id, has_shiny_participant')
         .eq('workspace_id', workspaceId)
         .is('deleted_at', null)
         .order('scheduled_for', { ascending: false }),
@@ -357,7 +358,7 @@ export default function EventsListScreen({ navigation, route }: Props) {
                   <Text style={styles.meta}>Estado: {getEventStatusLabel(item.status)}</Text>
                   <Text style={styles.meta}>
                     Modalidad:{' '}
-                    {formatEventMode(item.event_type, item.competition_format, item.top_size, item.match_format) || '—'}
+                    {formatEventMode(item.event_type, item.competition_format, item.top_size, item.match_format, item.topcut_format) || '—'}
                   </Text>
                   <Text style={styles.meta}>Cubo: {item.cube_id ? cubeMap[item.cube_id] ?? '—' : 'Sin definir'}</Text>
                   <Text style={styles.meta}>Sede: {item.venue_id ? venueMap[item.venue_id] ?? '—' : 'Sin definir'}</Text>

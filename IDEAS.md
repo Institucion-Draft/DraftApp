@@ -203,3 +203,35 @@ Hoy 2HG está totalmente ausente de cualquier stat agregada del jugador, ya que 
 **A definir**:
 - Qué datos mostrar: partidas jugadas en equipo, victorias/derrotas, compañeros frecuentes, rivales frecuentes
 - Cómo atribuir stats a ambos integrantes del equipo, dado que en 2HG solo el miembro A tiene fila en `event_participants`
+
+## Definir la modalidad de competencia después del draft
+
+Hoy la modalidad se fija al crear el evento. La idea es crear el evento con cubo, sede y cronómetro, hacer el draft, y elegir la modalidad recién al finalizarlo, cuando ya se sabe cuántos jugadores hay. Ventaja: las validaciones de cantidad (por ejemplo, jugadores divisibles por la cantidad de zonas) pasan a hacerse en el momento de elegir.
+
+**A evaluar**:
+- Un estado "sin definir" para `competition_format`
+- El trigger de 8 a 16 jugadores
+- El cierre automático del draft por cronómetro
+- Los textos de modalidad en las listas
+
+## Copa de perdedores
+
+En la Copa (sólo llaves), los 4 perdedores de los cuartos de final juegan sus propias semis, final y partido por el 3° puesto, con su propio podio. Con entre 8 y 16 jugadores los cuartos siempre tienen 4 cruces, así que siempre hay exactamente 4 perdedores y la cantidad de jugadores no complica este árbol. Queda por definir si ese podio da puntos.
+
+**A evaluar**:
+- Un segundo árbol en el motor de llaves (knockout_slots ya enlaza cada cruce con el siguiente)
+- Podio y puntos de la Copa de perdedores
+- Qué pasa con quienes pierden antes de los cuartos (octavos): no participan
+- Dejar lugar para dos árboles al diseñar el cuadro de llaves de Standings (fase 1c)
+
+## Desacoplar el evento de draft del evento de competencia
+
+Hoy cada evento es a la vez un draft y una competencia. La idea es separarlos: un evento de draft (cubo, sede, cronómetro, inscriptos y mazos) que puede contener más de una competencia, por ejemplo un todos contra todos + top 4 hoy y una Copa mañana con los mismos mazos, sin volver a draftear. Al crear una competencia se elige quiénes participan de los que drafteron, porque pueden no estar todos. Las estadísticas quedan por draft, con varias competencias adentro. Las venganzas pasarían a ser un bloque aparte, con su propio botón en el evento de draft, sin depender de ninguna competencia. Incluye la idea de definir la modalidad después del draft.
+
+**A evaluar**:
+- El modelo de datos: pairings, grupos de desempate y vistas de ranking cuelgan hoy de event_id
+- A qué se asignan los puntos del Ranking Global y de Temporada (a la competencia o al draft)
+- Logros, podios y perfil
+- A qué temporada pertenece cada competencia
+- La rotación de avatares, que hoy es por evento
+- Cómo conviven con los eventos ya existentes

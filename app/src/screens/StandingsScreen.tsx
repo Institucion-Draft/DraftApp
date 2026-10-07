@@ -1657,6 +1657,28 @@ export default function StandingsScreen({ route, navigation }: Props) {
       </View>
     ) : null;
 
+  // Copa (sólo llaves): no hay tabla de liga (sería una tabla en cero). Se muestra el podio y un
+  // aviso; los cruces se ven en Enfrentamientos. El cuadro de llaves llega en una fase posterior.
+  if (competitionFormat === 'knockout') {
+    return (
+      <View style={styles.screenRoot}>
+        {showConfettiOnce ? (
+          <View pointerEvents="none" style={styles.confettiOverlay}>
+            <ConfettiCannon count={150} origin={{ x: Math.max(80, winW / 2), y: -6 }} fadeOut />
+          </View>
+        ) : null}
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scroll}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {podiumBlock}
+          <Text style={styles.knockoutNotice}>Los cruces de la Copa se ven en Enfrentamientos</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.screenRoot}>
       {showConfettiOnce ? (
@@ -2145,6 +2167,7 @@ const createStyles = (c: ThemeColors) =>
     },
     legendSegment: { color: c.textSecondary, fontSize: 12, marginBottom: 4, marginRight: 4 },
     legendFootnote: { marginTop: 8, color: c.textSecondary, fontSize: 12 },
+    knockoutNotice: { marginTop: 16, color: c.textSecondary, fontSize: 14, textAlign: 'center' },
     tcSection: { marginTop: 22, marginBottom: 14, width: '100%', alignItems: 'center' },
     tcBracketOuter: { marginTop: 4 },
     tcHdrRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

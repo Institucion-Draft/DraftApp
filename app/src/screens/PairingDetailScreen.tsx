@@ -14,6 +14,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
+import { countSeriesWins } from '../lib/bracketSeries';
+import {
+  KNOCKOUT_BRACKET_ORIGIN,
+  bracketPhaseShortName,
+  bracketPhaseSingularName,
+  type BracketPhase,
+} from '../lib/knockoutRounds';
+import { isKnockoutBracketPairing, resolveNextMatchType } from '../lib/matchTypeRules';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -43,6 +51,8 @@ type PairingInfo = {
   official_winner_participant_id: string | null;
   official_draw: boolean;
   swiss_round: number | null;
+  /** 'bracket' en los cruces de llaves de la Copa; null en el resto de los formatos. */
+  stage: string | null;
   tiebreak_winner_participant_id: string | null;
   tiebreak_resolved_at: string | null;
 };
@@ -150,7 +160,7 @@ function formatCompletedMatchDuration(startedAt: string | null, endedAt: string 
 /** Alineado con `public.topcut_wins_needed` (migración 0039). */
 function topcutWinsNeededClient(
   format: string | null | undefined,
-  phase: 'semi' | 'final' | 'third_place'
+  phase: BracketPhase
 ): number {
   const f = format ?? 'bo3';
   if (f === 'bo1') return 1;
@@ -169,14 +179,17 @@ function bracketRowMatchesPairing(
   );
 }
 
-function bracketPhaseDisplayName(phase: 'semi' | 'final' | 'third_place'): string {
+function bracketPhaseDisplayName(phase: BracketPhase, knockout = false): string {
+  // Copa: nombre corto en minúscula ("Retomar 4tos en curso"); el top 4 conserva sus textos.
+  if (knockout) return bracketPhaseShortName(phase).toLowerCase();
   if (phase === 'semi') return 'Semifinal';
   if (phase === 'final') return 'Final';
+  if (phase === 'quarter' || phase === 'round_of_16') return bracketPhaseSingularName(phase);
   return '3er y 4to puesto';
 }
 
 function bracketLegRowLabel(
-  phase: 'semi' | 'final' | 'third_place',
+  phase: BracketPhase,
   legIndex: number,
   winsNeeded: number
 ): string {
@@ -186,9 +199,13 @@ function bracketLegRowLabel(
   return `#${name} · ${leg}`;
 }
 
-function bracketIniciarPhrase(phase: 'semi' | 'final' | 'third_place'): string {
+function bracketIniciarPhrase(phase: BracketPhase, knockout = false): string {
+  // Copa: nombre corto en minúscula; semifinal conserva su singular (igual que el top 4).
+  if (knockout && phase !== 'semi') return `Iniciar ${bracketPhaseShortName(phase).toLowerCase()}`;
   if (phase === 'semi') return 'Iniciar semifinal';
   if (phase === 'final') return 'Iniciar final';
+  if (phase === 'quarter') return 'Iniciar cuartos de final';
+  if (phase === 'round_of_16') return 'Iniciar octavos de final';
   return 'Iniciar 3er y 4to puesto';
 }
 
@@ -264,7 +281,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [activeTiebreakGroup, setActiveTiebreakGroup] = useState<ActiveTiebreakGroupState | null>(null);
   const [bracketMatchRow, setBracketMatchRow] = useState<{
     id: string;
-    bracket_phase: 'semi' | 'final' | 'third_place';
+    bracket_phase: BracketPhase;
     pairing_id: string | null;
     participant_a_id: string;
     participant_b_id: string;
@@ -296,7 +313,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const { data: pData, error: pErr } = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, tiebreak_winner_participant_id, tiebreak_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage, tiebreak_winner_participant_id, tiebreak_resolved_at'
       )
       .eq('id', pairingId)
       .maybeSingle();
@@ -536,7 +553,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         const rows = bmRes.data as {
           id: string;
           group_id: string;
-          bracket_phase: 'semi' | 'final' | 'third_place';
+          bracket_phase: BracketPhase;
           pairing_id: string | null;
           participant_a_id: string;
           participant_b_id: string;
@@ -972,12 +989,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     .sort((a, b) => a.match_number - b.match_number);
   // Igual que winsA/winsB (fase regular): las píldoras muestran solo juego real, walkover no
   // infla el marcador visual del desempate.
-  const tiebreakWinsA = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_a_id && !m.is_walkover
-  ).length;
-  const tiebreakWinsB = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === pairing.participant_b_id && !m.is_walkover
-  ).length;
+  const tiebreakWinsA = countSeriesWins(tiebreakMs, pairing.participant_a_id);
+  const tiebreakWinsB = countSeriesWins(tiebreakMs, pairing.participant_b_id);
   const tiebreakWinnerName =
     pairing.tiebreak_winner_participant_id === pairing.participant_a_id
       ? aName
@@ -995,16 +1008,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const mataAName = mauA?.display_name || mauA?.username || aName;
   const mataBName = mauB?.display_name || mauB?.username || bName;
   // Mismo criterio que tiebreakWinsA/B: walkover no infla el marcador visual del bracket real.
-  const mataTieWinsA = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === mataAId && !m.is_walkover
-  ).length;
-  const mataTieWinsB = tiebreakMs.filter(
-    (m) => m.status === 'completed' && m.winner_participant_id === mataBId && !m.is_walkover
-  ).length;
+  const mataTieWinsA = countSeriesWins(tiebreakMs, mataAId);
+  const mataTieWinsB = countSeriesWins(tiebreakMs, mataBId);
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
-    activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
-    activeTiebreakGroup?.group_origin === 'round_robin_topcut'
+    activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN && bracketMatchRow
+      ? bracketPhaseShortName(bracketMatchRow.bracket_phase)
+      : activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
+    activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
+    activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN
       ? 'Fase mata-mata'
       : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
         ? 'Desempate por el 4to puesto'
@@ -1015,8 +1027,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const useSwissTopcutBracketDetailLayout =
     bracketMatchRow != null &&
     ((competitionFormat === 'swiss' && activeTiebreakGroup?.group_origin === 'swiss_topcut') ||
-      activeTiebreakGroup?.group_origin === 'round_robin_topcut');
+      activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
+      activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN);
 
+  const isKnockoutPairing = isKnockoutBracketPairing(pairing.stage);
   const tiebreakBracketPrimaryLabel = (() => {
     if (!bracketMatchRow) return null;
     const phase = bracketMatchRow.bracket_phase;
@@ -1033,17 +1047,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           ? 1
           : topcutWinsNeededClient(topcutFormat, phase);
     if (inProgressMatch?.status === 'in_progress' && inProgressMatch.match_type === 'tiebreak') {
-      return `Retomar ${bracketPhaseDisplayName(phase)} en curso`;
+      return `Retomar ${bracketPhaseDisplayName(phase, isKnockoutPairing)} en curso`;
     }
     const wa = tiebreakWinsA;
     const wb = tiebreakWinsB;
     if (Math.max(wa, wb) >= wn) return null;
     const total = wa + wb;
-    if (wn === 1) return bracketIniciarPhrase(phase);
-    if (total === 0) return bracketIniciarPhrase(phase);
+    if (wn === 1) return bracketIniciarPhrase(phase, isKnockoutPairing);
+    if (total === 0) return bracketIniciarPhrase(phase, isKnockoutPairing);
     if (Math.max(wa, wb) === 1 && total === 1) return 'Jugar la vuelta';
     if (wa >= 1 && wb >= 1) return 'Jugar el bueno';
-    return bracketIniciarPhrase(phase);
+    return bracketIniciarPhrase(phase, isKnockoutPairing);
   })();
   // Las píldoras del hero muestran solo juego real — walkover cuenta para el resultado oficial
   // del pairing (pairing.official_winner_participant_id) y para PG/PJ/EG/EC de tabla/perfil,
@@ -1112,21 +1126,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const eventIsCancelled = draftEventStatus === 'cancelled';
   // Tipo de la partida que crearía "Iniciar": única fuente para el guard de startMatch() y para
   // el estado del botón, así no pueden divergir.
-  const nextMatchType: 'draft' | 'revenge' | 'tiebreak' =
-    isTiebreakPending && (isBracketGroup || pairing.tiebreak_winner_participant_id == null)
-      ? 'tiebreak'
-      : competitionFormat === 'swiss' &&
-          (pairing.swiss_round == null ||
-            currentSwissRound == null ||
-            pairing.swiss_round !== currentSwissRound)
-        ? 'revenge'
-        : !officialResolved &&
-            (competitionFormat !== 'swiss' ||
-              (pairing.swiss_round != null &&
-                currentSwissRound != null &&
-                pairing.swiss_round === currentSwissRound))
-          ? 'draft'
-          : 'revenge';
+  const nextMatchType = resolveNextMatchType({
+    isTiebreakPending,
+    isBracketGroup,
+    tiebreakWinnerParticipantId: pairing.tiebreak_winner_participant_id,
+    competitionFormat,
+    swissRound: pairing.swiss_round,
+    currentSwissRound,
+    officialResolved,
+    pairingStage: pairing.stage,
+  });
+  // Cruce de llaves de la Copa: sin partida oficial; una vez resuelta la serie, "Iniciar" es venganza.
   // Si alguno de los dos lados se fue (left_event_at), no se pueden iniciar partidas oficiales ni
   // de desempate/bracket (las resuelve el walkover). Las venganzas se juegan fuera del día del
   // torneo, así que sí: tanto iniciar una nueva como retomar una venganza en curso.
@@ -1146,7 +1156,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const startButtonLabel = inProgressMatch
     ? inProgressMatch.match_type === 'tiebreak'
       ? bracketMatchRow
-        ? `Retomar ${bracketPhaseDisplayName(bracketMatchRow.bracket_phase)} en curso`
+        ? `Retomar ${bracketPhaseDisplayName(bracketMatchRow.bracket_phase, isKnockoutPairing)} en curso`
         : 'Retomar desempate en curso'
       : inProgressMatch.match_type === 'revenge'
         ? 'Retomar venganza en curso'
@@ -1154,10 +1164,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     : placementButtonPending
       ? 'Definir 2do y 3er puesto'
       : isTiebreakPending && bracketMatchRow
-        ? tiebreakBracketPrimaryLabel ?? bracketIniciarPhrase(bracketMatchRow.bracket_phase)
+        ? tiebreakBracketPrimaryLabel ?? bracketIniciarPhrase(bracketMatchRow.bracket_phase, isKnockoutPairing)
         : isTiebreakPending
           ? 'Iniciar desempate'
-          : officialResolved
+          : officialResolved || isKnockoutPairing
             ? 'Iniciar venganza'
             : swissOfficialPendingThisRound || competitionFormat !== 'swiss'
               ? 'Iniciar partida'
@@ -1281,7 +1291,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   // debe mostrar sus píldoras vacías desde el primer ingreso, igual que el bracket de mata-mata
   // — antes dependía de officialMs.length > 0, dejando las píldoras invisibles hasta la primera
   // partida jugada.
-  const showHeroBlueRow = competitionFormat !== 'swiss' || pairing.swiss_round != null;
+  // Copa: el cruce no tiene fase regular, sólo la serie de llaves (fila verde).
+  const showHeroBlueRow = !isKnockoutPairing && (competitionFormat !== 'swiss' || pairing.swiss_round != null);
   const showPrimaryInSwissMata =
     movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || canManageEvent);
   const showPrimaryInOfficialsLegacy =
@@ -1566,7 +1577,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               ) : null}
               {showTiebreakSection ? (
                 <View style={[styles.subAccGreen, officialMs.length > 0 && styles.subAccGreenSpaced]}>
-                  <Text style={styles.subTitleSwissGreen}>Fase mata-mata</Text>
+                  <Text style={styles.subTitleSwissGreen}>
+                    {isKnockoutPairing && bracketMatchRow
+                      ? bracketPhaseShortName(bracketMatchRow.bracket_phase)
+                      : 'Fase mata-mata'}
+                  </Text>
                   {tiebreakMs.length === 0 ? null : tiebreakMs.map(renderTiebreakRow)}
                   {showPrimaryInSwissMata ? (
                     <View style={styles.primaryAboveRevengeWrap}>

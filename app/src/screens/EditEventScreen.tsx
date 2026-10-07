@@ -195,8 +195,8 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setStartingLife(sl);
 
       let swissTopcutBracketLocked = false;
-      if (cf === 'swiss' || isTop4) {
-        const bracketOrigin = isTop4 ? 'round_robin_topcut' : 'swiss_topcut';
+      if (cf === 'swiss' || isTop4 || cf === 'knockout') {
+        const bracketOrigin = cf === 'knockout' ? 'knockout_bracket' : isTop4 ? 'round_robin_topcut' : 'swiss_topcut';
         const grpRes = await supabase
           .from('event_tiebreak_groups')
           .select('id')
@@ -370,7 +370,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
       patch.venue_id = venueId;
     }
     if (
-      (competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && topSize === 4)) &&
+      (competitionFormat === 'swiss' ||
+        competitionFormat === 'knockout' ||
+        (competitionFormat === 'round_robin' && topSize === 4)) &&
       !topcutFormatLocked
     ) {
       patch.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
@@ -460,9 +462,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </>
       ) : null}
 
-      {competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && topSize === 4) ? (
+      {competitionFormat === 'swiss' || competitionFormat === 'knockout' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>
-          <Text style={[styles.label, topcutFormatLocked && styles.labelMuted]}>Eliminatorias</Text>
+          <Text style={[styles.label, topcutFormatLocked && styles.labelMuted]}>
+            {competitionFormat === 'knockout' ? 'Formato de las llaves' : 'Eliminatorias'}
+          </Text>
           <View style={styles.segmented}>
             {TOPCUT_FORMAT_OPTIONS.map((opt) => {
               const selected = eliminatoriasBo3 === (opt.value === 'bo3');
@@ -479,7 +483,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
             })}
           </View>
           {topcutFormatLocked ? (
-            <Text style={styles.topcutLockedHint}>Ya no editable: las eliminatorias comenzaron.</Text>
+            <Text style={styles.topcutLockedHint}>
+              {competitionFormat === 'knockout'
+                ? 'Ya no editable: las llaves comenzaron.'
+                : 'Ya no editable: las eliminatorias comenzaron.'}
+            </Text>
           ) : null}
         </>
       ) : null}
