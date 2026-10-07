@@ -5,6 +5,10 @@ import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { ThemeProvider, useTheme } from './src/theme';
 import { startPortraitGuard } from './src/lib/screenOrientationPolicy';
+import { AppAlertHost, installAppAlert } from './src/lib/appAlert';
+
+// Los carteles (Alert.alert) pasan a ser un Modal solo vertical: ver src/lib/appAlert.tsx.
+installAppAlert();
 
 function AppContent() {
   const { loading } = useAuth();
@@ -32,6 +36,7 @@ export default function App() {
         <AuthProvider>
           <AppContent />
         </AuthProvider>
+        <AppAlertHost />
       </ThemeProvider>
     </SafeAreaProvider>
   );
