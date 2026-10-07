@@ -719,7 +719,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
+      headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }, true),
     });
   }, [navigation, eventId]);
 
