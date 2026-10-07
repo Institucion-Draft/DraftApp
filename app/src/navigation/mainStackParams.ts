@@ -76,12 +76,15 @@ export type MainStackParamList = {
      * lee la identidad real del cruce desde este bracket match, no desde el pairing.
      */
     bracketMatchId?: string;
+    /** Origen cuadro de la Copa (StandingsScreen): el atrás del header vuelve a él, no a Enfrentamientos. */
+    fromStandings?: boolean;
   };
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
-  LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge' };
+  /** `fromStandings`: viene del cuadro de la Copa; se arrastra para que Atrás de PairingDetail vuelva a Standings. */
+  LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge'; fromStandings?: boolean };
   LifeChart: { matchId: string };
-  MatchResult: { matchId: string };
+  MatchResult: { matchId: string; fromStandings?: boolean };
   Standings: { eventId: string; showPodiumIntro?: boolean };
   Playground: { workspaceId: string };
   ContextFreeMatches: { workspaceId: string };

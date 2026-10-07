@@ -256,7 +256,13 @@ function computeMatchTurnTimeLines(
 export default function PairingDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const { pairingId, fromTab: fromPairingsTab = 'official', fromPlayerProfile, bracketMatchId } = route.params;
+  const {
+    pairingId,
+    fromTab: fromPairingsTab = 'official',
+    fromPlayerProfile,
+    bracketMatchId,
+    fromStandings,
+  } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
@@ -899,13 +905,20 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       return;
     }
     if (!pairing?.event_id) return;
+    if (fromStandings) {
+      // Standings ya está en el stack: se vuelve a él (popToExisting) en vez de apilar otra copia.
+      navigation.setOptions({
+        headerLeft: hierarchicalHeaderBack(navigation, 'Standings', { eventId: pairing.event_id }, true),
+      });
+      return;
+    }
     navigation.setOptions({
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingsList', {
         eventId: pairing.event_id,
         initialTab: fromPairingsTab,
       }),
     });
-  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab]);
+  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab, fromStandings]);
 
   if (loading) {
     return (
@@ -1230,6 +1243,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       navigation.navigate('LifeTracker', {
         matchId: String(activeRes.data.id),
         fromTab: fromPairingsTab,
+        ...(fromStandings ? { fromStandings: true } : {}),
       });
       return;
     }
@@ -1255,7 +1269,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       Alert.alert('Error', error?.message ?? 'No se pudo iniciar la partida.');
       return;
     }
-    navigation.navigate('LifeTracker', { matchId: String(data.id), fromTab: fromPairingsTab });
+    navigation.navigate('LifeTracker', {
+      matchId: String(data.id),
+      fromTab: fromPairingsTab,
+      ...(fromStandings ? { fromStandings: true } : {}),
+    });
   };
 
   // Mismo criterio que tiebreakBracketPrimaryLabel: el desempate por el 4to puesto siempre es

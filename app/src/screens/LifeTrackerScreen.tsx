@@ -830,10 +830,12 @@ async function navigateAfterMatchMaybeComplete(
   navigation: NativeStackNavigationProp<MainStackParamList, 'LifeTracker'>,
   eventId: string,
   matchId: string,
-  previousEventStatus: string | null | undefined
+  previousEventStatus: string | null | undefined,
+  fromStandings?: boolean
 ): Promise<void> {
+  const resultParams = { matchId, ...(fromStandings ? { fromStandings: true } : {}) };
   if (previousEventStatus === 'completed') {
-    navigation.replace('MatchResult', { matchId });
+    navigation.replace('MatchResult', resultParams);
     return;
   }
   const delays = [1500, 700, 700];
@@ -845,7 +847,7 @@ async function navigateAfterMatchMaybeComplete(
       return;
     }
   }
-  navigation.replace('MatchResult', { matchId });
+  navigation.replace('MatchResult', resultParams);
 }
 
 const COLOR_BG: Record<MtgColor, string> = {
@@ -1609,6 +1611,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   }, [matchId]);
 
   const pairingsFromTab = route.params.fromTab ?? 'official';
+  const fromStandings = route.params.fromStandings;
 
   useLayoutEffect(() => {
     if (!pairing) return;
@@ -1616,9 +1619,10 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', {
         pairingId: pairing.id,
         fromTab: pairingsFromTab,
+        ...(fromStandings ? { fromStandings: true } : {}),
       }),
     });
-  }, [navigation, pairing?.id, pairingsFromTab]);
+  }, [navigation, pairing?.id, pairingsFromTab, fromStandings]);
 
   const persistLife = useCallback(
     async (target: 'a' | 'b', overrideValue?: number, checkWin = true) => {
@@ -1768,10 +1772,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                   navigation,
                   pairing.event_id,
                   matchId,
-                  previousEventStatus
+                  previousEventStatus,
+                  fromStandings
                 );
               } else {
-                navigation.replace('MatchResult', { matchId });
+                navigation.replace('MatchResult', { matchId, ...(fromStandings ? { fromStandings: true } : {}) });
               }
             },
           },
@@ -1843,10 +1848,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               navigation,
               pairing.event_id,
               matchId,
-              previousEventStatus
+              previousEventStatus,
+              fromStandings
             );
           } else {
-            navigation.replace('MatchResult', { matchId });
+            navigation.replace('MatchResult', { matchId, ...(fromStandings ? { fromStandings: true } : {}) });
           }
         },
       },
@@ -2240,7 +2246,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           style={[styles.linkBtn, styles.concurrentBackBtn]}
           onPress={() =>
             pairing
-              ? navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab })
+              ? navigation.navigate('PairingDetail', {
+              pairingId: pairing.id,
+              fromTab: pairingsFromTab,
+              ...(fromStandings ? { fromStandings: true } : {}),
+            })
               : navigation.goBack()
           }
         >
@@ -2277,7 +2287,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
         ) : (
           <TouchableOpacity
             style={styles.linkBtn}
-            onPress={() => navigation.navigate('PairingDetail', { pairingId: pairing.id, fromTab: pairingsFromTab })}
+            onPress={() => navigation.navigate('PairingDetail', {
+              pairingId: pairing.id,
+              fromTab: pairingsFromTab,
+              ...(fromStandings ? { fromStandings: true } : {}),
+            })}
           >
             <Text style={styles.linkTxt}>Volver</Text>
           </TouchableOpacity>

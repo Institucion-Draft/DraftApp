@@ -15,12 +15,22 @@ import Svg, { Path } from 'react-native-svg';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar, { type PlayerAvatarSize } from '../components/PlayerAvatar';
+import KnockoutBracket from '../components/KnockoutBracket';
+import { countSeriesWins } from '../lib/bracketSeries';
+import {
+  buildKnockoutBracketModel,
+  type KnockoutBracketMatchRow,
+  type KnockoutBracketModel,
+  type KnockoutNode,
+  type KnockoutSlotRow,
+} from '../lib/knockoutBracketModel';
 import ColorFlag from '../components/ColorFlag';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
@@ -675,6 +685,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [eventFooter, setEventFooter] = useState<EventFooterStats>({ torneo: null, bo3: null });
   const [podiumState, setPodiumState] = useState<PodiumState | null>(null);
   const [swissTopcutBracketView, setSwissTopcutBracketView] = useState<SwissTopcutBracketView | null>(null);
+  /** Copa (sólo llaves): alto visible del scroll, para que el cuadro ajuste el alto de sus tarjetas. */
+  const [knockoutViewportH, setKnockoutViewportH] = useState(0);
+  /** Copa (sólo llaves): árbol de knockout_slots + datos para pintar el cuadro. */
+  const [knockoutBracket, setKnockoutBracket] = useState<{
+    model: KnockoutBracketModel | null;
+    names: Map<string, { userId: string; name: string }>;
+    seriesMatches: { pairing_id: string; status: string | null; winner_participant_id: string | null; is_walkover: boolean | null }[];
+    bo3: boolean;
+  } | null>(null);
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
@@ -703,6 +722,45 @@ export default function StandingsScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, 'EventDetail', { eventId }),
     });
   }, [navigation, eventId]);
+
+  // Copa (sólo llaves): la pantalla se llama "Cruces de copa" (el resto de los formatos conserva el
+  // título del stack).
+  useLayoutEffect(() => {
+    if (competitionFormat === 'knockout') navigation.setOptions({ title: 'Cruces de copa' });
+  }, [navigation, competitionFormat]);
+
+  // Copa (sólo llaves): el cuadro se ve en horizontal. Se bloquea mientras la pantalla tiene el foco y
+  // se restaura a vertical (la orientación de la app, ver app.json) al salir, incluso al navegar a
+  // otra pantalla; al volver con el foco se vuelve a bloquear.
+  // El bloqueo se aplica sólo con la pantalla en foco y se libera una única vez. Ningún setState ni
+  // recarga (la suscripción en vivo sigue corriendo con la pantalla tapada) puede re-dispararlo fuera
+  // del foco: el formato se lee desde un ref y todo pasa por applyLandscape/releaseLandscape.
+  const knockoutRef = useRef(false);
+  knockoutRef.current = competitionFormat === 'knockout';
+  const landscapeLockedRef = useRef(false);
+  const applyLandscape = useCallback(() => {
+    if (!knockoutRef.current || landscapeLockedRef.current || !navigation.isFocused()) return;
+    landscapeLockedRef.current = true;
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+  }, [navigation]);
+  const releaseLandscape = useCallback(() => {
+    if (!landscapeLockedRef.current) return;
+    landscapeLockedRef.current = false;
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, []);
+  // Foco: bloquea; pérdida de foco (incluida la navegación a otra pantalla): restaura.
+  useFocusEffect(
+    useCallback(() => {
+      applyLandscape();
+      return releaseLandscape;
+    }, [applyLandscape, releaseLandscape])
+  );
+  // El formato se conoce recién al cargar: si ya hay foco, bloquea en ese momento.
+  useEffect(() => {
+    if (competitionFormat === 'knockout') applyLandscape();
+  }, [competitionFormat, applyLandscape]);
+  // Al desmontar la pantalla, restaura si quedó bloqueada.
+  useEffect(() => releaseLandscape, [releaseLandscape]);
 
   const load = useCallback(async () => {
     let swissTopcutBracketModel: SwissTopcutBracketView | null = null;
@@ -742,7 +800,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type, topcut_format'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -922,6 +980,55 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
     const matches = (matchesRes.data ?? []) as any[];
     const matchIds = matches.map((m) => String(m.id));
+
+    // Copa (sólo llaves): estructura del árbol (knockout_slots) y filas jugables del grupo vigente.
+    let knockoutBracketData: typeof knockoutBracket = null;
+    if (fmt === 'knockout') {
+      let model: KnockoutBracketModel | null = null;
+      const grpRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('group_origin', 'knockout_bracket')
+        .neq('status', 'superseded')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const knockoutGroupId = (grpRes.data as { id: string } | null)?.id ?? null;
+      if (knockoutGroupId) {
+        const [slotsRes, bmRes] = await Promise.all([
+          supabase
+            .from('knockout_slots')
+            .select(
+              'id, round_key, position, participant_a_id, participant_b_id, is_bye, feeds_slot_id, feeds_as, winner_participant_id, bracket_match_id'
+            )
+            .eq('group_id', knockoutGroupId),
+          supabase
+            .from('event_tiebreak_bracket_matches')
+            .select('id, pairing_id, winner_participant_id')
+            .eq('group_id', knockoutGroupId),
+        ]);
+        if (!slotsRes.error && !bmRes.error) {
+          model = buildKnockoutBracketModel(
+            (slotsRes.data ?? []) as KnockoutSlotRow[],
+            (bmRes.data ?? []) as KnockoutBracketMatchRow[]
+          );
+        }
+      }
+      knockoutBracketData = {
+        model,
+        names: infoByParticipantId,
+        seriesMatches: matches
+          .filter((m) => m.match_type === 'tiebreak')
+          .map((m) => ({
+            pairing_id: String(m.pairing_id),
+            status: m.status ?? null,
+            winner_participant_id: m.winner_participant_id ?? null,
+            is_walkover: m.is_walkover ?? null,
+          })),
+        bo3: (eventRes.data as { topcut_format?: string | null } | null)?.topcut_format === 'bo3',
+      };
+    }
 
     const lifeRes =
       !turnTrackOn && matchIds.length > 0
@@ -1357,6 +1464,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       });
     }
     setSwissTopcutBracketView(swissTopcutBracketModel);
+    setKnockoutBracket(knockoutBracketData);
     setRows(rowsBuilt);
 
     const revengeRowsBuilt: RevengeRowView[] = participants.map((p: any) => {
@@ -1657,8 +1765,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
       </View>
     ) : null;
 
-  // Copa (sólo llaves): no hay tabla de liga (sería una tabla en cero). Se muestra el podio y un
-  // aviso; los cruces se ven en Enfrentamientos. El cuadro de llaves llega en una fase posterior.
+  // Copa (sólo llaves): no hay tabla de liga (sería una tabla en cero). Se muestra el podio y el
+  // cuadro de llaves simétrico (knockout_slots).
   if (competitionFormat === 'knockout') {
     return (
       <View style={styles.screenRoot}>
@@ -1671,9 +1779,36 @@ export default function StandingsScreen({ route, navigation }: Props) {
           style={styles.container}
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          onLayout={(e) => setKnockoutViewportH(Math.round(e.nativeEvent.layout.height))}
         >
           {podiumBlock}
-          <Text style={styles.knockoutNotice}>Los cruces de la Copa se ven en Enfrentamientos</Text>
+          {knockoutBracket?.model ? (
+            <KnockoutBracket
+              model={knockoutBracket.model}
+              names={knockoutBracket.names}
+              bo3={knockoutBracket.bo3}
+              viewportHeight={knockoutViewportH}
+              seriesWins={(pairingId, participantId) =>
+                pairingId == null
+                  ? 0
+                  : countSeriesWins(
+                      knockoutBracket.seriesMatches.filter((m) => m.pairing_id === pairingId),
+                      participantId
+                    )
+              }
+              onPressMatch={(node: KnockoutNode) => {
+                if (!node.pairingId) return;
+                navigation.navigate('PairingDetail', {
+                  pairingId: node.pairingId,
+                  fromTab: 'official',
+                  fromStandings: true,
+                  ...(node.bracketMatchId ? { bracketMatchId: node.bracketMatchId } : {}),
+                });
+              }}
+            />
+          ) : (
+            <Text style={styles.knockoutNotice}>Las llaves se sortean al finalizar el draft</Text>
+          )}
         </ScrollView>
       </View>
     );

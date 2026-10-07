@@ -59,6 +59,11 @@ type Props = {
   userId: string;
   participantId?: string;
   size: PlayerAvatarSize;
+  /**
+   * Diámetro real en puntos; pisa al de `size`. Para espacios que no coinciden con ninguno de los
+   * tamaños fijos (p. ej. el cuadro de la Copa): el sprite se dibuja a ese tamaño, sin escalar la vista.
+   */
+  diameter?: number;
   withColorBorder?: boolean;
   borderWidth?: number;
   style?: StyleProp<ViewStyle>;
@@ -253,6 +258,7 @@ export default function PlayerAvatar({
   withColorBorder = false,
   borderWidth = 3,
   style,
+  diameter: diameterProp,
   outsideEvent = false,
   showShinyAnimation = false,
   giantSide,
@@ -260,7 +266,7 @@ export default function PlayerAvatar({
   isMemberB = false,
 }: Props) {
   const { colors } = useTheme();
-  const diameter = SIZE_PT[size];
+  const diameter = diameterProp ?? SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
   const outer = diameter + 2 * bw;
   const rInner = diameter * CORNER_RATIO;

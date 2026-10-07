@@ -1834,7 +1834,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             style={styles.primaryBtn}
             onPress={() => navigation.navigate('Standings', { eventId: event.id })}
           >
-            <Text style={styles.primaryBtnTxt}>Tabla de posiciones</Text>
+            <Text style={styles.primaryBtnTxt}>
+              {normalizeCompetitionFormat(event.competition_format) === 'knockout' ? 'Cruces de copa' : 'Tabla de posiciones'}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}
