@@ -1733,7 +1733,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   onPress={() =>
                     Alert.alert(
                       'Fin del draft',
-                      '¿Finalizar draft? Queda habilitado Enfrentamientos.',
+                      '¿Finalizar draft?',
                       [
                         { text: 'Volver', style: 'cancel' },
                         {

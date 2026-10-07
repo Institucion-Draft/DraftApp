@@ -102,6 +102,8 @@ export type KnockoutLink = {
   toY: number;
   /** Hacia dónde se dibuja: 'left' sale por el borde derecho del hijo; 'right' por el izquierdo. */
   side: 'left' | 'right';
+  /** El origen es un pase directo (bye): ese hueco se dibuja apagado y sin conector. */
+  fromIsBye: boolean;
 };
 
 export type KnockoutLayout = {
@@ -162,6 +164,7 @@ export function layoutKnockoutBracket(
             toCol: col,
             toY: y,
             side,
+            fromIsBye: c.isBye,
           });
         });
       }
@@ -177,8 +180,8 @@ export function layoutKnockoutBracket(
   const finalY = (left.y + right.y) / 2;
   columnRounds[finalCol] = 'final';
   boxes.push({ node: model.final, col: finalCol, yCenter: finalY, side: 'center' });
-  links.push({ fromCol: levels - 1, fromY: left.y, toCol: finalCol, toY: finalY, side: 'left' });
-  links.push({ fromCol: levels + 1, fromY: right.y, toCol: finalCol, toY: finalY, side: 'right' });
+  links.push({ fromCol: levels - 1, fromY: left.y, toCol: finalCol, toY: finalY, side: 'left', fromIsBye: false });
+  links.push({ fromCol: levels + 1, fromY: right.y, toCol: finalCol, toY: finalY, side: 'right', fromIsBye: false });
 
   let thirdBox: KnockoutBox | null = null;
   if (model.third) {

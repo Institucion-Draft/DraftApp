@@ -146,12 +146,8 @@ export default function KnockoutBracket({ model, names, seriesWins, bo3, viewpor
     ];
     const divider = !isTop ? styles.dividerTop : null;
     if (participantId == null) {
-      // Bye: la mitad de abajo dice "pasa". Un lugar sin definir queda vacío, sin texto.
-      return (
-        <View style={[halfStyle, divider, styles.halfEmpty]}>
-          {node.isBye ? <Text style={[styles.passText, nameStyle]}>pasa</Text> : null}
-        </View>
-      );
+      // Un lugar sin definir queda vacío, sin texto.
+      return <View style={[halfStyle, divider, styles.halfEmpty]} />;
     }
     const info = names.get(participantId);
     // PlayerAvatar recibe el diámetro real: el sprite se dibuja a ese tamaño, sin escalar la vista.
@@ -209,6 +205,19 @@ export default function KnockoutBracket({ model, names, seriesWins, bo3, viewpor
 
   const renderCard = (box: KnockoutBox) => {
     const node = box.node;
+    // Pase directo (bye): no se dibuja la tarjeta del jugador; queda un hueco apagado, del mismo tamaño,
+    // que mantiene la simetría. El jugador se ve únicamente en su tarjeta de la ronda siguiente.
+    if (node.isBye) {
+      return (
+        <View
+          key={node.slotId}
+          style={[
+            styles.ghost,
+            { position: 'absolute' as const, left: colX(box.col), top: box.yCenter - cardH / 2, width: cardW, height: cardH },
+          ]}
+        />
+      );
+    }
     const bothDefined = node.participantAId != null && node.participantBId != null;
     const tappable = bothDefined && !node.isBye && node.pairingId != null && node.bracketMatchId != null;
     const isFinal = node.round === 'final';
@@ -252,7 +261,7 @@ export default function KnockoutBracket({ model, names, seriesWins, bo3, viewpor
       </View>
       <View style={{ width: totalW, height: layout.bodyHeight }}>
         <Svg width={totalW} height={layout.bodyHeight} style={StyleSheet.absoluteFill} pointerEvents="none">
-          {layout.links.map((l, i) => (
+          {layout.links.filter((l) => !l.fromIsBye).map((l, i) => (
             <Path key={`lk-${i}`} d={linkPath(l)} stroke={colors.borderStrong} strokeWidth={1} fill="none" />
           ))}
         </Svg>
@@ -325,6 +334,13 @@ function createStyles(c: ThemeColors) {
         default: {},
       }),
     },
+    // Hueco de un pase directo: sólo un borde tenue, sin texto ni avatar.
+    ghost: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      opacity: 0.35,
+    },
     cardFinal: { backgroundColor: c.card, borderWidth: 1.5, borderColor: c.textMuted },
     // Cada mitad es una fila: avatar a la izquierda y bloque de texto a la derecha.
     half: { flexDirection: 'row', alignItems: 'center', paddingRight: 6 },
@@ -339,7 +355,6 @@ function createStyles(c: ThemeColors) {
     textBlockCentered: { justifyContent: 'center' },
     name: { fontWeight: '600', color: c.text, textAlign: 'center', alignSelf: 'stretch' },
     pillsSpacer: { height: PILL_H },
-    passText: { fontStyle: 'italic', color: c.textSecondary },
     pillsRow: { flexDirection: 'row', justifyContent: 'center' },
     pill: {
       width: 14,
