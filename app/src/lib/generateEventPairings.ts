@@ -50,6 +50,12 @@ export async function generateEventPairings(eventId: string): Promise<GeneratePa
     return { ok: true, message: 'Se sortearon las llaves.' };
   }
 
+  // Copa (grupos + llaves): las zonas se sortean aparte (RPC draw_zones, 0136) con la configuración que elige el
+  // organizador; acá no se genera ningún pairing (no es un todos contra todos).
+  if (normalizeCompetitionFormat(competitionFormat) === 'zones_knockout') {
+    return { ok: true, message: 'Falta sortear las zonas.' };
+  }
+
   const partsRes = await supabase
     .from('event_participants')
     .select(
