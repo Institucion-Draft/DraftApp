@@ -198,3 +198,33 @@ export function layoutKnockoutBracket(
   const bodyHeight = Math.max(halfH, thirdBox ? thirdBox.yCenter + cardH / 2 : 0);
   return { cols, levels, finalCol, boxes, links, thirdBox, columnRounds, bodyHeight };
 }
+
+const ROUND_ORDER: Record<BracketPhase, number> = { round_of_16: 1, quarter: 2, semi: 3, final: 4, third_place: 5 };
+
+/**
+ * Perdedores del primer partido REAL de la copa principal (espejo de knockout_try_draw_second_chance, 0135).
+ * Primer partido real de un jugador = el primer slot no-bye (por ronda) en el que está: los que entran con bye
+ * lo juegan en la ronda siguiente. allResolved = todos los primeros partidos tienen ganador. Se excluye a
+ * quienes tienen left_event_at (si perdió el que se fue, no entra).
+ */
+export function knockoutFirstMatchLosers(
+  slots: readonly KnockoutSlotRow[],
+  leftIds: ReadonlySet<string>
+): { allResolved: boolean; losers: string[] } {
+  const first = new Map<string, { key: number; winner: string | null }>();
+  for (const s of slots) {
+    if (s.is_bye) continue;
+    for (const p of [s.participant_a_id, s.participant_b_id]) {
+      if (!p) continue;
+      const key = ROUND_ORDER[s.round_key] * 100 + s.position;
+      const cur = first.get(p);
+      if (!cur || key < cur.key) first.set(p, { key, winner: s.winner_participant_id });
+    }
+  }
+  const all = [...first.entries()];
+  const allResolved = all.length > 0 && all.every(([, v]) => v.winner != null);
+  const losers = all
+    .filter(([p, v]) => v.winner != null && v.winner !== p && !leftIds.has(p))
+    .map(([p]) => p);
+  return { allResolved, losers };
+}

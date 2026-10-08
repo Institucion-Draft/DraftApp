@@ -251,6 +251,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   /** Mata-mata suizo bracket: filas BO3 por fase (solo cuando aplica). */
   const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
+  /** Copa (0135): cruces del jugador en la 2da oportunidad (sección aparte de la copa principal). */
+  const [profileSecondByPhase, setProfileSecondByPhase] = useState<MataPhaseBuckets | null>(null);
   /** Participó en el desempate group_type='fourth_place' (4to puesto real de
    *  round_robin_bo1_top4, o 1er puesto de round_robin BO3 clásico — 0075), grupo aparte del principal. */
   const [profileInFourthPlaceGroup, setProfileInFourthPlaceGroup] = useState(false);
@@ -675,6 +677,108 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     });
     setRevengeH2h(revRows);
 
+    // Arma los cruces del jugador por ronda a partir de las filas del bracket (copa principal o 2da oportunidad).
+    const buildMataBuckets = (bmRows: BracketBmRow[]): MataPhaseBuckets => {
+    const roundOf16Rows: OfficialH2HRow[] = [];
+    const quarterRows: OfficialH2HRow[] = [];
+    const semiRows: OfficialH2HRow[] = [];
+    const finalRows: OfficialH2HRow[] = [];
+    const thirdRows: OfficialH2HRow[] = [];
+
+    for (const bm of bmRows) {
+      let oppId: string | null = null;
+      if (bm.participant_a_id === participantId) oppId = bm.participant_b_id;
+      else if (bm.participant_b_id === participantId) oppId = bm.participant_a_id;
+      else continue;
+      const phase: BracketPhase | null =
+        bm.bracket_phase === 'round_of_16' ||
+        bm.bracket_phase === 'quarter' ||
+        bm.bracket_phase === 'semi' ||
+        bm.bracket_phase === 'final' ||
+        bm.bracket_phase === 'third_place'
+          ? bm.bracket_phase
+          : null;
+      if (!phase) continue;
+
+      // Marcador parcial: matches tiebreak del pairing del bracket match, alineando las
+      // victorias a los participantes del bracket match — walkover no infla el marcador
+      // (mismo criterio que profileWins/opponentWins de fase regular más arriba), pero sí
+      // determina el badge "Se fue" de quien perdió por abandono.
+      let profileWins = 0;
+      let opponentWins = 0;
+      let opponentIsWalkoverLoser = false;
+      let selfIsWalkoverLoser = false;
+      if (bm.pairing_id) {
+        for (const m of matches) {
+          if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
+          if (m.pairing_id !== bm.pairing_id) continue;
+          const w = String(m.winner_participant_id);
+          if (m.is_walkover) {
+            if (w === participantId) opponentIsWalkoverLoser = true;
+            else if (w === oppId) selfIsWalkoverLoser = true;
+            continue;
+          }
+          if (w === participantId) profileWins += 1;
+          else if (w === oppId) opponentWins += 1;
+        }
+      }
+      const oppPlayer = players.find((p) => p.id === oppId);
+      const row: OfficialH2HRow = {
+        opponentId: oppId,
+        opponentName: oppPlayer?.displayName ?? 'Jugador',
+        pairingId: bm.pairing_id,
+        profileWins,
+        opponentWins,
+        sortTier: 0,
+        isDraw: false,
+        bracketMatchId: bm.id,
+        opponentIsWalkoverLoser,
+        selfIsWalkoverLoser,
+      };
+      (phase === 'round_of_16'
+        ? roundOf16Rows
+        : phase === 'quarter'
+          ? quarterRows
+          : phase === 'semi'
+            ? semiRows
+            : phase === 'final'
+              ? finalRows
+              : thirdRows
+      ).push(row);
+    }
+    return {
+      roundOf16: roundOf16Rows,
+      quarter: quarterRows,
+      semi: semiRows,
+      final: finalRows,
+      third: thirdRows,
+    };
+    };
+
+    // 2da oportunidad (0135): sus cruces del jugador, en sección aparte de la copa principal.
+    let secondBuckets: MataPhaseBuckets | null = null;
+    if (competitionFormat === 'knockout') {
+      const secRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('group_origin', 'knockout_second_chance')
+        .in('status', ['active', 'resolved', 'failed'])
+        .limit(1)
+        .maybeSingle();
+      if (!secRes.error && secRes.data?.id) {
+        const secBm = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('id, bracket_phase, pairing_id, participant_a_id, participant_b_id, winner_participant_id')
+          .eq('group_id', secRes.data.id);
+        const secRows = (secBm.data ?? []) as BracketBmRow[];
+        if (secRows.some((bm) => bm.participant_a_id === participantId || bm.participant_b_id === participantId)) {
+          secondBuckets = buildMataBuckets(secRows);
+        }
+      }
+    }
+    setProfileSecondByPhase(secondBuckets);
+
     // Grupo "principal" (fase mata-mata suiza/real de top4, o desempate clásico viejo tipo
     // 'tiebreak'): excluye explícitamente group_type='fourth_place' — ese se procesa aparte más
     // abajo, con su propia query, para que no lo tape un grupo más nuevo (el bracket real de
@@ -685,6 +789,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       .select('id, round_number, group_origin, group_type')
       .eq('event_id', eventId)
       .neq('group_type', 'fourth_place')
+      // Copa (0135): este grupo es el de la copa principal; la 2da oportunidad se arma aparte más abajo.
+      .neq('group_origin', 'knockout_second_chance')
       .in('status', ['active', 'resolved', 'failed'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -728,80 +834,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           // El rival, la fase y el resultado salen del bracket match, NO del pairing
           // (que en swiss BO2 [match_format='bo2'] puede estar compartido con la ronda suiza y apuntar a
           // otro jugador). El pairing solo se usa para contar el marcador parcial.
-          const roundOf16Rows: OfficialH2HRow[] = [];
-          const quarterRows: OfficialH2HRow[] = [];
-          const semiRows: OfficialH2HRow[] = [];
-          const finalRows: OfficialH2HRow[] = [];
-          const thirdRows: OfficialH2HRow[] = [];
-
-          for (const bm of bmRows) {
-            let oppId: string | null = null;
-            if (bm.participant_a_id === participantId) oppId = bm.participant_b_id;
-            else if (bm.participant_b_id === participantId) oppId = bm.participant_a_id;
-            else continue;
-            const phase: BracketPhase | null =
-              bm.bracket_phase === 'round_of_16' ||
-              bm.bracket_phase === 'quarter' ||
-              bm.bracket_phase === 'semi' ||
-              bm.bracket_phase === 'final' ||
-              bm.bracket_phase === 'third_place'
-                ? bm.bracket_phase
-                : null;
-            if (!phase) continue;
-
-            // Marcador parcial: matches tiebreak del pairing del bracket match, alineando las
-            // victorias a los participantes del bracket match — walkover no infla el marcador
-            // (mismo criterio que profileWins/opponentWins de fase regular más arriba), pero sí
-            // determina el badge "Se fue" de quien perdió por abandono.
-            let profileWins = 0;
-            let opponentWins = 0;
-            let opponentIsWalkoverLoser = false;
-            let selfIsWalkoverLoser = false;
-            if (bm.pairing_id) {
-              for (const m of matches) {
-                if (m.match_type !== 'tiebreak' || m.status !== 'completed' || !m.winner_participant_id) continue;
-                if (m.pairing_id !== bm.pairing_id) continue;
-                const w = String(m.winner_participant_id);
-                if (m.is_walkover) {
-                  if (w === participantId) opponentIsWalkoverLoser = true;
-                  else if (w === oppId) selfIsWalkoverLoser = true;
-                  continue;
-                }
-                if (w === participantId) profileWins += 1;
-                else if (w === oppId) opponentWins += 1;
-              }
-            }
-            const oppPlayer = players.find((p) => p.id === oppId);
-            const row: OfficialH2HRow = {
-              opponentId: oppId,
-              opponentName: oppPlayer?.displayName ?? 'Jugador',
-              pairingId: bm.pairing_id,
-              profileWins,
-              opponentWins,
-              sortTier: 0,
-              isDraw: false,
-              bracketMatchId: bm.id,
-              opponentIsWalkoverLoser,
-              selfIsWalkoverLoser,
-            };
-            (phase === 'round_of_16'
-              ? roundOf16Rows
-              : phase === 'quarter'
-                ? quarterRows
-                : phase === 'semi'
-                  ? semiRows
-                  : phase === 'final'
-                    ? finalRows
-                    : thirdRows
-            ).push(row);
-          }
-          setProfileMataByPhase({
-            roundOf16: roundOf16Rows,
-            quarter: quarterRows,
-            semi: semiRows,
-            final: finalRows,
-            third: thirdRows,
-          });
+          setProfileMataByPhase(buildMataBuckets(bmRows));
           setProfileTiebreakRows([]);
         }
       } else {
@@ -1798,6 +1831,72 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       ));
     };
 
+    // Dibuja los cruces del jugador por ronda (principal o 2da oportunidad).
+    const renderMataBuckets = (buckets: MataPhaseBuckets, headerEl: React.ReactNode) => {
+      const total =
+        buckets.roundOf16.length +
+        buckets.quarter.length +
+        buckets.semi.length +
+        buckets.final.length +
+        buckets.third.length;
+      return (
+        <>
+          {headerEl}
+          {total === 0 ? (
+            <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
+          ) : (
+            <>
+              {buckets.roundOf16.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('round_of_16')}</Text>
+                  {buckets.roundOf16.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'round_of_16') < 2)
+                  )}
+                </>
+              ) : null}
+              {buckets.quarter.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('quarter')}</Text>
+                  {buckets.quarter.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'quarter') < 2)
+                  )}
+                </>
+              ) : null}
+              {buckets.semi.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>Semifinal</Text>
+                  {buckets.semi.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'semi') < 2)
+                  )}
+                </>
+              ) : null}
+              {buckets.final.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>Final</Text>
+                  {buckets.final.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'final') < 2)
+                  )}
+                </>
+              ) : null}
+              {buckets.third.length > 0 ? (
+                <>
+                  <Text style={styles.profilePhaseSubtitle}>3er y 4to puesto</Text>
+                  {buckets.third.map((row) =>
+                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'third_place') < 2)
+                  )}
+                </>
+              ) : null}
+            </>
+          )}
+        </>
+      );
+    };
+
+    const secondChanceSection = () =>
+      profileSecondByPhase
+        ? renderMataBuckets(profileSecondByPhase, <Text style={styles.sectionTitle}>2da oportunidad</Text>)
+        : null;
+
     const swissMataBracketSection = () => {
       if (
         !profileInTiebreakGroup ||
@@ -1821,62 +1920,13 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           </>
         );
       }
-      const total =
-        profileMataByPhase.roundOf16.length +
-        profileMataByPhase.quarter.length +
-        profileMataByPhase.semi.length +
-        profileMataByPhase.final.length +
-        profileMataByPhase.third.length;
-      return (
-        <>
-          {showMataHeader ? <Text style={styles.sectionTitle}>Fase mata-mata</Text> : null}
-          {total === 0 ? (
-            <Text style={styles.muted}>Sin partidas de desempate jugadas.</Text>
-          ) : (
-            <>
-              {profileMataByPhase.roundOf16.length > 0 ? (
-                <>
-                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('round_of_16')}</Text>
-                  {profileMataByPhase.roundOf16.map((row) =>
-                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'round_of_16') < 2)
-                  )}
-                </>
-              ) : null}
-              {profileMataByPhase.quarter.length > 0 ? (
-                <>
-                  <Text style={styles.profilePhaseSubtitle}>{bracketPhaseSingularName('quarter')}</Text>
-                  {profileMataByPhase.quarter.map((row) =>
-                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'quarter') < 2)
-                  )}
-                </>
-              ) : null}
-              {profileMataByPhase.semi.length > 0 ? (
-                <>
-                  <Text style={styles.profilePhaseSubtitle}>Semifinal</Text>
-                  {profileMataByPhase.semi.map((row) =>
-                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'semi') < 2)
-                  )}
-                </>
-              ) : null}
-              {profileMataByPhase.final.length > 0 ? (
-                <>
-                  <Text style={styles.profilePhaseSubtitle}>Final</Text>
-                  {profileMataByPhase.final.map((row) =>
-                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'final') < 2)
-                  )}
-                </>
-              ) : null}
-              {profileMataByPhase.third.length > 0 ? (
-                <>
-                  <Text style={styles.profilePhaseSubtitle}>3er y 4to puesto</Text>
-                  {profileMataByPhase.third.map((row) =>
-                    officialPairingCard(row, 'green', topcutWinsNeededClient(topcutFormat, 'third_place') < 2)
-                  )}
-                </>
-              ) : null}
-            </>
-          )}
-        </>
+      return renderMataBuckets(
+        profileMataByPhase,
+        showMataHeader ? (
+          <Text style={styles.sectionTitle}>Fase mata-mata</Text>
+        ) : profileSecondByPhase ? (
+          <Text style={styles.sectionTitle}>Copa</Text>
+        ) : null
       );
     };
 
@@ -1940,6 +1990,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         {eventCompetitionFormat === 'swiss' ? (
           <>
             {swissMataBracketSection()}
+            {secondChanceSection()}
             {profileInTiebreakGroup && profileTiebreakGroupOrigin !== 'swiss_topcut' ? (
               <>
                 <Text style={styles.sectionTitle}>Desempate</Text>
@@ -1956,6 +2007,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         ) : (
           <>
             {swissMataBracketSection()}
+            {secondChanceSection()}
             {fourthPlaceMataSection()}
             {tiebreakRoundRobinCards()}
             {eventCompetitionFormat === 'knockout' ? null : (

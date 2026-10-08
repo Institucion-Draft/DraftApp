@@ -16,7 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat } from '../lib/eventMode';
-import { KNOCKOUT_BRACKET_ORIGIN, bracketPhaseTickerName, type BracketPhase } from '../lib/knockoutRounds';
+import { KNOCKOUT_BRACKET_ORIGIN, KNOCKOUT_SECOND_CHANCE_ORIGIN, bracketPhaseTickerName, isKnockoutCupOrigin, type BracketPhase } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import {
@@ -376,7 +376,7 @@ async function fetchEventTickerContext(
   currentMatchId: string,
   currentPairingId: string
 ): Promise<EventTickerContext | null> {
-  const [eventRes, pairingsRes, participantsRes, tgRes] = await Promise.all([
+  const [eventRes, pairingsRes, participantsRes, tgRes, copaGroupsRes] = await Promise.all([
     supabase
       .from('draft_events')
       .select('turn_tracking_enabled, topcut_format, match_format, competition_format')
@@ -397,6 +397,13 @@ async function fetchEventTickerContext(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Copa (0135): los cruces de la copa principal y de la 2da oportunidad (hay dos grupos).
+    supabase
+      .from('event_tiebreak_groups')
+      .select('id')
+      .eq('event_id', eventId)
+      .in('group_origin', [KNOCKOUT_BRACKET_ORIGIN, KNOCKOUT_SECOND_CHANCE_ORIGIN])
+      .in('status', ['active', 'resolved']),
   ]);
 
   if (eventRes.error || pairingsRes.error || participantsRes.error) return null;
@@ -435,11 +442,16 @@ async function fetchEventTickerContext(
   const bracketPhaseByPairingId = new Map<string, BracketPhase>();
   const bracketPairingIds = new Set<string>();
   const tgId = (tgRes.data as { id?: string } | null)?.id;
-  if (tgId && !tgRes.error) {
+  const tickerGroupIds = new Set<string>();
+  if (tgId && !tgRes.error) tickerGroupIds.add(tgId);
+  if (!copaGroupsRes.error) {
+    for (const r of (copaGroupsRes.data ?? []) as { id: string }[]) tickerGroupIds.add(r.id);
+  }
+  if (tickerGroupIds.size > 0) {
     const bmRes = await supabase
       .from('event_tiebreak_bracket_matches')
       .select('pairing_id, participant_a_id, participant_b_id, bracket_phase')
-      .eq('group_id', tgId);
+      .in('group_id', [...tickerGroupIds]);
     if (!bmRes.error) {
       for (const row of bmRes.data ?? []) {
         const pid = resolveBracketPairingId(
@@ -1451,12 +1463,26 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       tg?.group_type === 'bracket' &&
       (tg.group_origin === 'swiss_topcut' ||
         tg.group_origin === 'round_robin_topcut' ||
-        tg.group_origin === KNOCKOUT_BRACKET_ORIGIN);
+        isKnockoutCupOrigin(tg.group_origin));
     if (isSwissTopcutBracketTiebreak) {
+      // Copa (0135): hay dos cuadros (principal y 2da oportunidad); el cruce de esta partida puede estar en
+      // cualquiera de los dos, así que se miran los de ambos grupos. El resto de los formatos: un solo grupo.
+      let bracketGroupIds: string[] = [tg.id];
+      if (isKnockoutCupOrigin(tg.group_origin)) {
+        const cupRes = await supabase
+          .from('event_tiebreak_groups')
+          .select('id')
+          .eq('event_id', pairingRow.event_id)
+          .in('group_origin', [KNOCKOUT_BRACKET_ORIGIN, KNOCKOUT_SECOND_CHANCE_ORIGIN])
+          .in('status', ['active', 'resolved']);
+        if (!cupRes.error && cupRes.data && cupRes.data.length > 0) {
+          bracketGroupIds = (cupRes.data as { id: string }[]).map((r) => r.id);
+        }
+      }
       const bmr = await supabase
         .from('event_tiebreak_bracket_matches')
         .select('pairing_id, participant_a_id, participant_b_id')
-        .eq('group_id', tg.id);
+        .in('group_id', bracketGroupIds);
       const rows = (bmr.data ?? []) as {
         pairing_id: string | null;
         participant_a_id: string;

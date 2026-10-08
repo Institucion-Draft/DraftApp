@@ -8,8 +8,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
-  Modal,
-  ScrollView,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -22,13 +20,15 @@ import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/event
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
   KNOCKOUT_BRACKET_ORIGIN,
+  KNOCKOUT_SECOND_CHANCE_ORIGIN,
+  SECOND_CHANCE_PREFIX,
   bracketPhaseSortKey,
   bracketPhaseTitle,
+  isKnockoutCupOrigin,
   type BracketPhase,
 } from '../lib/knockoutRounds';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
-import { useCanManageEvent } from '../hooks/useCanManageEvent';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -154,7 +154,8 @@ type TiebreakOfficialSection = {
     | 'round_robin_topcut'
     | 'round_robin_fourth_place'
     | 'round_robin_first_place'
-    | 'knockout_bracket';
+    | 'knockout_bracket'
+    | 'knockout_second_chance';
 };
 
 type RevengeItemView = {
@@ -193,7 +194,8 @@ type RevengeGroupView = {
 };
 
 type SwissRevengeStandaloneRow = {
-  pairingId: string;
+  /** null sólo en la Copa: el pairing de venganza se crea al tocar el vs (ensure_revenge_pairing). */
+  pairingId: string | null;
   participantAId: string;
   participantBId: string;
   aName: string;
@@ -347,7 +349,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
   const isFocused = useIsFocused();
   const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
+  const [tab, setTab] = useState<'officials' | 'second' | 'revenge'>('officials');
   const [items, setItems] = useState<ItemView[]>([]);
   const [officialByeByRound, setOfficialByeByRound] = useState<Record<number, OfficialByeCard[]>>({});
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
@@ -361,15 +363,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   /** round_robin + top_size=4 (cualquier match_format): título "Fase todos contra todos". */
   const [isRoundRobinTop4, setIsRoundRobinTop4] = useState(false);
   const [eventType, setEventType] = useState<string | null>(null);
-  // Copa: datos para armar venganzas entre cualquier par de jugadores (ensure_revenge_pairing).
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [eventPlaying, setEventPlaying] = useState(false);
+  // Copa: jugadores del evento (incluidos los que se fueron) y pairings por par, para la pestaña Venganzas.
   const [copaPlayers, setCopaPlayers] = useState<{ id: string; userId: string; name: string }[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickA, setPickA] = useState<string | null>(null);
-  const [pickB, setPickB] = useState<string | null>(null);
-  const [creatingRevenge, setCreatingRevenge] = useState(false);
-  const { canManageEvent } = useCanManageEvent(workspaceId, eventId);
+  const [copaPairingByPair, setCopaPairingByPair] = useState<Map<string, string>>(new Map());
+  const [openingRevenge, setOpeningRevenge] = useState(false);
   const [revengeItems, setRevengeItems] = useState<RevengeItemView[]>([]);
   const [tiebreakOfficialSections, setTiebreakOfficialSections] = useState<TiebreakOfficialSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -457,8 +454,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       event_type?: string | null;
     } | null;
     setEventType(eventFlags?.event_type ?? null);
-    setWorkspaceId((eventFlags as { workspace_id?: string | null } | null)?.workspace_id ?? null);
-    setEventPlaying(eventStatus === 'playing');
     setKnockoutBo3(
       eventFlags?.competition_format === 'knockout' &&
         (eventFlags as { topcut_format?: string | null } | null)?.topcut_format === 'bo3'
@@ -527,13 +522,24 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const participants = (participantsRes.data ?? []) as ParticipantRow[];
     const pMap = new Map<string, ParticipantRow>(participants.map((p) => [p.id, p]));
     setCopaPlayers(
+      // Quien se fue (left_event_at) también puede jugar venganzas: sólo pierde sus oficiales pendientes.
       participants
-        .filter((p) => !p.left_event_at)
         .map((p) => {
           const u = relationOne(p.users);
           return { id: p.id, userId: p.user_id, name: u?.display_name || u?.username || 'Jugador' };
         })
         .sort((x, y) => x.name.localeCompare(y.name, 'es', { sensitivity: 'base' }))
+    );
+
+    setCopaPairingByPair(
+      new Map(
+        pairingsAll.map((p) => [
+          p.participant_a_id < p.participant_b_id
+            ? `${p.participant_a_id}|${p.participant_b_id}`
+            : `${p.participant_b_id}|${p.participant_a_id}`,
+          p.id,
+        ])
+      )
     );
 
     const pairingIds = pairingsAll.map((p) => p.id);
@@ -901,8 +907,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             | 'round_robin_topcut'
             | 'round_robin_fourth_place'
             | 'round_robin_first_place'
-            | 'knockout_bracket' =
-            ag.group_origin === KNOCKOUT_BRACKET_ORIGIN
+            | 'knockout_bracket'
+            | 'knockout_second_chance' =
+            ag.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN
+              ? 'knockout_second_chance'
+              : ag.group_origin === KNOCKOUT_BRACKET_ORIGIN
               ? 'knockout_bracket'
               : ag.group_origin === 'swiss_topcut'
               ? 'swiss_topcut'
@@ -1178,7 +1187,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             }
             // Copa: dentro de cada ronda, en vivo → por jugar (vírgenes y comenzados) → finalizados.
             // El sort es estable: el resto del orden (creación) se conserva.
-            if (groupOrigin === KNOCKOUT_BRACKET_ORIGIN) {
+            if (isKnockoutCupOrigin(groupOrigin)) {
               const rank = (it: TiebreakOfficialItem) =>
                 it.status === 'in_progress' ? 0 : it.status === 'completed' ? 2 : 1;
               tbItems.sort(
@@ -1268,7 +1277,17 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       // round_robin BO3 clásico, ver 0075) siempre se procesa aparte del grupo "principal": para
       // round_robin_bo1_top4 puede coexistir con el bracket real de top4 creado al resolverse.
       const fourthPlaceFamilyGroups = agRows.filter((r) => r.group_type === 'fourth_place');
-      const mainGroup = agRows.find((r) => r.group_type !== 'fourth_place') ?? null;
+      // Copa (sólo llaves, 0135): una sección por cuadro (principal y 2da oportunidad); antes se tomaba el
+      // grupo más reciente, que con dos cuadros sería el de la 2da oportunidad.
+      const copaGroups = agRows
+        .filter((r) => isKnockoutCupOrigin(r.group_origin))
+        .sort((x, y) => (x.group_origin === KNOCKOUT_BRACKET_ORIGIN ? 0 : 1) - (y.group_origin === KNOCKOUT_BRACKET_ORIGIN ? 0 : 1));
+      for (const g of copaGroups) {
+        const s = await buildSectionForGroup(g);
+        if (s) tiebreakSections.push(s);
+      }
+      const mainGroup =
+        agRows.find((r) => r.group_type !== 'fourth_place' && !isKnockoutCupOrigin(r.group_origin)) ?? null;
 
       if (mainGroup) {
         const s = await buildSectionForGroup(mainGroup);
@@ -1363,9 +1382,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     await load();
     setRefreshing(false);
   }, [load]);
+  // Suizo y Copa: cada jugador ve sus venganzas + sus vs posibles; las de los demás van debajo ("Otras venganzas").
+  const revengeScoped = competitionFormat === 'swiss' || competitionFormat === 'knockout';
   const liveRevengeItems = revengeItems
     .filter((item) => item.status === 'in_progress')
-    .filter((item) => competitionFormat !== 'swiss' || item.mine)
+    .filter((item) => !revengeScoped || item.mine)
     .sort((x, y) => y.activityAt.localeCompare(x.activityAt));
   const revengeGroups: RevengeGroupView[] = [];
   const groupByPairing = new Map<string, RevengeGroupView>();
@@ -1400,31 +1421,26 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     revengeGroups.push(next);
   }
   const myRevengeGroups =
-    competitionFormat === 'swiss'
+    revengeScoped
       ? revengeGroups.filter(
           (g) => !!myUserId && (g.aUserId === myUserId || g.bUserId === myUserId)
         )
       : revengeGroups;
   const otherLiveRevengeItems =
-    competitionFormat === 'swiss'
+    revengeScoped
       ? revengeItems
           .filter((item) => item.status === 'in_progress' && !item.mine)
           .sort((x, y) => y.activityAt.localeCompare(x.activityAt))
       : [];
   const otherRevengeGroups =
-    competitionFormat === 'swiss'
+    revengeScoped
       ? revengeGroups
           .filter((g) => !myUserId || (g.aUserId !== myUserId && g.bUserId !== myUserId))
           .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))
       : [];
   const hasOtherSwissRevenge =
-    competitionFormat === 'swiss' &&
+    revengeScoped &&
     (otherRevengeGroups.length > 0 || otherLiveRevengeItems.length > 0);
-  const revengeListEmpty =
-    myRevengeGroups.length === 0 &&
-    liveRevengeItems.length === 0 &&
-    swissRevengeStandalone.length === 0 &&
-    !hasOtherSwissRevenge;
 
   const tiebreakCardsTotal = tiebreakOfficialSections.reduce(
     (total, section) => total + section.rounds.reduce((sum, b) => sum + b.items.length, 0),
@@ -1618,17 +1634,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     [navigation, myUserId, eventType, competitionFormat, officialBo1, colors, styles]
   );
 
-  // Copa: "Nueva venganza" entre cualquier par de jugadores (ensure_revenge_pairing, 0134).
+  // Copa: pestaña Venganzas como en Suizo (mis vs contra todos los demás jugadores del evento).
   const isCopa = competitionFormat === 'knockout';
   const myCopaPlayer = copaPlayers.find((p) => p.userId === myUserId) ?? null;
-  // Quien no administra el evento sólo puede armar venganzas en las que juega: el primer jugador queda fijo.
-  const revengeFirstFixed = !canManageEvent ? (myCopaPlayer?.id ?? null) : null;
-  const canCreateRevenge = isCopa && eventPlaying && (canManageEvent || myCopaPlayer != null);
   // Pares (a|b con a < b) con un cruce de llaves pendiente: ahí corre la serie, no una venganza.
   const pendingCrucePairs = useMemo(() => {
     const s = new Set<string>();
     for (const sec of tiebreakOfficialSections) {
-      if (sec.groupOrigin !== 'knockout_bracket') continue;
+      if (!isKnockoutCupOrigin(sec.groupOrigin)) continue;
       for (const r of sec.rounds) {
         for (const it of r.items) {
           if (it.tiebreakWinnerParticipantId != null) continue;
@@ -1640,47 +1653,62 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     }
     return s;
   }, [tiebreakOfficialSections]);
-  const revengeBlocked = (x: string, y: string) => pendingCrucePairs.has(x < y ? `${x}|${y}` : `${y}|${x}`);
-  const openRevengePicker = () => {
-    setPickA(revengeFirstFixed);
-    setPickB(null);
-    setPickerOpen(true);
-  };
-  const closeRevengePicker = () => {
-    if (creatingRevenge) return;
-    setPickerOpen(false);
-  };
-  const onPickRevengePlayer = (id: string) => {
-    if (revengeFirstFixed) {
-      if (id === revengeFirstFixed || revengeBlocked(revengeFirstFixed, id)) return;
-      setPickB(id);
+  const pairKey = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
+  const copaHasSecond = tiebreakOfficialSections.some((s) => s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN);
+  // Copa: una pestaña por cuadro (la general de Venganzas es aparte); el resto de los formatos muestra todas las secciones.
+  const visibleTiebreakSections = isCopa
+    ? tiebreakOfficialSections.filter(
+        (s) => (tab === 'second') === (s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN)
+      )
+    : tiebreakOfficialSections;
+  // Copa, vs posibles: todos los demás jugadores del evento (incluidos los que se fueron), salvo quien tiene un
+  // oficial pendiente CONMIGO (cruce de llaves sin resolver entre los dos). Un oficial pendiente contra un
+  // tercero no excluye a nadie. Los que ya tienen venganza jugada o en vivo no van acá: están en el historial.
+  const playedRevengePairings = new Set(revengeItems.map((it) => it.pairingId));
+  const copaRevengeRows: SwissRevengeStandaloneRow[] = [];
+  if (isCopa && myCopaPlayer) {
+    for (const p of copaPlayers) {
+      if (p.id === myCopaPlayer.id) continue;
+      const key = pairKey(myCopaPlayer.id, p.id);
+      if (pendingCrucePairs.has(key)) continue;
+      const existing = copaPairingByPair.get(key) ?? null;
+      if (existing && playedRevengePairings.has(existing)) continue;
+      copaRevengeRows.push({
+        pairingId: existing,
+        participantAId: myCopaPlayer.id,
+        participantBId: p.id,
+        aName: myCopaPlayer.name,
+        bName: p.name,
+        aUserId: myCopaPlayer.userId,
+        bUserId: p.userId,
+      });
+    }
+  }
+  const standaloneRows = isCopa ? copaRevengeRows : swissRevengeStandalone;
+  const revengeListEmpty =
+    myRevengeGroups.length === 0 &&
+    liveRevengeItems.length === 0 &&
+    standaloneRows.length === 0 &&
+    !hasOtherSwissRevenge;
+  // Tocar un vs: si el pairing todavía no existe (Copa), se crea con ensure_revenge_pairing.
+  const openStandaloneRow = async (row: SwissRevengeStandaloneRow) => {
+    if (row.pairingId) {
+      navigation.navigate('PairingDetail', { pairingId: row.pairingId, fromTab: 'revenge' });
       return;
     }
-    if (pickA == null) {
-      setPickA(id);
-    } else if (id === pickA) {
-      setPickA(null);
-      setPickB(null);
-    } else if (id === pickB) {
-      setPickB(null);
-    } else if (!revengeBlocked(pickA, id)) {
-      setPickB(id);
-    }
-  };
-  const confirmRevenge = async () => {
-    if (!pickA || !pickB || creatingRevenge) return;
-    setCreatingRevenge(true);
+    if (openingRevenge) return;
+    setOpeningRevenge(true);
     const { data, error } = await supabase.rpc('ensure_revenge_pairing', {
       p_event_id: eventId,
-      p_participant_a: pickA,
-      p_participant_b: pickB,
+      p_participant_a: row.participantAId,
+      p_participant_b: row.participantBId,
     });
-    setCreatingRevenge(false);
+    setOpeningRevenge(false);
     if (error || !data) {
       Alert.alert('No se pudo armar la venganza', error?.message ?? 'Probá de nuevo.');
       return;
     }
-    setPickerOpen(false);
+    setCopaPairingByPair((prev) => new Map(prev).set(pairKey(row.participantAId, row.participantBId), String(data)));
     navigation.navigate('PairingDetail', { pairingId: String(data), fromTab: 'revenge' });
   };
 
@@ -1703,12 +1731,18 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           <Text style={[styles.tabLabel, tab === 'officials' && styles.tabLabelActive]}>Oficiales</Text>
           <View style={[styles.tabUnderline, tab !== 'officials' && styles.tabUnderlineHidden]} />
         </TouchableOpacity>
+        {isCopa && copaHasSecond ? (
+          <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('second')} activeOpacity={0.7}>
+            <Text style={[styles.tabLabel, tab === 'second' && styles.tabLabelActive]}>2da oportunidad</Text>
+            <View style={[styles.tabUnderline, tab !== 'second' && styles.tabUnderlineHidden]} />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('revenge')} activeOpacity={0.7}>
           <Text style={[styles.tabLabel, tab === 'revenge' && styles.tabLabelActive]}>Venganzas</Text>
           <View style={[styles.tabUnderline, tab !== 'revenge' && styles.tabUnderlineHidden]} />
         </TouchableOpacity>
       </View>
-      {tab === 'officials' ? (
+      {tab !== 'revenge' ? (
         <FlatList<ItemView | OfficialListRow>
           data={isSwissOfficialSectioned ? officialSwissFlatRows : items}
           keyExtractor={(it) => it.id}
@@ -1721,11 +1755,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             ) : null
           }
           ListHeaderComponent={
-            tiebreakOfficialSections.length > 0 ? (
+            visibleTiebreakSections.length > 0 ? (
               <View style={styles.tiebreakOfficialHeaderWrap}>
-                {tiebreakOfficialSections.map((section, sectionIdx) => (
+                {visibleTiebreakSections.map((section, sectionIdx) => (
                   <View key={`tb-section-${section.groupOrigin}-${sectionIdx}`}>
-                {section.groupOrigin === 'knockout_bracket' ? null : (
+                {isKnockoutCupOrigin(section.groupOrigin) ? null : (
                 <Text style={styles.groupHeader}>
                   {section.groupOrigin === 'swiss_topcut' ||
                   section.groupOrigin === 'round_robin_topcut'
@@ -1837,7 +1871,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       const liveR = swapSides ? it.liveScoreA : it.liveScoreB;
                       const seriesWinsLeft = swapSides ? it.seriesWinsB : it.seriesWinsA;
                       const seriesWinsRight = swapSides ? it.seriesWinsA : it.seriesWinsB;
-                      const isKnockoutSection = section.groupOrigin === KNOCKOUT_BRACKET_ORIGIN;
+                      const isKnockoutSection = isKnockoutCupOrigin(section.groupOrigin);
                       const showSeriesPills = isKnockoutSection && knockoutBo3;
                       const dimLeft =
                         it.dimLoserSide == null
@@ -1853,7 +1887,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                             : it.dimLoserSide === 'b';
                       // Copa: misma marca que la fase de liga. En vivo y virgen no llevan marca.
                       const knockoutProgressValue =
-                        section.groupOrigin === 'knockout_bracket' ? knockoutProgress(it) : null;
+                        isKnockoutCupOrigin(section.groupOrigin) ? knockoutProgress(it) : null;
                       const knockoutMarkColor =
                         knockoutProgressValue == null || it.status === 'in_progress'
                           ? null
@@ -1954,7 +1988,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                       const phaseSubheader: { label: string; firstId: string | null } | null =
                         isBracket && it.bracketPhase
                           ? {
-                              label: bracketPhaseTitle(it.bracketPhase),
+                              label:
+                                (section.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN ? SECOND_CHANCE_PREFIX + ' · ' : '') +
+                                bracketPhaseTitle(it.bracketPhase),
                               firstId: firstIdByPhase[it.bracketPhase] ?? null,
                             }
                           : null;
@@ -2017,74 +2053,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         />
       ) : (
         <>
-        {isCopa ? (
-          <View style={styles.newRevengeWrap}>
-            <TouchableOpacity
-              style={[styles.newRevengeBtn, !canCreateRevenge && styles.newRevengeBtnDisabled]}
-              disabled={!canCreateRevenge}
-              activeOpacity={0.7}
-              onPress={openRevengePicker}
-            >
-              <Text style={styles.newRevengeBtnTxt}>Nueva venganza</Text>
-            </TouchableOpacity>
-            {!eventPlaying ? (
-              <Text style={styles.newRevengeHint}>Las venganzas se juegan mientras el evento está en juego.</Text>
-            ) : null}
-          </View>
-        ) : null}
-        <Modal
-          visible={pickerOpen}
-          transparent
-          animationType="fade"
-          supportedOrientations={['portrait']}
-          onRequestClose={closeRevengePicker}
-        >
-          <View style={styles.pickerBackdrop}>
-            <View style={styles.pickerCard}>
-              <Text style={styles.pickerTitle}>Nueva venganza</Text>
-              <Text style={styles.pickerSub}>
-                {revengeFirstFixed ? 'Elegí contra quién jugás.' : 'Elegí a los dos jugadores.'}
-              </Text>
-              <ScrollView style={styles.pickerList}>
-                {copaPlayers.map((p) => {
-                  const isFirst = p.id === pickA;
-                  const isSecond = p.id === pickB;
-                  const blocked = pickA != null && p.id !== pickA && revengeBlocked(pickA, p.id);
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={[styles.pickerRow, (isFirst || isSecond) && styles.pickerRowOn, blocked && styles.pickerRowOff]}
-                      disabled={blocked}
-                      activeOpacity={0.7}
-                      onPress={() => onPickRevengePlayer(p.id)}
-                    >
-                      <PlayerAvatar userId={p.userId} participantId={p.id} size="tiny" withColorBorder={false} />
-                      <Text style={styles.pickerName} numberOfLines={1}>
-                        {p.name}
-                      </Text>
-                      <Text style={styles.pickerTag}>
-                        {isFirst ? 'Jugador 1' : isSecond ? 'Jugador 2' : blocked ? 'Cruce pendiente' : ''}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-              <View style={styles.pickerButtons}>
-                <TouchableOpacity style={styles.pickerBtn} onPress={closeRevengePicker} activeOpacity={0.7}>
-                  <Text style={styles.pickerBtnTxt}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.pickerBtn, styles.pickerBtnPrimary, (!pickA || !pickB || creatingRevenge) && styles.newRevengeBtnDisabled]}
-                  disabled={!pickA || !pickB || creatingRevenge}
-                  onPress={() => void confirmRevenge()}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.pickerBtnTxt, styles.pickerBtnPrimaryTxt]}>Confirmar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
         <FlatList
           data={myRevengeGroups}
           keyExtractor={(it) => it.pairingId}
@@ -2160,9 +2128,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             ) : null
           }
           ListFooterComponent={
-            swissRevengeStandalone.length > 0 || hasOtherSwissRevenge ? (
+            standaloneRows.length > 0 || hasOtherSwissRevenge ? (
               <View style={styles.swissRevengeStandaloneWrap}>
-                {swissRevengeStandalone.map((row) => {
+                {standaloneRows.map((row) => {
                   const swapSides = !!myUserId && row.bUserId === myUserId;
                   const leftUserId = swapSides ? row.bUserId : row.aUserId;
                   const rightUserId = swapSides ? row.aUserId : row.bUserId;
@@ -2172,12 +2140,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   const rightName = swapSides ? row.aName : row.bName;
                   return (
                     <TouchableOpacity
-                      key={row.pairingId}
+                      key={row.pairingId ?? `${row.participantAId}|${row.participantBId}`}
                       style={styles.card}
                       activeOpacity={0.7}
-                      onPress={() =>
-                        navigation.navigate('PairingDetail', { pairingId: row.pairingId, fromTab: 'revenge' })
-                      }
+                      disabled={openingRevenge}
+                      onPress={() => void openStandaloneRow(row)}
                     >
                       <View style={styles.compactRow}>
                         <View style={styles.inlinePlayer}>
@@ -2414,26 +2381,6 @@ const createStyles = (c: ThemeColors) =>
       backgroundColor: c.background,
     },
     tabBtn: { marginRight: 22, paddingBottom: 8 },
-    newRevengeWrap: { paddingHorizontal: 16, paddingTop: 12 },
-    newRevengeBtn: { backgroundColor: c.accent, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
-    newRevengeBtnDisabled: { opacity: 0.4 },
-    newRevengeBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '700' },
-    newRevengeHint: { color: c.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'center' },
-    pickerBackdrop: { flex: 1, backgroundColor: c.overlay, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
-    pickerCard: { width: '100%', maxWidth: 360, maxHeight: '80%', backgroundColor: c.card, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderStrong, padding: 16 },
-    pickerTitle: { fontSize: 17, fontWeight: '700', color: c.text, textAlign: 'center' },
-    pickerSub: { fontSize: 13, color: c.textSecondary, textAlign: 'center', marginTop: 4, marginBottom: 10 },
-    pickerList: { flexGrow: 0 },
-    pickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: 'transparent', gap: 10 },
-    pickerRowOn: { backgroundColor: c.status.warning.subtle, borderColor: c.status.warning.border },
-    pickerRowOff: { opacity: 0.4 },
-    pickerName: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: '600', color: c.text },
-    pickerTag: { fontSize: 11, fontWeight: '700', color: c.textSecondary },
-    pickerButtons: { flexDirection: 'row', gap: 10, marginTop: 14 },
-    pickerBtn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center', borderWidth: 1, borderColor: c.borderStrong },
-    pickerBtnPrimary: { backgroundColor: c.accent, borderColor: c.accent },
-    pickerBtnTxt: { fontSize: 15, fontWeight: '600', color: c.text },
-    pickerBtnPrimaryTxt: { color: c.onAccent },
     tabLabel: { fontSize: 15, fontWeight: '600', color: c.textSecondary },
     tabLabelActive: { color: c.text, fontWeight: '800' },
     tabUnderline: { height: 2, backgroundColor: c.accent, borderRadius: 1, marginTop: 6 },
