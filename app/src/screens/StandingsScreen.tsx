@@ -26,6 +26,7 @@ import { releaseLandscape as releaseLandscapeLock, requestLandscape } from '../l
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
   buildKnockoutBracketModel,
+  knockoutFirstMatchLosers,
   type KnockoutBracketMatchRow,
   type KnockoutBracketModel,
   type KnockoutNode,
@@ -693,7 +694,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
     names: Map<string, { userId: string; name: string }>;
     seriesMatches: { pairing_id: string; status: string | null; winner_participant_id: string | null; is_walkover: boolean | null }[];
     bo3: boolean;
+    /** 2da oportunidad (0135): cuadro, ya sorteada y eliminados en su primer partido (para la lista previa al sorteo). */
+    secondModel: KnockoutBracketModel | null;
+    secondDrawn: boolean;
+    eliminated: { id: string; userId: string; name: string }[];
   } | null>(null);
+  const [secondPodiumState, setSecondPodiumState] = useState<PodiumState | null>(null);
+  const [copaTab, setCopaTab] = useState<'main' | 'second'>('main');
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
@@ -809,6 +816,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         .select('id, champion_user_id, status, group_type, round_number, created_at, group_origin')
         .eq('event_id', eventId)
         // Mismos estados que PairingsList/PlayerProfile (que sí muestran el cuadro).
+        // El podio del evento es el de la copa principal; el de la 2da oportunidad se arma aparte (0135).
+        .neq('group_origin', 'knockout_second_chance')
         .in('status', ['active', 'resolved', 'failed'])
         .order('created_at', { ascending: false })
         .limit(1)
@@ -981,42 +990,62 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const matches = (matchesRes.data ?? []) as any[];
     const matchIds = matches.map((m) => String(m.id));
 
-    // Copa (sólo llaves): estructura del árbol (knockout_slots) y filas jugables del grupo vigente.
+    // Copa (sólo llaves): estructura del árbol (knockout_slots) y filas jugables de cada copa (principal y
+    // 2da oportunidad, 0135).
     let knockoutBracketData: typeof knockoutBracket = null;
+    let secondGroupRow: PodiumTiebreakGroupRow | null = null;
     if (fmt === 'knockout') {
-      let model: KnockoutBracketModel | null = null;
-      const grpRes = await supabase
-        .from('event_tiebreak_groups')
-        .select('id')
-        .eq('event_id', eventId)
-        .eq('group_origin', 'knockout_bracket')
-        .neq('status', 'superseded')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const knockoutGroupId = (grpRes.data as { id: string } | null)?.id ?? null;
-      if (knockoutGroupId) {
+      const loadBracket = async (groupId: string | null) => {
+        if (!groupId) return { model: null as KnockoutBracketModel | null, slots: [] as KnockoutSlotRow[] };
         const [slotsRes, bmRes] = await Promise.all([
           supabase
             .from('knockout_slots')
             .select(
               'id, round_key, position, participant_a_id, participant_b_id, is_bye, feeds_slot_id, feeds_as, winner_participant_id, bracket_match_id'
             )
-            .eq('group_id', knockoutGroupId),
+            .eq('group_id', groupId),
           supabase
             .from('event_tiebreak_bracket_matches')
             .select('id, pairing_id, winner_participant_id')
-            .eq('group_id', knockoutGroupId),
+            .eq('group_id', groupId),
         ]);
-        if (!slotsRes.error && !bmRes.error) {
-          model = buildKnockoutBracketModel(
-            (slotsRes.data ?? []) as KnockoutSlotRow[],
-            (bmRes.data ?? []) as KnockoutBracketMatchRow[]
-          );
-        }
-      }
+        if (slotsRes.error || bmRes.error) return { model: null as KnockoutBracketModel | null, slots: [] as KnockoutSlotRow[] };
+        const slots = (slotsRes.data ?? []) as KnockoutSlotRow[];
+        return {
+          model: buildKnockoutBracketModel(slots, (bmRes.data ?? []) as KnockoutBracketMatchRow[]),
+          slots,
+        };
+      };
+      const [mainGrpRes, secondGrpRes] = await Promise.all([
+        supabase
+          .from('event_tiebreak_groups')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('group_origin', 'knockout_bracket')
+          .neq('status', 'superseded')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('event_tiebreak_groups')
+          .select('id, champion_user_id, status, group_type, round_number, created_at, group_origin')
+          .eq('event_id', eventId)
+          .eq('group_origin', 'knockout_second_chance')
+          .neq('status', 'superseded')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      const main = await loadBracket((mainGrpRes.data as { id: string } | null)?.id ?? null);
+      const second = await loadBracket((secondGrpRes.data as { id: string } | null)?.id ?? null);
+      secondGroupRow = (secondGrpRes.data as PodiumTiebreakGroupRow | null) ?? null;
+      // Eliminados en su primer partido (lista previa al sorteo de la 2da oportunidad).
+      const leftIds = new Set(
+        (participants as { id: string; left_event_at?: string | null }[]).filter((p) => p.left_event_at).map((p) => String(p.id))
+      );
+      const firstLosers = knockoutFirstMatchLosers(main.slots, leftIds);
       knockoutBracketData = {
-        model,
+        model: main.model,
         names: infoByParticipantId,
         seriesMatches: matches
           .filter((m) => m.match_type === 'tiebreak')
@@ -1027,6 +1056,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
             is_walkover: m.is_walkover ?? null,
           })),
         bo3: (eventRes.data as { topcut_format?: string | null } | null)?.topcut_format === 'bo3',
+        secondModel: second.model,
+        secondDrawn: secondGroupRow != null,
+        eliminated: firstLosers.losers.map((id) => ({
+          id,
+          userId: infoByParticipantId.get(id)?.userId ?? '',
+          name: infoByParticipantId.get(id)?.name ?? 'Jugador',
+        })),
       };
     }
 
@@ -1211,6 +1247,35 @@ export default function StandingsScreen({ route, navigation }: Props) {
         eventStatus
       )
     );
+
+    // 2da oportunidad (0135): su propio podio, calculado solo con lo que se resolvió en su cuadro.
+    if (secondGroupRow) {
+      const tb2 = await fetchPodiumTiebreakInputs(
+        secondGroupRow,
+        pairings as PodiumPairingRow[],
+        matches as PodiumMatchRow[]
+      );
+      setSecondPodiumState(
+        computePodium(
+          podiumPlayers,
+          [],
+          participants.length,
+          null,
+          tb2.group,
+          tb2.matches,
+          'tiebreak',
+          null,
+          null,
+          tb2.bracketMatches,
+          rawFmt,
+          rawTopSize,
+          rawMatchFormat,
+          eventStatus
+        )
+      );
+    } else {
+      setSecondPodiumState(null);
+    }
 
     const lifeEvents = (lifeRes.data ?? []) as LifeEvRow[];
     const lifeByMatchId = new Map<string, LifeEvRow[]>();
@@ -1622,15 +1687,23 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
   const winW = Dimensions.get('window').width;
 
-  const renderPedestalColumn = (rank: 1 | 2 | 3, baseH: number, bgColor: string) => {
-    if (!podiumState) return null;
+  // ps / isMainCup: la Copa tiene dos podios (principal y 2da oportunidad, 0135); el campeón del evento
+  // (brillo del shiny) es solo el de la principal.
+  const renderPedestalColumn = (
+    rank: 1 | 2 | 3,
+    baseH: number,
+    bgColor: string,
+    ps: PodiumState | null = podiumState,
+    isMainCup = true
+  ) => {
+    if (!ps) return null;
     const step =
-      podiumState.steps.find((s) => s.rank === rank) ??
+      ps.steps.find((s) => s.rank === rank) ??
       ({
         rank,
         players: [],
         topPlayerOnStool: null,
-      } as (typeof podiumState.steps)[number]);
+      } as (typeof ps.steps)[number]);
     const players = step.players;
     const stoolId = step.topPlayerOnStool;
     const cnt = players.length;
@@ -1650,6 +1723,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const renderOneAvatar = (pl: (typeof players)[number]) => {
       const isEventChampion =
         rank === 1 &&
+        isMainCup &&
         eventChampionUserId != null &&
         String(pl.userId) === String(eventChampionUserId);
       const showChampionShinyAnim = isEventChampion && eventChampionIsShiny;
@@ -1747,26 +1821,57 @@ export default function StandingsScreen({ route, navigation }: Props) {
     );
   };
 
-  const step1Filled =
-    podiumState != null &&
-    (podiumState.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0;
-
-  const podiumBlock =
-    podiumState != null && step1Filled ? (
+  const buildPodiumBlock = (ps: PodiumState | null, title: string | null, isMainCup: boolean) => {
+    const filled = ps != null && (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0;
+    if (!ps || !filled) return null;
+    return (
       <View style={styles.podiumSection}>
+        {title ? <Text style={styles.podiumTitle}>{title}</Text> : null}
         <View style={styles.podiumArena}>
           <View style={styles.podiumCenterRow}>
             {/* Fondos del podio (plata/oro/bronce): contenido, iguales en ambos modos. */}
-            {renderPedestalColumn(2, 90, '#D1D5DB')}
-            {renderPedestalColumn(1, 124, '#FCD34D')}
-            {renderPedestalColumn(3, 70, '#B45309')}
+            {renderPedestalColumn(2, 90, '#D1D5DB', ps, isMainCup)}
+            {renderPedestalColumn(1, 124, '#FCD34D', ps, isMainCup)}
+            {renderPedestalColumn(3, 70, '#B45309', ps, isMainCup)}
           </View>
         </View>
       </View>
-    ) : null;
+    );
+  };
 
-  // Copa (sólo llaves): no hay tabla de liga (sería una tabla en cero). Se muestra el podio y el
-  // cuadro de llaves simétrico (knockout_slots).
+  const podiumBlock = buildPodiumBlock(podiumState, null, true);
+
+  // Copa (sólo llaves): no hay tabla de liga (sería una tabla en cero). Se muestran los podios y el
+  // cuadro de llaves simétrico (knockout_slots) de cada copa.
+  const renderCopaBracket = (model: KnockoutBracketModel) =>
+    knockoutBracket ? (
+      <KnockoutBracket
+        model={model}
+        names={knockoutBracket.names}
+        bo3={knockoutBracket.bo3}
+        viewportHeight={knockoutViewportH}
+        seriesWins={(pairingId, participantId) =>
+          pairingId == null
+            ? 0
+            : countSeriesWins(
+                knockoutBracket.seriesMatches.filter((m) => m.pairing_id === pairingId),
+                participantId
+              )
+        }
+        onPressMatch={(node: KnockoutNode) => {
+          if (!node.pairingId) return;
+          navigation.navigate('PairingDetail', {
+            pairingId: node.pairingId,
+            fromTab: 'official',
+            fromStandings: true,
+            ...(node.bracketMatchId ? { bracketMatchId: node.bracketMatchId } : {}),
+          });
+        }}
+      />
+    ) : null;
+  // La pestaña de la 2da oportunidad aparece con 4 o más eliminados en su primer partido, o ya sorteada.
+  const showSecondTab =
+    knockoutBracket != null && (knockoutBracket.secondDrawn || knockoutBracket.eliminated.length >= 4);
   if (competitionFormat === 'knockout') {
     return (
       <View style={styles.screenRoot}>
@@ -1781,31 +1886,40 @@ export default function StandingsScreen({ route, navigation }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           onLayout={(e) => setKnockoutViewportH(Math.round(e.nativeEvent.layout.height))}
         >
-          {podiumBlock}
-          {knockoutBracket?.model ? (
-            <KnockoutBracket
-              model={knockoutBracket.model}
-              names={knockoutBracket.names}
-              bo3={knockoutBracket.bo3}
-              viewportHeight={knockoutViewportH}
-              seriesWins={(pairingId, participantId) =>
-                pairingId == null
-                  ? 0
-                  : countSeriesWins(
-                      knockoutBracket.seriesMatches.filter((m) => m.pairing_id === pairingId),
-                      participantId
-                    )
-              }
-              onPressMatch={(node: KnockoutNode) => {
-                if (!node.pairingId) return;
-                navigation.navigate('PairingDetail', {
-                  pairingId: node.pairingId,
-                  fromTab: 'official',
-                  fromStandings: true,
-                  ...(node.bracketMatchId ? { bracketMatchId: node.bracketMatchId } : {}),
-                });
-              }}
-            />
+          {/* Dos podios independientes: el de la Copa y el de la 2da oportunidad (si se sorteó). */}
+          {buildPodiumBlock(podiumState, secondPodiumState ? 'Copa' : null, true)}
+          {buildPodiumBlock(secondPodiumState, '2da oportunidad', false)}
+          {showSecondTab ? (
+            <View style={styles.tabsRow}>
+              <TouchableOpacity style={styles.tabBtn} onPress={() => setCopaTab('main')} activeOpacity={0.7}>
+                <Text style={[styles.tabLabel, copaTab === 'main' && styles.tabLabelActive]}>Copa</Text>
+                <View style={[styles.tabUnderline, copaTab !== 'main' && styles.tabUnderlineHidden]} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.tabBtn} onPress={() => setCopaTab('second')} activeOpacity={0.7}>
+                <Text style={[styles.tabLabel, copaTab === 'second' && styles.tabLabelActive]}>2da oportunidad</Text>
+                <View style={[styles.tabUnderline, copaTab !== 'second' && styles.tabUnderlineHidden]} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {copaTab === 'second' && showSecondTab ? (
+            knockoutBracket?.secondModel ? (
+              renderCopaBracket(knockoutBracket.secondModel)
+            ) : (
+              <View style={styles.secondChanceWait}>
+                <Text style={styles.knockoutNotice}>Se sortea cuando terminen los primeros partidos de la Copa</Text>
+                <Text style={styles.secondChanceListTitle}>Eliminados en su primer partido</Text>
+                {(knockoutBracket?.eliminated ?? []).map((pl) => (
+                  <View key={pl.id} style={styles.secondChanceRow}>
+                    <PlayerAvatar userId={pl.userId} participantId={pl.id} size="tiny" withColorBorder={false} />
+                    <Text style={styles.secondChanceName} numberOfLines={1}>
+                      {pl.name}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )
+          ) : knockoutBracket?.model ? (
+            renderCopaBracket(knockoutBracket.model)
           ) : (
             <Text style={styles.knockoutNotice}>Las llaves se sortean al finalizar el draft</Text>
           )}
@@ -2303,6 +2417,11 @@ const createStyles = (c: ThemeColors) =>
     legendSegment: { color: c.textSecondary, fontSize: 12, marginBottom: 4, marginRight: 4 },
     legendFootnote: { marginTop: 8, color: c.textSecondary, fontSize: 12 },
     knockoutNotice: { marginTop: 16, color: c.textSecondary, fontSize: 14, textAlign: 'center' },
+    podiumTitle: { fontSize: 15, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 6 },
+    secondChanceWait: { marginTop: 8, paddingHorizontal: 8 },
+    secondChanceListTitle: { marginTop: 18, marginBottom: 8, fontSize: 14, fontWeight: '700', color: c.text },
+    secondChanceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+    secondChanceName: { flex: 1, minWidth: 0, fontSize: 14, color: c.text, fontWeight: '600' },
     tcSection: { marginTop: 22, marginBottom: 14, width: '100%', alignItems: 'center' },
     tcBracketOuter: { marginTop: 4 },
     tcHdrRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

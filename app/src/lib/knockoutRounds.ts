@@ -9,6 +9,17 @@ export type BracketPhase = 'round_of_16' | 'quarter' | 'semi' | 'final' | 'third
 /** Origen de los grupos de llaves de la Copa. */
 export const KNOCKOUT_BRACKET_ORIGIN = 'knockout_bracket';
 
+/** Origen del grupo de la 2da oportunidad de la Copa (0135). */
+export const KNOCKOUT_SECOND_CHANCE_ORIGIN = 'knockout_second_chance';
+
+/** Copa principal o 2da oportunidad: los dos cuadros de eliminación directa de una Copa. */
+export function isKnockoutCupOrigin(origin: string | null | undefined): boolean {
+  return origin === KNOCKOUT_BRACKET_ORIGIN || origin === KNOCKOUT_SECOND_CHANCE_ORIGIN;
+}
+
+/** Prefijo de los títulos de ronda de la 2da oportunidad, para distinguirlos de los de la Copa. */
+export const SECOND_CHANCE_PREFIX = '2da oportunidad';
+
 /**
  * Títulos de cada ronda en los listados. Semi, final y 3er puesto son los textos que ya usa
  * Enfrentamientos para el top 4; octavos y cuartos son nuevos.
@@ -103,7 +114,7 @@ const TOP4_ORDER: Record<BracketPhase, number> = {
 
 /** Posición de una ronda en el listado de un grupo de llaves según su origen. */
 export function bracketPhaseSortKey(phase: BracketPhase, groupOrigin: string | null | undefined): number {
-  return (groupOrigin === KNOCKOUT_BRACKET_ORIGIN ? KNOCKOUT_ORDER : TOP4_ORDER)[phase];
+  return (isKnockoutCupOrigin(groupOrigin) ? KNOCKOUT_ORDER : TOP4_ORDER)[phase];
 }
 
 /**

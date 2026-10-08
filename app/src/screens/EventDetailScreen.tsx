@@ -27,6 +27,7 @@ import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
+import { KNOCKOUT_BRACKET_ORIGIN, isKnockoutCupOrigin } from '../lib/knockoutRounds';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   getTwoWayTieFirstPlaceParticipantIds,
@@ -449,6 +450,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       .select('id, group_type, round_number, champion_user_id, group_origin')
       .eq('event_id', e.id)
       .eq('status', 'active')
+      // Copa (0135): puede haber dos cuadros activos (principal y 2da oportunidad); este banner no los usa.
+      .not('group_origin', 'in', '(knockout_bracket,knockout_second_chance)')
       .maybeSingle();
 
     if (!activeGroupRes.error && activeGroupRes.data) {
@@ -800,11 +803,50 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     await load();
   };
 
+  // Copa (sólo llaves): dar por concluido deja el evento en 'concluded' tal cual están las dos copas: los cruces y
+  // partidas sin resolver quedan suspendidos (sin ganador, sin walkovers inventados) y cada podio queda con los
+  // puestos que ya estaban resueltos. Campeón = ganador de la final de la copa principal si está resuelta; si no, null.
+  const concludeCopa = async () => {
+    if (!event) return;
+    let championUserId: string | null = null;
+    const mainRes = await supabase
+      .from('event_tiebreak_groups')
+      .select('id')
+      .eq('event_id', event.id)
+      .eq('group_origin', KNOCKOUT_BRACKET_ORIGIN)
+      .neq('status', 'superseded')
+      .limit(1)
+      .maybeSingle();
+    const mainGroupId = (mainRes.data as { id: string } | null)?.id ?? null;
+    if (mainGroupId) {
+      const finalRes = await supabase
+        .from('event_tiebreak_bracket_matches')
+        .select('winner_participant_id')
+        .eq('group_id', mainGroupId)
+        .eq('bracket_phase', 'final')
+        .maybeSingle();
+      const winnerId = (finalRes.data as { winner_participant_id: string | null } | null)?.winner_participant_id ?? null;
+      if (winnerId) {
+        const winnerRes = await supabase.from('event_participants').select('user_id').eq('id', winnerId).maybeSingle();
+        championUserId = (winnerRes.data as { user_id: string } | null)?.user_id ?? null;
+      }
+    }
+    await patchEvent({
+      status: 'concluded',
+      event_ended_at: new Date().toISOString(),
+      champion_user_id: championUserId,
+    });
+  };
+
   const concludeEvent = async () => {
     if (!event) return;
-    // Copa: el campeón sale de la final del bracket; este cierre calcula por reglas de liga.
     const concludeFormat = normalizeCompetitionFormat(event.competition_format);
-    if (concludeFormat === 'knockout' || concludeFormat === 'zones_knockout') {
+    if (concludeFormat === 'knockout') {
+      await concludeCopa();
+      return;
+    }
+    // Copa (grupos + llaves): todavía no se ofrece; el campeón sale de la final del bracket.
+    if (concludeFormat === 'zones_knockout') {
       Alert.alert('No disponible', 'El cierre manual no está disponible para las Copas.');
       return;
     }
@@ -1318,7 +1360,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup.group_type !== 'fourth_place' &&
     activeTiebreakGroup.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup.group_origin !== 'round_robin_topcut' &&
-    activeTiebreakGroup.group_origin !== 'knockout_bracket' &&
+    !isKnockoutCupOrigin(activeTiebreakGroup.group_origin) &&
     (activeTiebreakGroup.champion_user_id == null || String(activeTiebreakGroup.champion_user_id).trim() === '');
 
   const showTiebreakPendingBanner =
@@ -1330,7 +1372,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     activeTiebreakGroup?.group_type !== 'fourth_place' &&
     activeTiebreakGroup?.group_origin !== 'swiss_topcut' &&
     activeTiebreakGroup?.group_origin !== 'round_robin_topcut' &&
-    activeTiebreakGroup?.group_origin !== 'knockout_bracket' &&
+    !isKnockoutCupOrigin(activeTiebreakGroup?.group_origin) &&
     (multiTiebreakBannerVisible ||
       (event.status === 'playing' && event.final_pending && !event.champion_user_id));
 
@@ -2043,9 +2085,26 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      {canManageEvent && normalizeCompetitionFormat(event.competition_format) === 'knockout' && event.status === 'playing' ? (
+      {canManageEvent &&
+       normalizeCompetitionFormat(event.competition_format) === 'knockout' &&
+       event.status === 'playing' &&
+       Date.now() >= new Date(event.scheduled_for).getTime() + 7 * 24 * 60 * 60 * 1000 ? (
         <View style={styles.block}>
-          <Text style={styles.muted}>El cierre manual no está disponible para las Copas: el campeón sale de la final.</Text>
+          <TouchableOpacity
+            style={styles.concludeBtn}
+            onPress={() =>
+              Alert.alert(
+                'Dar por concluido',
+                '¿Dar por concluido el evento? Los cruces y partidas que todavía no se resolvieron quedan suspendidos tal cual (sin ganador y sin walkovers), y cada podio queda con los puestos que ya estaban definidos. No se puede deshacer.',
+                [
+                  { text: 'Volver', style: 'cancel' },
+                  { text: 'Concluir', style: 'destructive', onPress: () => void concludeEvent() },
+                ]
+              )
+            }
+          >
+            <Text style={styles.concludeTxt}>Dar por concluido</Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 

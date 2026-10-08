@@ -286,6 +286,8 @@ export async function fetchEventPodiums(eventIds: string[]): Promise<Map<string,
       .from('event_tiebreak_groups')
       .select('id, event_id, champion_user_id, status, group_type, round_number, created_at, group_origin')
       .in('event_id', ids)
+      // El podio del evento es el de la copa principal: la 2da oportunidad (0135) tiene el suyo aparte y no suma puntos todavía.
+      .neq('group_origin', 'knockout_second_chance')
       .in('status', ['active', 'resolved', 'failed']),
   ]);
   if (partsRes.error || pairingsRes.error || eventsRes.error || groupsRes.error) return out;

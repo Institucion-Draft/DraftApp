@@ -16,9 +16,11 @@ import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
-  KNOCKOUT_BRACKET_ORIGIN,
+  KNOCKOUT_SECOND_CHANCE_ORIGIN,
+  SECOND_CHANCE_PREFIX,
   bracketPhaseShortName,
   bracketPhaseSingularName,
+  isKnockoutCupOrigin,
   type BracketPhase,
 } from '../lib/knockoutRounds';
 import { isKnockoutBracketPairing, isKnockoutRevengePairing, resolveNextMatchType } from '../lib/matchTypeRules';
@@ -1025,11 +1027,12 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const mataTieWinsB = countSeriesWins(tiebreakMs, mataBId);
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
-    activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN && bracketMatchRow
-      ? bracketPhaseShortName(bracketMatchRow.bracket_phase)
+    isKnockoutCupOrigin(activeTiebreakGroup?.group_origin) && bracketMatchRow
+      ? (activeTiebreakGroup?.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN ? SECOND_CHANCE_PREFIX + ' · ' : '') +
+        bracketPhaseShortName(bracketMatchRow.bracket_phase)
       : activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
     activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
-    activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN
+    isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
       ? 'Fase mata-mata'
       : activeTiebreakGroup?.group_origin === 'round_robin_fourth_place'
         ? 'Desempate por el 4to puesto'
@@ -1041,7 +1044,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     bracketMatchRow != null &&
     ((competitionFormat === 'swiss' && activeTiebreakGroup?.group_origin === 'swiss_topcut') ||
       activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
-      activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN);
+      isKnockoutCupOrigin(activeTiebreakGroup?.group_origin));
 
   const isKnockoutPairing = isKnockoutBracketPairing(pairing.stage);
   // Pairing de sólo venganza de la Copa (0134): sin serie de llaves ni sección de partidas oficiales.
@@ -1159,7 +1162,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     ? inProgressMatch.match_type === 'revenge'
     : nextMatchType === 'revenge';
   const startBlockedByLeftEvent = Boolean(a?.left_event_at || b?.left_event_at) && !startsRevenge;
-  const startDisabled = eventIsCancelled || startBlockedByLeftEvent;
+  // Copa concluida (concludeCopa): los cruces quedan suspendidos tal cual; no se inician más partidas
+  // oficiales. Las venganzas no caducan: se pueden iniciar y retomar siempre.
+  const eventIsConcludedCup = draftEventStatus === 'concluded' && competitionFormat === 'knockout' && !startsRevenge;
+  const startDisabled = eventIsCancelled || startBlockedByLeftEvent || eventIsConcludedCup;
 
   const swissOfficialPendingThisRound =
     competitionFormat === 'swiss' &&
@@ -1197,6 +1203,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     if (!pairing) return;
     if (eventIsCancelled) {
       Alert.alert('Evento cancelado', 'No se pueden iniciar partidas en un evento cancelado.');
+      return;
+    }
+    if (eventIsConcludedCup) {
+      Alert.alert('Evento concluido', 'El evento se dio por concluido: los cruces que faltaban quedan suspendidos.');
       return;
     }
     // Partidas oficiales y de desempate/bracket: no se inician en un pairing donde alguno de los
