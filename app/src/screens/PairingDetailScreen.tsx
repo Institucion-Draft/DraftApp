@@ -21,7 +21,7 @@ import {
   bracketPhaseSingularName,
   type BracketPhase,
 } from '../lib/knockoutRounds';
-import { isKnockoutBracketPairing, resolveNextMatchType } from '../lib/matchTypeRules';
+import { isKnockoutBracketPairing, isKnockoutRevengePairing, resolveNextMatchType } from '../lib/matchTypeRules';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -1044,6 +1044,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       activeTiebreakGroup?.group_origin === KNOCKOUT_BRACKET_ORIGIN);
 
   const isKnockoutPairing = isKnockoutBracketPairing(pairing.stage);
+  // Pairing de sólo venganza de la Copa (0134): sin serie de llaves ni sección de partidas oficiales.
+  const isRevengeOnlyPairing = isKnockoutRevengePairing(pairing.stage);
   const tiebreakBracketPrimaryLabel = (() => {
     if (!bracketMatchRow) return null;
     const phase = bracketMatchRow.bracket_phase;
@@ -1180,7 +1182,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         ? tiebreakBracketPrimaryLabel ?? bracketIniciarPhrase(bracketMatchRow.bracket_phase, isKnockoutPairing)
         : isTiebreakPending
           ? 'Iniciar desempate'
-          : officialResolved || isKnockoutPairing
+          : officialResolved || isKnockoutPairing || isRevengeOnlyPairing
             ? 'Iniciar venganza'
             : swissOfficialPendingThisRound || competitionFormat !== 'swiss'
               ? 'Iniciar partida'
@@ -1310,7 +1312,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   // — antes dependía de officialMs.length > 0, dejando las píldoras invisibles hasta la primera
   // partida jugada.
   // Copa: el cruce no tiene fase regular, sólo la serie de llaves (fila verde).
-  const showHeroBlueRow = !isKnockoutPairing && (competitionFormat !== 'swiss' || pairing.swiss_round != null);
+  const showHeroBlueRow =
+    !isKnockoutPairing && !isRevengeOnlyPairing && (competitionFormat !== 'swiss' || pairing.swiss_round != null);
   const showPrimaryInSwissMata =
     movePrimaryBtnAboveRevenge && useSwissTopcutBracketDetailLayout && (isParticipant || canManageEvent);
   const showPrimaryInOfficialsLegacy =
@@ -1578,6 +1581,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         </View>
       </View>
 
+      {isRevengeOnlyPairing ? null : (
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Oficiales</Text>
         {useSwissTopcutBracketDetailLayout ? (
@@ -1747,6 +1751,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           </>
         )}
       </View>
+      )}
 
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Venganzas</Text>

@@ -21,6 +21,7 @@ Registro de ideas y features futuras que todavía no están agendadas como pendi
 - Partido de menos de tanto tiempo (a definir el umbral)
 - 3 veces seguidas el mismo tipo de Pokémon (elegido en Life Tracker)
 - 5 veces el mismo tipo de Pokémon
+- Copa oficial: achv_regular_pairings (achv_participant_outcomes) toma todos los pairings de formato distinto de Suizo; filtrar por stage (excluir 'bracket' y 'revenge') antes de habilitar Copas oficiales.
 
 ## Personalización avanzada de Temporadas (opciones de organizador)
 

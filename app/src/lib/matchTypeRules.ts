@@ -16,6 +16,14 @@ export function isKnockoutBracketPairing(stage: string | null | undefined): bool
   return stage === 'bracket';
 }
 
+/**
+ * Pairing creado sólo para jugar venganzas en la Copa (ensure_revenge_pairing, 0134): nunca tiene serie de
+ * llaves ni resultado oficial. Si más adelante el cuadro cruza a esos dos, el servidor lo pasa a 'bracket'.
+ */
+export function isKnockoutRevengePairing(stage: string | null | undefined): boolean {
+  return stage === 'revenge';
+}
+
 export type NextMatchTypeInput = {
   /** Hay una serie de llaves / desempate abierta en este pairing. */
   isTiebreakPending: boolean;
@@ -31,6 +39,8 @@ export type NextMatchTypeInput = {
 
 /** Tipo de la partida que crea "Iniciar" en PairingDetailScreen. */
 export function resolveNextMatchType(i: NextMatchTypeInput): NewMatchType {
+  // Un pairing de sólo venganza nunca arranca otra cosa que una venganza.
+  if (isKnockoutRevengePairing(i.pairingStage)) return 'revenge';
   if (i.isTiebreakPending && (i.isBracketGroup || i.tiebreakWinnerParticipantId == null)) {
     return 'tiebreak';
   }
@@ -65,6 +75,7 @@ export type RematchTypeInput = {
 
 /** Tipo de la partida que crea el botón de revancha en MatchResultScreen. */
 export function resolveRematchType(i: RematchTypeInput): NewMatchType | 'two_headed_giant' {
+  if (isKnockoutRevengePairing(i.pairingStage)) return 'revenge';
   if (i.currentMatchType === 'tiebreak') return 'tiebreak';
   if (isKnockoutBracketPairing(i.pairingStage)) return 'revenge';
   if (
