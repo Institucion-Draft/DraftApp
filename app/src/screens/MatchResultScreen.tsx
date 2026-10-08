@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
-import type { BracketPhase } from '../lib/knockoutRounds';
+import { KNOCKOUT_SECOND_CHANCE_ORIGIN, isKnockoutCupOrigin, type BracketPhase } from '../lib/knockoutRounds';
 import { resolveRematchType } from '../lib/matchTypeRules';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -359,6 +359,27 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     });
   }, [navigation, pairing?.id, fromStandings]);
 
+  // Copa: "Enfrentamientos" vuelve a Oficiales con el sub-tab de la copa a la que pertenece la partida.
+  const goToPairingsList = async () => {
+    if (!pairing) return;
+    let cup: 'prima' | 'second' | null = null;
+    const bmRes = await supabase
+      .from('event_tiebreak_bracket_matches')
+      .select('group_id')
+      .eq('pairing_id', pairing.id);
+    const groupIds = ((bmRes.data ?? []) as { group_id: string }[]).map((r) => r.group_id);
+    if (groupIds.length > 0) {
+      const gRes = await supabase.from('event_tiebreak_groups').select('group_origin').in('id', groupIds);
+      const origins = ((gRes.data ?? []) as { group_origin: string }[]).map((r) => r.group_origin);
+      if (origins.includes(KNOCKOUT_SECOND_CHANCE_ORIGIN)) cup = 'second';
+      else if (origins.some((x) => isKnockoutCupOrigin(x))) cup = 'prima';
+    }
+    navigation.navigate('PairingsList', {
+      eventId: pairing.event_id,
+      ...(cup ? { initialTab: 'official' as const, initialCup: cup } : {}),
+    });
+  };
+
   if (loading || !match || !pairing || !pa || !pb) {
     return (
       <View style={styles.centered}>
@@ -580,7 +601,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         ) : null}
         {match.match_type === 'tiebreak' ? (
           <>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => void goToPairingsList()}>
               <Text style={styles.primaryTxt}>Enfrentamientos</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>
@@ -589,7 +610,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           </>
         ) : (
           <>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('PairingsList', { eventId: pairing.event_id })}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => void goToPairingsList()}>
               <Text style={styles.secondaryTxt}>Enfrentamientos</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventDetail', { eventId: pairing.event_id })}>

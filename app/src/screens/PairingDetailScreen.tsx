@@ -12,12 +12,13 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { fetchEventVenueName } from '../lib/eventVenueName';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
   KNOCKOUT_SECOND_CHANCE_ORIGIN,
-  SECOND_CHANCE_PREFIX,
+  cupNameSuffix,
   bracketPhaseShortName,
   bracketPhaseSingularName,
   isKnockoutCupOrigin,
@@ -298,6 +299,20 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   /** Hubo (o hay) fila de bracket suizo top cut para este pairing; sirve para el hero cuando el grupo activo ya no es el bracket. */
   const [pairingHadSwissTopcutBracket, setPairingHadSwissTopcutBracket] = useState(false);
   const [draftEventStatus, setDraftEventStatus] = useState<string | null>(null);
+  // Nombre de la sede del evento (para "Copa {sede}"); sin sede, "Copa" a secas.
+  const [venueName, setVenueName] = useState<string | null>(null);
+  const venueEventId = pairing?.event_id ?? null;
+  useEffect(() => {
+    if (!venueEventId) return undefined;
+    let cancelled = false;
+    void fetchEventVenueName(venueEventId).then((n) => {
+      if (!cancelled) setVenueName(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [venueEventId]);
+
   const [topcutFormat, setTopcutFormat] = useState<string>('bo3');
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin o swiss con match_format='bo1': el oficial es a una sola partida (1 sola
@@ -918,9 +933,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingsList', {
         eventId: pairing.event_id,
         initialTab: fromPairingsTab,
+        ...(activeTiebreakGroup?.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN
+          ? { initialCup: 'second' as const }
+          : isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
+            ? { initialCup: 'prima' as const }
+            : {}),
       }),
     });
-  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab, fromStandings]);
+  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab, fromStandings, activeTiebreakGroup?.group_origin]);
 
   if (loading) {
     return (
@@ -1028,8 +1048,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
   const tiebreakSectionTitle =
     isKnockoutCupOrigin(activeTiebreakGroup?.group_origin) && bracketMatchRow
-      ? (activeTiebreakGroup?.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN ? SECOND_CHANCE_PREFIX + ' · ' : '') +
-        bracketPhaseShortName(bracketMatchRow.bracket_phase)
+      ? bracketPhaseShortName(bracketMatchRow.bracket_phase) + cupNameSuffix(activeTiebreakGroup?.group_origin, venueName)
       : activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
     activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
     isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
@@ -1591,12 +1610,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      {isRevengeOnlyPairing ? null : (
+      {isRevengeOnlyPairing ? (
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Oficiales</Text>
+        <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
+      </View>
+      ) : (
       <View style={styles.block}>
         <Text style={styles.blockTitle}>Oficiales</Text>
         {useSwissTopcutBracketDetailLayout ? (
           officialMs.length === 0 && !showTiebreakSection ? (
-            <Text style={styles.muted}>Todavía no hay partidas.</Text>
+            <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
           ) : (
             <>
               {officialMs.length > 0 ? (
@@ -1611,7 +1635,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 <View style={[styles.subAccGreen, officialMs.length > 0 && styles.subAccGreenSpaced]}>
                   <Text style={styles.subTitleSwissGreen}>
                     {isKnockoutPairing && bracketMatchRow
-                      ? bracketPhaseShortName(bracketMatchRow.bracket_phase)
+                      ? bracketPhaseShortName(bracketMatchRow.bracket_phase) + cupNameSuffix(activeTiebreakGroup?.group_origin, venueName)
                       : 'Fase mata-mata'}
                   </Text>
                   {tiebreakMs.length === 0 ? null : tiebreakMs.map(renderTiebreakRow)}
@@ -1638,7 +1662,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           )
         ) : officialMs.length === 0 && revengeMs.length === 0 && tiebreakMs.length === 0 && !isTiebreakPending ? (
           <>
-            <Text style={styles.muted}>Todavía no hay partidas.</Text>
+            <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
             {showPrimaryInOfficialsLegacy ? (
               <View style={styles.primaryAboveRevengeWrap}>
                 <TouchableOpacity
@@ -1663,7 +1687,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               <View style={styles.subAccBlue}>
                 <Text style={styles.subTitleSwissBlue}>Fase todos contra todos</Text>
                 {officialMs.length === 0 ? (
-                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
                 ) : (
                   officialMs.map(renderDraftRow)
                 )}
@@ -1676,7 +1700,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               <View style={styles.subAccBlue}>
                 <Text style={styles.subTitleSwissBlue}>Cruces</Text>
                 {officialMs.length === 0 ? (
-                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
                 ) : (
                   officialMs.map(renderDraftRow)
                 )}
@@ -1689,7 +1713,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               <View style={styles.subAccBlue}>
                 <Text style={styles.subTitleSwissBlue}>Fase rondas suizas</Text>
                 {officialMs.length === 0 ? (
-                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
                 ) : (
                   officialMs.map(renderDraftRow)
                 )}
@@ -1698,7 +1722,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               <>
                 <Text style={styles.sectionSubtitle}>Partidas oficiales</Text>
                 {officialMs.length === 0 ? (
-                  <Text style={styles.muted}>Todavía no hay partidas oficiales.</Text>
+                  <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
                 ) : (
                   officialMs.map(renderDraftRow)
                 )}
@@ -1768,7 +1792,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         {revengeMs.length === 0 ? (
           <Text style={styles.muted}>Todavía no hay venganzas jugadas.</Text>
         ) : (
-          <>
+          <View style={styles.subAccRevenge}>
             <Text style={styles.revengeCounter}>
               {shortName(dispLeftName)} {dispRevLeft} - {dispRevRight} {shortName(dispRightName)}
             </Text>
@@ -1862,7 +1886,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                 </View>
               );
             })}
-          </>
+          </View>
         )}
       </View>
 
@@ -1935,6 +1959,13 @@ const createStyles = (c: ThemeColors) =>
       marginBottom: 4,
     },
     subAccGreenSpaced: { marginTop: 16 },
+    subAccRevenge: {
+      borderLeftWidth: 3,
+      borderLeftColor: c.revengeLine,
+      paddingLeft: 10,
+      paddingVertical: 4,
+      marginBottom: 4,
+    },
     subAccOrange: {
       borderLeftWidth: 3,
       borderLeftColor: c.status.warning.solid,

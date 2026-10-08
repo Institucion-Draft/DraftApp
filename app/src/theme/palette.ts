@@ -83,6 +83,15 @@ export type ThemeColors = {
    */
   pairingProgress: { undecided: string; decided: string };
 
+  /**
+   * Línea vertical de la lista de venganzas (PairingDetailScreen): rojo sangre, distinto de los verdes/azules de
+   * las secciones oficiales y del `status.error` de las alertas. Es un elemento gráfico (no texto).
+   */
+  revengeLine: string;
+
+  /** Bronce (insignia del campeón de la Copa Consuelo): menos prestigiosa que `achievement` (oro). */
+  bronze: StatusColors;
+
   /** Fondo semitransparente detrás de modales. */
   overlay: string;
   /** Color de sombra (iOS shadowColor). */
@@ -121,6 +130,9 @@ export const lightColors: ThemeColors = {
   // texto), por eso alcanza el umbral de 3:1 y el ámbar puede ser vívido.
   pairingProgress: { undecided: '#d97706', decided: '#6d28d9' },
 
+  revengeLine: '#7a1020',
+  bronze: { subtle: '#f6e9dd', border: '#c98f5a', text: '#6b3a14', solid: '#b0703a', onSolid: '#ffffff' },
+
   overlay: 'rgba(0,0,0,0.45)',
   shadow: '#000000',
 };
@@ -155,6 +167,10 @@ export const darkColors: ThemeColors = {
 
   // Hex exactos del NewsTicker (LifeTrackerScreen). Contraste contra card (#212934): 8.79:1 / 8.30:1.
   pairingProgress: { undecided: '#FBBF24', decided: '#D8B4FE' },
+
+  // Contraste contra background (#0e1116) ~3.1:1: alcanza para una línea gráfica de 3px.
+  revengeLine: '#c4242f',
+  bronze: { subtle: '#33231a', border: '#7a4e2c', text: '#e0a470', solid: '#cd8a52', onSolid: '#0e1116' },
 
   overlay: 'rgba(0,0,0,0.6)',
   shadow: '#000000',
