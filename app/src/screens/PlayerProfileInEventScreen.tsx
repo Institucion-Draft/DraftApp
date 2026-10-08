@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { fetchEventVenueName } from '../lib/eventVenueName';
+import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -253,6 +255,20 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const [profileMataByPhase, setProfileMataByPhase] = useState<MataPhaseBuckets | null>(null);
   /** Copa (0135): cruces del jugador en la 2da oportunidad (sección aparte de la copa principal). */
   const [profileSecondByPhase, setProfileSecondByPhase] = useState<MataPhaseBuckets | null>(null);
+  // Nombre de la sede del evento (para "Copa {sede}"); sin sede, "Copa" a secas.
+  const [venueName, setVenueName] = useState<string | null>(null);
+  const venueEventId = eventId;
+  useEffect(() => {
+    if (!venueEventId) return undefined;
+    let cancelled = false;
+    void fetchEventVenueName(venueEventId).then((n) => {
+      if (!cancelled) setVenueName(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [venueEventId]);
+
   /** Participó en el desempate group_type='fourth_place' (4to puesto real de
    *  round_robin_bo1_top4, o 1er puesto de round_robin BO3 clásico — 0075), grupo aparte del principal. */
   const [profileInFourthPlaceGroup, setProfileInFourthPlaceGroup] = useState(false);
@@ -778,6 +794,39 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
     }
     setProfileSecondByPhase(secondBuckets);
+
+    // Copa: los pairings nunca tienen official_winner_participant_id (el ganador de cada cruce vive en el cuadro:
+    // event_tiebreak_bracket_matches), así que el conteo por pairing daba 0 para todos. Se cuentan los cruces
+    // resueltos de AMBAS copas; las venganzas no entran (no son cruces del cuadro).
+    if (competitionFormat === 'knockout') {
+      const cupGroupsRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('id')
+        .eq('event_id', eventId)
+        .in('group_origin', ['knockout_bracket', 'knockout_second_chance'])
+        .in('status', ['active', 'resolved', 'failed']);
+      const cupGroupIds = ((cupGroupsRes.data ?? []) as { id: string }[]).map((g) => g.id);
+      let cupCompleted = 0;
+      let cupWon = 0;
+      if (cupGroupIds.length > 0) {
+        const cupBmRes = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('participant_a_id, participant_b_id, winner_participant_id')
+          .in('group_id', cupGroupIds);
+        for (const bm of (cupBmRes.data ?? []) as {
+          participant_a_id: string;
+          participant_b_id: string;
+          winner_participant_id: string | null;
+        }[]) {
+          if (bm.participant_a_id !== participantId && bm.participant_b_id !== participantId) continue;
+          if (bm.winner_participant_id == null) continue;
+          cupCompleted += 1;
+          if (bm.winner_participant_id === participantId) cupWon += 1;
+        }
+      }
+      setPairingsCompleted(cupCompleted);
+      setPairingsWon(cupWon);
+    }
 
     // Grupo "principal" (fase mata-mata suiza/real de top4, o desempate clásico viejo tipo
     // 'tiebreak'): excluye explícitamente group_type='fourth_place' — ese se procesa aparte más
@@ -1894,7 +1943,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const secondChanceSection = () =>
       profileSecondByPhase
-        ? renderMataBuckets(profileSecondByPhase, <Text style={styles.sectionTitle}>2da oportunidad</Text>)
+        ? renderMataBuckets(profileSecondByPhase, <Text style={styles.sectionTitle}>{CUP_CONSUELO_NAME}</Text>)
         : null;
 
     const swissMataBracketSection = () => {
@@ -1925,7 +1974,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         showMataHeader ? (
           <Text style={styles.sectionTitle}>Fase mata-mata</Text>
         ) : profileSecondByPhase ? (
-          <Text style={styles.sectionTitle}>Copa</Text>
+          <Text style={styles.sectionTitle}>{cupPrimaName(venueName)}</Text>
         ) : null
       );
     };
@@ -1989,8 +2038,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         </View>
         {eventCompetitionFormat === 'swiss' ? (
           <>
-            {swissMataBracketSection()}
             {secondChanceSection()}
+            {swissMataBracketSection()}
             {profileInTiebreakGroup && profileTiebreakGroupOrigin !== 'swiss_topcut' ? (
               <>
                 <Text style={styles.sectionTitle}>Desempate</Text>
@@ -2006,8 +2055,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           </>
         ) : (
           <>
-            {swissMataBracketSection()}
             {secondChanceSection()}
+            {swissMataBracketSection()}
             {fourthPlaceMataSection()}
             {tiebreakRoundRobinCards()}
             {eventCompetitionFormat === 'knockout' ? null : (

@@ -17,6 +17,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
+import { fetchEventVenueName } from '../lib/eventVenueName';
+import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
@@ -677,7 +679,7 @@ function SwissTopcutBracketBlock({ model }: { model: SwissTopcutBracketView }) {
 export default function StandingsScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const { eventId, showPodiumIntro } = route.params;
+  const { eventId, showPodiumIntro, cup } = route.params;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<RowView[]>([]);
@@ -701,6 +703,20 @@ export default function StandingsScreen({ route, navigation }: Props) {
   } | null>(null);
   const [secondPodiumState, setSecondPodiumState] = useState<PodiumState | null>(null);
   const [copaTab, setCopaTab] = useState<'main' | 'second'>('main');
+  // Nombre de la sede del evento (para "Copa {sede}"); sin sede, "Copa" a secas.
+  const [venueName, setVenueName] = useState<string | null>(null);
+  const venueEventId = eventId;
+  useEffect(() => {
+    if (!venueEventId) return undefined;
+    let cancelled = false;
+    void fetchEventVenueName(venueEventId).then((n) => {
+      if (!cancelled) setVenueName(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [venueEventId]);
+
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
@@ -1633,6 +1649,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [load]);
 
   useEffect(() => {
+    // Copa: el confeti sólo sale al llegar desde el resultado de la final (showPodiumIntro), nunca por entrar al podio.
+    if (competitionFormat === 'knockout') return undefined;
     if (eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return undefined;
     let cancelled = false;
     let dismissT: ReturnType<typeof setTimeout> | undefined;
@@ -1654,10 +1672,18 @@ export default function StandingsScreen({ route, navigation }: Props) {
       cancelled = true;
       if (dismissT) clearTimeout(dismissT);
     };
-  }, [eventId, eventStatusStored]);
+  }, [eventId, eventStatusStored, competitionFormat]);
+
+  // Copa: navegación desde el resultado de una final -> la copa de ESA final queda seleccionada.
+  useEffect(() => {
+    if (!cup) return;
+    setCopaTab(cup === 'second' ? 'second' : 'main');
+    navigation.setParams({ eventId, cup: undefined });
+  }, [cup, eventId, navigation]);
 
   useEffect(() => {
-    if (!showPodiumIntro || (eventStatusStored !== 'completed' && eventStatusStored !== 'concluded')) return;
+    if (!showPodiumIntro) return;
+    if (competitionFormat !== 'knockout' && eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return;
     let cancelled = false;
     setShowConfettiOnce(true);
     void (async () => {
@@ -1675,7 +1701,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [showPodiumIntro, eventStatusStored, eventId, navigation]);
+  }, [showPodiumIntro, eventStatusStored, competitionFormat, eventId, navigation]);
 
   if (loading) {
     return (
@@ -1821,8 +1847,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
     );
   };
 
-  const buildPodiumBlock = (ps: PodiumState | null, title: string | null, isMainCup: boolean) => {
-    const filled = ps != null && (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0;
+  const buildPodiumBlock = (ps: PodiumState | null, title: string | null, isMainCup: boolean, needTop2 = false) => {
+    const filled =
+      ps != null &&
+      (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0 &&
+      (!needTop2 || (ps.steps.find((s) => s.rank === 2)?.players.length ?? 0) > 0);
     if (!ps || !filled) return null;
     return (
       <View style={styles.podiumSection}>
@@ -1869,9 +1898,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
         }}
       />
     ) : null;
-  // La pestaña de la 2da oportunidad aparece con 4 o más eliminados en su primer partido, o ya sorteada.
-  const showSecondTab =
-    knockoutBracket != null && (knockoutBracket.secondDrawn || knockoutBracket.eliminated.length >= 4);
+  // Hay pestañas (Copa Prima | Copa 2da chance) sólo si la 2da chance ya se sorteó.
+  const showSecondTab = knockoutBracket != null && knockoutBracket.secondDrawn;
+  const selectedCup: 'main' | 'second' = showSecondTab ? copaTab : 'main';
   if (competitionFormat === 'knockout') {
     return (
       <View style={styles.screenRoot}>
@@ -1886,39 +1915,25 @@ export default function StandingsScreen({ route, navigation }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           onLayout={(e) => setKnockoutViewportH(Math.round(e.nativeEvent.layout.height))}
         >
-          {/* Dos podios independientes: el de la Copa y el de la 2da oportunidad (si se sorteó). */}
-          {buildPodiumBlock(podiumState, secondPodiumState ? 'Copa' : null, true)}
-          {buildPodiumBlock(secondPodiumState, '2da oportunidad', false)}
+          {/* Orden: pestañas de copa, podio de la copa elegida (con 1er y 2do definidos) y su cuadro. */}
           {showSecondTab ? (
             <View style={styles.tabsRow}>
               <TouchableOpacity style={styles.tabBtn} onPress={() => setCopaTab('main')} activeOpacity={0.7}>
-                <Text style={[styles.tabLabel, copaTab === 'main' && styles.tabLabelActive]}>Copa</Text>
-                <View style={[styles.tabUnderline, copaTab !== 'main' && styles.tabUnderlineHidden]} />
+                <Text style={[styles.tabLabel, selectedCup === 'main' && styles.tabLabelActive]}>{cupPrimaName(venueName)}</Text>
+                <View style={[styles.tabUnderline, selectedCup !== 'main' && styles.tabUnderlineHidden]} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.tabBtn} onPress={() => setCopaTab('second')} activeOpacity={0.7}>
-                <Text style={[styles.tabLabel, copaTab === 'second' && styles.tabLabelActive]}>2da oportunidad</Text>
-                <View style={[styles.tabUnderline, copaTab !== 'second' && styles.tabUnderlineHidden]} />
+                <Text style={[styles.tabLabel, selectedCup === 'second' && styles.tabLabelActive]}>{CUP_CONSUELO_NAME}</Text>
+                <View style={[styles.tabUnderline, selectedCup !== 'second' && styles.tabUnderlineHidden]} />
               </TouchableOpacity>
             </View>
           ) : null}
-          {copaTab === 'second' && showSecondTab ? (
-            knockoutBracket?.secondModel ? (
-              renderCopaBracket(knockoutBracket.secondModel)
-            ) : (
-              <View style={styles.secondChanceWait}>
-                <Text style={styles.knockoutNotice}>Se sortea cuando terminen los primeros partidos de la Copa</Text>
-                <Text style={styles.secondChanceListTitle}>Eliminados en su primer partido</Text>
-                {(knockoutBracket?.eliminated ?? []).map((pl) => (
-                  <View key={pl.id} style={styles.secondChanceRow}>
-                    <PlayerAvatar userId={pl.userId} participantId={pl.id} size="tiny" withColorBorder={false} />
-                    <Text style={styles.secondChanceName} numberOfLines={1}>
-                      {pl.name}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )
-          ) : knockoutBracket?.model ? (
+          {selectedCup === 'second'
+            ? buildPodiumBlock(secondPodiumState, null, false, true)
+            : buildPodiumBlock(podiumState, null, true, true)}
+          {selectedCup === 'second' && knockoutBracket?.secondModel ? (
+            renderCopaBracket(knockoutBracket.secondModel)
+          ) : selectedCup === 'main' && knockoutBracket?.model ? (
             renderCopaBracket(knockoutBracket.model)
           ) : (
             <Text style={styles.knockoutNotice}>Las llaves se sortean al finalizar el draft</Text>

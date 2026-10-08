@@ -838,6 +838,31 @@ function measureAvatarCenterInScroll(
   });
 }
 
+async function cupFinalResolvedByMatch(
+  matchId: string
+): Promise<{ isCupMatch: boolean; cup: 'prima' | 'second' | null }> {
+  const none = { isCupMatch: false, cup: null };
+  const mRes = await supabase.from('matches').select('pairing_id, match_type').eq('id', matchId).maybeSingle();
+  const m = mRes.data as { pairing_id: string; match_type: string } | null;
+  if (mRes.error || !m || m.match_type !== 'tiebreak') return none;
+  const bmRes = await supabase
+    .from('event_tiebreak_bracket_matches')
+    .select('group_id, bracket_phase, winner_participant_id')
+    .eq('pairing_id', m.pairing_id);
+  const bms = (bmRes.data ?? []) as { group_id: string; bracket_phase: string; winner_participant_id: string | null }[];
+  if (bmRes.error || bms.length === 0) return none;
+  const gRes = await supabase.from('event_tiebreak_groups').select('id, group_origin').in('id', bms.map((b) => b.group_id));
+  const groups = (gRes.data ?? []) as { id: string; group_origin: string }[];
+  const cupGroups = groups.filter((g) => isKnockoutCupOrigin(g.group_origin));
+  if (cupGroups.length === 0) return none;
+  const finalBm = bms.find(
+    (b) => b.bracket_phase === 'final' && b.winner_participant_id != null && cupGroups.some((g) => g.id === b.group_id)
+  );
+  if (!finalBm) return { isCupMatch: true, cup: null };
+  const origin = cupGroups.find((g) => g.id === finalBm.group_id)?.group_origin;
+  return { isCupMatch: true, cup: origin === KNOCKOUT_SECOND_CHANCE_ORIGIN ? 'second' : 'prima' };
+}
+
 async function navigateAfterMatchMaybeComplete(
   navigation: NativeStackNavigationProp<MainStackParamList, 'LifeTracker'>,
   eventId: string,
@@ -846,6 +871,17 @@ async function navigateAfterMatchMaybeComplete(
   fromStandings?: boolean
 ): Promise<void> {
   const resultParams = { matchId, ...(fromStandings ? { fromStandings: true } : {}) };
+  // Copa: si esta partida cerró la FINAL de una de las dos copas (define 1er y 2do puesto), se va a Cruces de copa con
+  // el tab de esa copa y el confeti. El resto de las partidas de una Copa no espera a que el evento se complete.
+  const cupFinal = await cupFinalResolvedByMatch(matchId);
+  if (cupFinal.isCupMatch) {
+    if (cupFinal.cup) {
+      navigation.replace('Standings', { eventId, showPodiumIntro: true, cup: cupFinal.cup });
+    } else {
+      navigation.replace('MatchResult', resultParams);
+    }
+    return;
+  }
   if (previousEventStatus === 'completed') {
     navigation.replace('MatchResult', resultParams);
     return;

@@ -12,6 +12,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { fetchEventVenueName } from '../lib/eventVenueName';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
@@ -21,9 +22,9 @@ import { countSeriesWins } from '../lib/bracketSeries';
 import {
   KNOCKOUT_BRACKET_ORIGIN,
   KNOCKOUT_SECOND_CHANCE_ORIGIN,
-  SECOND_CHANCE_PREFIX,
   bracketPhaseSortKey,
   bracketPhaseTitle,
+  cupShortName,
   isKnockoutCupOrigin,
   type BracketPhase,
 } from '../lib/knockoutRounds';
@@ -349,7 +350,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const { eventId } = route.params;
   const isFocused = useIsFocused();
   const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'officials' | 'second' | 'revenge'>('officials');
+  const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
+  // Copa: sub-tab de Oficiales (la 2da chance sólo aparece si existe).
+  const [cupTab, setCupTab] = useState<'prima' | 'second'>('prima');
+  // Nombre de la sede del evento (para "Copa {sede}"); sin sede, "Copa" a secas.
+  const [venueName, setVenueName] = useState<string | null>(null);
+  const venueEventId = route.params.eventId;
+  useEffect(() => {
+    if (!venueEventId) return undefined;
+    let cancelled = false;
+    void fetchEventVenueName(venueEventId).then((n) => {
+      if (!cancelled) setVenueName(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [venueEventId]);
+
   const [items, setItems] = useState<ItemView[]>([]);
   const [officialByeByRound, setOfficialByeByRound] = useState<Record<number, OfficialByeCard[]>>({});
   const [currentSwissRoundStored, setCurrentSwissRoundStored] = useState<number | null>(null);
@@ -382,14 +399,16 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
   useLayoutEffect(() => {
     const initialTab = route.params.initialTab;
+    const initialCup = route.params.initialCup;
     if (initialTab === 'revenge') {
       setTab('revenge');
-      navigation.setParams({ eventId, initialTab: undefined });
+      navigation.setParams({ eventId, initialTab: undefined, initialCup: undefined });
     } else if (initialTab === 'official') {
       setTab('officials');
-      navigation.setParams({ eventId, initialTab: undefined });
+      if (initialCup) setCupTab(initialCup);
+      navigation.setParams({ eventId, initialTab: undefined, initialCup: undefined });
     }
-  }, [route.params.initialTab, eventId, navigation]);
+  }, [route.params.initialTab, route.params.initialCup, eventId, navigation]);
 
   const load = useCallback(async (): Promise<boolean> => {
     const meRes = await supabase.auth.getUser();
@@ -1637,42 +1656,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   // Copa: pestaña Venganzas como en Suizo (mis vs contra todos los demás jugadores del evento).
   const isCopa = competitionFormat === 'knockout';
   const myCopaPlayer = copaPlayers.find((p) => p.userId === myUserId) ?? null;
-  // Pares (a|b con a < b) con un cruce de llaves pendiente: ahí corre la serie, no una venganza.
-  const pendingCrucePairs = useMemo(() => {
-    const s = new Set<string>();
-    for (const sec of tiebreakOfficialSections) {
-      if (!isKnockoutCupOrigin(sec.groupOrigin)) continue;
-      for (const r of sec.rounds) {
-        for (const it of r.items) {
-          if (it.tiebreakWinnerParticipantId != null) continue;
-          const a = it.participant_a_id < it.participant_b_id ? it.participant_a_id : it.participant_b_id;
-          const b = it.participant_a_id < it.participant_b_id ? it.participant_b_id : it.participant_a_id;
-          s.add(`${a}|${b}`);
-        }
-      }
-    }
-    return s;
-  }, [tiebreakOfficialSections]);
   const pairKey = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
   const copaHasSecond = tiebreakOfficialSections.some((s) => s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN);
+  const activeCupTab = copaHasSecond ? cupTab : 'prima';
   // Copa: una pestaña por cuadro (la general de Venganzas es aparte); el resto de los formatos muestra todas las secciones.
   const visibleTiebreakSections = isCopa
     ? tiebreakOfficialSections.filter(
-        (s) => (tab === 'second') === (s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN)
+        (s) => (activeCupTab === 'second') === (s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN)
       )
     : tiebreakOfficialSections;
   // Copa, vs posibles: todos los demás jugadores del evento (incluidos los que se fueron), salvo quien tiene un
   // oficial pendiente CONMIGO (cruce de llaves sin resolver entre los dos). Un oficial pendiente contra un
   // tercero no excluye a nadie. Los que ya tienen venganza jugada o en vivo no van acá: están en el historial.
-  const playedRevengePairings = new Set(revengeItems.map((it) => it.pairingId));
   const copaRevengeRows: SwissRevengeStandaloneRow[] = [];
   if (isCopa && myCopaPlayer) {
     for (const p of copaPlayers) {
       if (p.id === myCopaPlayer.id) continue;
-      const key = pairKey(myCopaPlayer.id, p.id);
-      if (pendingCrucePairs.has(key)) continue;
-      const existing = copaPairingByPair.get(key) ?? null;
-      if (existing && playedRevengePairings.has(existing)) continue;
+      const existing = copaPairingByPair.get(pairKey(myCopaPlayer.id, p.id)) ?? null;
       copaRevengeRows.push({
         pairingId: existing,
         participantAId: myCopaPlayer.id,
@@ -1731,18 +1731,25 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           <Text style={[styles.tabLabel, tab === 'officials' && styles.tabLabelActive]}>Oficiales</Text>
           <View style={[styles.tabUnderline, tab !== 'officials' && styles.tabUnderlineHidden]} />
         </TouchableOpacity>
-        {isCopa && copaHasSecond ? (
-          <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('second')} activeOpacity={0.7}>
-            <Text style={[styles.tabLabel, tab === 'second' && styles.tabLabelActive]}>2da oportunidad</Text>
-            <View style={[styles.tabUnderline, tab !== 'second' && styles.tabUnderlineHidden]} />
-          </TouchableOpacity>
-        ) : null}
         <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('revenge')} activeOpacity={0.7}>
           <Text style={[styles.tabLabel, tab === 'revenge' && styles.tabLabelActive]}>Venganzas</Text>
           <View style={[styles.tabUnderline, tab !== 'revenge' && styles.tabUnderlineHidden]} />
         </TouchableOpacity>
       </View>
       {tab !== 'revenge' ? (
+        <>
+        {isCopa && copaHasSecond ? (
+          <View style={styles.tabsRow}>
+            <TouchableOpacity style={styles.tabBtn} onPress={() => setCupTab('prima')} activeOpacity={0.7}>
+              <Text style={[styles.tabLabel, activeCupTab === 'prima' && styles.tabLabelActive]}>{cupShortName(KNOCKOUT_BRACKET_ORIGIN, venueName)}</Text>
+              <View style={[styles.tabUnderline, activeCupTab !== 'prima' && styles.tabUnderlineHidden]} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tabBtn} onPress={() => setCupTab('second')} activeOpacity={0.7}>
+              <Text style={[styles.tabLabel, activeCupTab === 'second' && styles.tabLabelActive]}>{cupShortName(KNOCKOUT_SECOND_CHANCE_ORIGIN, venueName)}</Text>
+              <View style={[styles.tabUnderline, activeCupTab !== 'second' && styles.tabUnderlineHidden]} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <FlatList<ItemView | OfficialListRow>
           data={isSwissOfficialSectioned ? officialSwissFlatRows : items}
           keyExtractor={(it) => it.id}
@@ -1989,7 +1996,6 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                         isBracket && it.bracketPhase
                           ? {
                               label:
-                                (section.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN ? SECOND_CHANCE_PREFIX + ' · ' : '') +
                                 bracketPhaseTitle(it.bracketPhase),
                               firstId: firstIdByPhase[it.bracketPhase] ?? null,
                             }
@@ -2051,6 +2057,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             return renderOfficialPairingCard(item);
           }}
         />
+        </>
       ) : (
         <>
         <FlatList

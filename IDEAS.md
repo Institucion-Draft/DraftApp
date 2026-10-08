@@ -251,3 +251,4 @@ Dos ideas relacionadas para la Copa: una segunda copa en paralelo para quienes c
 - **UI:** ambas copas en paralelo con una pestaña por copa en Cruces de copa; en Enfrentamientos, una pestaña por copa más una pestaña general de venganzas.
 - **Copa desde 4 jugadores:** bajar el mínimo de 8 a 4 jugadores en la validación, `draw_knockout_bracket` (casos de 4 jugadores = semis directas, y 5 a 7 = cuartos con byes), nombres de ronda y modelo del cuadro. En grupos + Copa el límite de 4 a 16 se aplica a los que entran al cuadro, no al total del evento.
 - **Puntos de la 2da oportunidad:** hoy la 2da oportunidad no puntúa (las vistas de puntos filtran por orígenes explícitos y excluyen `knockout_second_chance`). Definir si suma puntos y con qué escala, aparte de la copa principal.
+- **Ditto en el life tracker:** si un jugador tiene a Ditto, en su life tracker contra otros jugadores el avatar tiene que mostrar el Pokémon del rival que tiene enfrente.

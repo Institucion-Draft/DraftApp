@@ -64,7 +64,8 @@ export type MainStackParamList = {
     /** Origen de navegación para el botón Atrás del header. */
     from?: 'Standings' | 'EventDetail';
   };
-  PairingsList: { eventId: string; initialTab?: 'official' | 'revenge' };
+  /** `initialCup`: sub-tab de Oficiales en la Copa ('prima' | 'second'). */
+  PairingsList: { eventId: string; initialTab?: 'official' | 'revenge'; initialCup?: 'prima' | 'second' };
   PairingDetail: {
     pairingId: string;
     fromTab?: 'official' | 'revenge';
@@ -85,7 +86,8 @@ export type MainStackParamList = {
   LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge'; fromStandings?: boolean };
   LifeChart: { matchId: string };
   MatchResult: { matchId: string; fromStandings?: boolean };
-  Standings: { eventId: string; showPodiumIntro?: boolean };
+  /** `cup`: copa a mostrar en Cruces de copa ('prima' | 'second'); `showPodiumIntro` dispara el confeti. */
+  Standings: { eventId: string; showPodiumIntro?: boolean; cup?: 'prima' | 'second' };
   Playground: { workspaceId: string };
   ContextFreeMatches: { workspaceId: string };
   ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };

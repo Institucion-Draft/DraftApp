@@ -27,7 +27,7 @@ import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
-import { KNOCKOUT_BRACKET_ORIGIN, isKnockoutCupOrigin } from '../lib/knockoutRounds';
+import { CUP_CONSUELO_NAME, KNOCKOUT_BRACKET_ORIGIN, cupPrimaName, isKnockoutCupOrigin } from '../lib/knockoutRounds';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
   getTwoWayTieFirstPlaceParticipantIds,
@@ -210,6 +210,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [prodeCCompact, setProdeCCompact] = useState(false);
   const [cubeName, setCubeName] = useState<string | null>(null);
   const [venueName, setVenueName] = useState<string | null>(null);
+  /** Copa (0135): campeón de la Copa Consuelo (su grupo ya tiene la final resuelta). */
+  const [consueloChampionUserId, setConsueloChampionUserId] = useState<string | null>(null);
   const [championName, setChampionName] = useState<string | null>(null);
   const [championGender, setChampionGender] = useState<Gender | null>(null);
   const [tiebreakBanner, setTiebreakBanner] = useState<{
@@ -684,6 +686,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setMyParticipantId(mine?.id ?? null);
     setCubeName((cubeRes.data as any)?.name ?? null);
     setVenueName((venueRes.data as any)?.name ?? null);
+    if (normalizeCompetitionFormat(e.competition_format) === 'knockout') {
+      const consueloRes = await supabase
+        .from('event_tiebreak_groups')
+        .select('champion_user_id')
+        .eq('event_id', e.id)
+        .eq('group_origin', 'knockout_second_chance')
+        .neq('status', 'superseded')
+        .maybeSingle();
+      setConsueloChampionUserId((consueloRes.data as { champion_user_id: string | null } | null)?.champion_user_id ?? null);
+    } else {
+      setConsueloChampionUserId(null);
+    }
 
     if (p.length > 0) {
       const ids = p.map((x) => x.id);
@@ -1973,7 +1987,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                       <Text style={styles.participantName}>{uname}</Text>
                       {event.champion_user_id && p.user_id === event.champion_user_id ? (
                         <View style={styles.championBadge}>
-                          <Text style={styles.championBadgeText}>{participantChampionLabel}</Text>
+                          <Text style={styles.championBadgeText}>
+                            {normalizeCompetitionFormat(event.competition_format) === 'knockout'
+                              ? `${participantChampionLabel} ${cupPrimaName(venueName)}`
+                              : participantChampionLabel}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {normalizeCompetitionFormat(event.competition_format) === 'knockout' &&
+                      consueloChampionUserId &&
+                      p.user_id === consueloChampionUserId ? (
+                        <View style={styles.consueloBadge}>
+                          <Text style={styles.consueloBadgeText}>{`${participantChampionLabel} ${CUP_CONSUELO_NAME}`}</Text>
                         </View>
                       ) : null}
                       {polemicaSet.has(p.user_id) ? (
@@ -2335,6 +2360,15 @@ const createStyles = (c: ThemeColors) =>
       marginTop: 8,
     },
     championBadgeText: { fontSize: 11, fontWeight: '700', color: c.status.warning.text },
+    consueloBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 999,
+      borderWidth: 1,
+      backgroundColor: c.bronze.subtle,
+      borderColor: c.bronze.solid,
+    },
+    consueloBadgeText: { fontSize: 10, fontWeight: '700', color: c.bronze.text },
     polemicaBadge: {
       paddingHorizontal: 8,
       paddingVertical: 3,

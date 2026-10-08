@@ -17,8 +17,33 @@ export function isKnockoutCupOrigin(origin: string | null | undefined): boolean 
   return origin === KNOCKOUT_BRACKET_ORIGIN || origin === KNOCKOUT_SECOND_CHANCE_ORIGIN;
 }
 
-/** Prefijo de los títulos de ronda de la 2da oportunidad, para distinguirlos de los de la Copa. */
-export const SECOND_CHANCE_PREFIX = '2da oportunidad';
+/** Copa de 2da chance: nombre visible fijo. */
+export const CUP_CONSUELO_NAME = 'Copa Consuelo';
+
+/** Copa principal: "Copa {sede}"; sin sede, "Copa" a secas. */
+export function cupPrimaName(venueName?: string | null): string {
+  const v = venueName?.trim();
+  return v ? `Copa ${v}` : 'Copa';
+}
+
+/** Nombre completo de la copa a la que pertenece un grupo (vacío si no es una copa). */
+export function cupFullName(origin: string | null | undefined, venueName?: string | null): string {
+  if (origin === KNOCKOUT_SECOND_CHANCE_ORIGIN) return CUP_CONSUELO_NAME;
+  if (origin === KNOCKOUT_BRACKET_ORIGIN) return cupPrimaName(venueName);
+  return '';
+}
+
+/** Nombre corto para sub-tabs (sin la palabra Copa): "{sede}" | "Consuelo"; sin sede, "Copa". */
+export function cupShortName(origin: string | null | undefined, venueName?: string | null): string {
+  if (origin === KNOCKOUT_SECOND_CHANCE_ORIGIN) return 'Consuelo';
+  return venueName?.trim() || 'Copa';
+}
+
+/** Sufijo de los headers de partida de la Copa ("Semifinal · Copa Quito"); vacío si no es una copa. */
+export function cupNameSuffix(origin: string | null | undefined, venueName?: string | null): string {
+  const name = cupFullName(origin, venueName);
+  return name ? ` · ${name}` : '';
+}
 
 /**
  * Títulos de cada ronda en los listados. Semi, final y 3er puesto son los textos que ya usa
