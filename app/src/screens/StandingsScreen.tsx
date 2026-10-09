@@ -2082,9 +2082,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
             <Text style={styles.knockoutNotice}>
               {competitionFormat === 'zones_knockout'
                 ? zonesPhaseDone
-                  ? 'Llaves en preparación'
+                  ? 'Mata-mata en preparación'
                   : 'Se definen al terminar la fase de grupos'
-                : 'Las llaves se sortean al finalizar el draft'}
+                : 'El mata-mata se sortea al finalizar el draft'}
             </Text>
           )}
         </ScrollView>

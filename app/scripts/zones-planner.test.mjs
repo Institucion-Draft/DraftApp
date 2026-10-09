@@ -330,7 +330,7 @@ const phase = (n, k, iz) => {
   ok(zoneQualifiersToCupText({ qualifiers: 2, wildcards: 1 }, names) === '2 clasificados por grupo + el mejor tercero a Copa Quito', 'texto: clasificados a Copa {sede}');
   ok(zoneQualifiersToCupText({ qualifiers: 2, wildcards: 0 }, names) === '2 clasificados por grupo a Copa Quito', 'texto: sin wildcards se omite el "+ ..."');
   ok(zoneConsueloTotalText(8, names) === '8 jugadores a Copa Consuelo', 'texto: total a Consuelo');
-  ok(zoneFormatLine('BO1', 'BO3') === 'Grupos BO1 · Llaves BO3', 'texto: modalidad "Grupos {BO} · Llaves {BO}"');
+  ok(zoneFormatLine('BO1', 'BO3') === 'Grupos BO1 · Mata-mata BO3', 'texto: modalidad "Grupos {BO} · Mata-mata {BO}"');
 }
 
 // Consuelo con más de 16 no clasificados: M = min(N - T, 16)

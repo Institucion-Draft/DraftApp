@@ -76,9 +76,9 @@ export function zoneQualifiersToCupText(o: Pick<ZoneOption, 'qualifiers' | 'wild
   return `${zoneQualifiersText(o)} a ${names.prima}`;
 }
 
-/** Modalidad: "Grupos BO1 · Llaves BO3" (los formatos ya vienen como etiqueta, "—" si faltan). */
+/** Modalidad: "Grupos BO1 · Mata-mata BO3" (los formatos ya vienen como etiqueta, "—" si faltan). */
 export function zoneFormatLine(matchFormatLabel: string, topcutFormatLabel: string): string {
-  return `Grupos ${matchFormatLabel} · Llaves ${topcutFormatLabel}`;
+  return `Grupos ${matchFormatLabel} · Mata-mata ${topcutFormatLabel}`;
 }
 
 /** Total a Consuelo, sólo el número: "8 jugadores a Copa Consuelo". */

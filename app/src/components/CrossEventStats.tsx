@@ -10,6 +10,9 @@ import { supabase } from '../lib/supabase';
 import type { MtgColor } from '../lib/database.types';
 import PlayerAvatar from './PlayerAvatar';
 import { fetchEventPodiums, type EventPodiumResult } from '../lib/eventPodium';
+import { cupReachedInstance, cupReachedText, type CupGroupInput, type CupSlotInput } from '../lib/cupReachedInstance';
+import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
+import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -59,6 +62,8 @@ type EventEntry = {
   placement: number;
   total_players: number;
   colors: MtgColor[];
+  /** Copa sola / Grupos + Copa: instancia alcanzada ("Campeón Copa Quito"...); null en los demás formatos. */
+  reached: string | null;
 };
 
 type H2HEntry = {
@@ -96,6 +101,76 @@ function CellStat({ won, lost }: { won: number; lost: number }) {
       {p !== null && <Text style={styles.h2hCellPct}>{p}%</Text>}
     </View>
   );
+}
+
+/**
+ * Copa sola y Grupos + Copa: instancia alcanzada de la persona en cada evento Copa del historial. Consultas en lote
+ * (una por tabla para todos los eventos Copa), no una por fila. Devuelve event_id -> texto; los demás eventos no figuran.
+ */
+async function loadCupReachedTexts(
+  userId: string,
+  entries: { event_id: string; participant_id: string }[]
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const eventIds = Array.from(new Set(entries.map((e) => e.event_id)));
+  if (eventIds.length === 0) return out;
+  const evRes = await supabase.from('draft_events').select('id, competition_format, venue_id').in('id', eventIds);
+  const cupEvents = ((evRes.data ?? []) as { id: string; competition_format: string; venue_id: string | null }[]).filter(
+    (e) => e.competition_format === 'knockout' || e.competition_format === 'zones_knockout'
+  );
+  if (cupEvents.length === 0) return out;
+  const cupEventIds = cupEvents.map((e) => e.id);
+  const venueIds = Array.from(new Set(cupEvents.map((e) => e.venue_id).filter((v): v is string => !!v)));
+  const [venuesRes, groupsRes, userRes] = await Promise.all([
+    venueIds.length > 0 ? supabase.from('venues').select('id, name').in('id', venueIds) : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    supabase
+      .from('event_tiebreak_groups')
+      .select('id, event_id, group_origin')
+      .in('event_id', cupEventIds)
+      .in('group_origin', ['knockout_bracket', 'knockout_second_chance'])
+      .in('status', ['active', 'resolved', 'failed']),
+    supabase.from('users').select('gender').eq('id', userId).maybeSingle(),
+  ]);
+  const groups = (groupsRes.data ?? []) as { id: string; event_id: string; group_origin: string }[];
+  const slotsRes =
+    groups.length > 0
+      ? await supabase
+          .from('knockout_slots')
+          .select('group_id, round_key, participant_a_id, participant_b_id, is_bye, winner_participant_id')
+          .in('group_id', groups.map((g) => g.id))
+      : { data: [] as never[] };
+  const slotsByGroup = new Map<string, CupSlotInput[]>();
+  for (const s of (slotsRes.data ?? []) as (CupSlotInput & { group_id: string })[]) {
+    if (!slotsByGroup.has(s.group_id)) slotsByGroup.set(s.group_id, []);
+    slotsByGroup.get(s.group_id)!.push(s);
+  }
+  const groupsByEvent = new Map<string, CupGroupInput[]>();
+  for (const g of groups) {
+    if (!groupsByEvent.has(g.event_id)) groupsByEvent.set(g.event_id, []);
+    groupsByEvent.get(g.event_id)!.push({ origin: g.group_origin, slots: slotsByGroup.get(g.id) ?? [] });
+  }
+  const venueName = new Map(((venuesRes.data ?? []) as { id: string; name: string }[]).map((v) => [v.id, v.name]));
+  const gender = ((userRes.data as { gender?: Gender | null } | null)?.gender ?? null) as Gender | null;
+  const eventById = new Map(cupEvents.map((e) => [e.id, e]));
+  for (const entry of entries) {
+    const ev = eventById.get(entry.event_id);
+    if (!ev) continue;
+    const reached = cupReachedInstance({
+      participantId: entry.participant_id,
+      groups: groupsByEvent.get(ev.id) ?? [],
+      isZones: ev.competition_format === 'zones_knockout',
+    });
+    if (!reached) continue;
+    out.set(
+      entry.event_id,
+      cupReachedText(reached, {
+        mainName: cupPrimaName(ev.venue_id ? venueName.get(ev.venue_id) : null),
+        consueloName: CUP_CONSUELO_NAME,
+        gendered: (m, fe) => resolveGenderedText(gender, m, fe),
+      })
+    );
+  }
+  return out;
 }
 
 // ── Componente ────────────────────────────────────────────────────────────────
@@ -164,7 +239,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       const participantIds = rawHistory.map(e => e.participant_id);
       const eventIds = Array.from(new Set(rawHistory.map(e => e.event_id)));
 
-      const [colorsRowsRes, podiumsByEvent] = await Promise.all([
+      const [colorsRowsRes, podiumsByEvent, cupReachedByEvent] = await Promise.all([
         participantIds.length > 0
           ? supabase.from('participant_colors').select('participant_id, color').in('participant_id', participantIds)
           : Promise.resolve({ data: [] as { participant_id: string; color: string }[], error: null }),
@@ -175,6 +250,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
         // (4° en adelante) sigue con el placement de la vista, sin tocar: eventPodium solo calcula
         // podio (1-3), no un ranking completo.
         eventIds.length > 0 ? fetchEventPodiums(eventIds) : Promise.resolve(new Map<string, EventPodiumResult>()),
+        loadCupReachedTexts(userId, rawHistory),
       ]);
 
       let colorsByPart: Record<string, MtgColor[]> = {};
@@ -219,6 +295,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           ...e,
           placement: podiumStep?.rank ?? e.placement,
           colors: colorsByPart[e.participant_id] ?? [],
+          reached: cupReachedByEvent.get(e.event_id) ?? null,
         };
       }));
       setH2H(rawH2H.map(h => ({ ...h, opponent_name: opponentNames[h.opponent_user_id] ?? 'Jugador' })));
@@ -325,7 +402,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                   </View>
                 )}
               </View>
-              <Text style={styles.historyPlacement}>{e.placement}° de {e.total_players}</Text>
+              <Text style={styles.historyPlacement}>{e.reached ?? `${e.placement}° de ${e.total_players}`}</Text>
             </View>
           ))
         ) : (
@@ -455,7 +532,7 @@ const createStyles = (c: ThemeColors) =>
     historyLeft: { flex: 1, marginRight: 8 },
     historyName: { fontSize: 15, color: c.textBody, marginBottom: 4 },
     historyColors: { flexDirection: 'row', gap: 4 },
-    historyPlacement: { fontSize: 15, fontWeight: '700', color: c.text },
+    historyPlacement: { fontSize: 15, fontWeight: '700', color: c.text, flexShrink: 1, maxWidth: '55%', textAlign: 'right' },
 
     // H2H tabla
     h2hHeaderRow: {
