@@ -59,6 +59,9 @@ type EventRow = {
   current_swiss_round?: number | null;
   swiss_rounds_total?: number | null;
   swiss_rounds_manual?: number | null;
+  /** Grupos + Copa (0136): null hasta que se sortean las zonas (draw_zones). */
+  zones_drawn_at?: string | null;
+  zones_count?: number | null;
   giant_randomization_done?: boolean | null;
   scheduled_for: string;
   cube_id: string | null;
@@ -238,7 +241,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -1355,9 +1358,15 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const eventAvatar = avatarPublicUrl(event.avatar_path);
   const playingOrDone = event.status === 'playing' || event.status === 'completed' || event.status === 'concluded';
-  const showEnfrentamientosBtn = playingOrDone && (myParticipantId != null || isWorkspaceMember);
+  // Grupos + Copa (0136): hasta que las pantallas por zona estén listas (B2), Enfrentamientos, Cruces de copa y Tabla
+  // de posiciones NO se ofrecen, ni antes ni después del sorteo de zonas.
+  const isZonesEvent = normalizeCompetitionFormat(event.competition_format) === 'zones_knockout';
+  const zonesAwaitingDraw = isZonesEvent && event.status === 'playing' && !event.zones_drawn_at;
+  const zonesDrawn = isZonesEvent && !!event.zones_drawn_at;
+  const showEnfrentamientosBtn = !isZonesEvent && playingOrDone && (myParticipantId != null || isWorkspaceMember);
   const showStandingsBtn =
-    isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId);
+    !isZonesEvent &&
+    (isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId));
   const championParticipant = event.champion_user_id
     ? (participants.find((p) => p.user_id === event.champion_user_id) ??
        participants.find((p) => p.member_b_user_id === event.champion_user_id) ??
@@ -1873,6 +1882,27 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           ) : (
             <Text style={styles.muted}>Estás inscripto en este evento.</Text>
           )}
+        </View>
+      ) : null}
+
+      {zonesAwaitingDraw ? (
+        <View style={styles.block}>
+          {canManageEvent ? (
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('ZonesDraw', { eventId: event.id })}>
+              <Text style={styles.primaryBtnTxt}>Sortear grupos</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.muted}>Esperando el sorteo de grupos</Text>
+          )}
+        </View>
+      ) : null}
+
+      {zonesDrawn ? (
+        <View style={styles.block}>
+          <Text style={styles.blockTitle}>Grupos sorteados</Text>
+          <Text style={styles.muted}>
+            {event.zones_count ? `${event.zones_count} zonas armadas. ` : ''}Los enfrentamientos y las tablas por grupo se habilitan próximamente.
+          </Text>
         </View>
       ) : null}
 

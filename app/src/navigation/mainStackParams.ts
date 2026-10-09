@@ -80,6 +80,8 @@ export type MainStackParamList = {
     /** Origen cuadro de la Copa (StandingsScreen): el atrás del header vuelve a él, no a Enfrentamientos. */
     fromStandings?: boolean;
   };
+  /** Simulador del sorteo de zonas de un evento Grupos + Copa (draw_zones). */
+  ZonesDraw: { eventId: string };
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
   /** `fromStandings`: viene del cuadro de la Copa; se arrastra para que Atrás de PairingDetail vuelva a Standings. */

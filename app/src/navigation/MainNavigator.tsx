@@ -32,6 +32,7 @@ import EventDiaryScreen from '../screens/EventDiaryScreen';
 import ProDeCScreen from '../screens/ProDeCScreen';
 import EditEventScreen from '../screens/EditEventScreen';
 import EventCheckInScreen from '../screens/EventCheckInScreen';
+import ZonesDrawScreen from '../screens/ZonesDrawScreen';
 import PlayerProfileInEventScreen from '../screens/PlayerProfileInEventScreen';
 import PairingsListScreen from '../screens/PairingsListScreen';
 import PairingDetailScreen from '../screens/PairingDetailScreen';
@@ -223,6 +224,7 @@ export default function MainStackNavigator() {
         />
         <Stack.Screen name="EditEvent" component={EditEventScreen} options={{ title: 'Editar evento', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EventCheckIn" component={EventCheckInScreen} options={{ title: 'Mi mazo', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="ZonesDraw" component={ZonesDrawScreen} options={{ title: 'Sortear grupos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen
           name="PlayerProfileInEvent"
           component={PlayerProfileInEventScreen}
