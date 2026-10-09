@@ -1,3 +1,4 @@
+import { countProfileSeries, type ProfileBracketMatch, type ProfileGroupPairing } from '../lib/profileSeriesCount';
 import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
   View,
@@ -820,7 +821,11 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     // Copa: los pairings nunca tienen official_winner_participant_id (el ganador de cada cruce vive en el cuadro:
     // event_tiebreak_bracket_matches), así que el conteo por pairing daba 0 para todos. Se cuentan los cruces
     // resueltos de AMBAS copas; las venganzas no entran (no son cruces del cuadro).
-    if (competitionFormat === 'knockout') {
+    // Copa sola: los pairings no tienen resultado oficial, todo sale del cuadro. Grupos + Copa: se SUMA al resultado oficial de
+    // la fase de grupos (zona e interzonal) cada serie resuelta de las llaves (Copa y Consuelo); la serie sale de
+    // event_tiebreak_bracket_matches, no de official_* del pairing, así que un par que se cruza en grupo y en copa cuenta dos veces
+    // (una por fase) sin pisarse. Un walkover por abandono cuenta como ganado para quien se queda (en cada fase).
+    if (competitionFormat === 'knockout' || competitionFormat === 'zones_knockout') {
       const cupGroupsRes = await supabase
         .from('event_tiebreak_groups')
         .select('id')
@@ -828,26 +833,22 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         .in('group_origin', ['knockout_bracket', 'knockout_second_chance'])
         .in('status', ['active', 'resolved', 'failed']);
       const cupGroupIds = ((cupGroupsRes.data ?? []) as { id: string }[]).map((g) => g.id);
-      let cupCompleted = 0;
-      let cupWon = 0;
+      let cupRows: ProfileBracketMatch[] = [];
       if (cupGroupIds.length > 0) {
         const cupBmRes = await supabase
           .from('event_tiebreak_bracket_matches')
           .select('participant_a_id, participant_b_id, winner_participant_id')
           .in('group_id', cupGroupIds);
-        for (const bm of (cupBmRes.data ?? []) as {
-          participant_a_id: string;
-          participant_b_id: string;
-          winner_participant_id: string | null;
-        }[]) {
-          if (bm.participant_a_id !== participantId && bm.participant_b_id !== participantId) continue;
-          if (bm.winner_participant_id == null) continue;
-          cupCompleted += 1;
-          if (bm.winner_participant_id === participantId) cupWon += 1;
-        }
+        cupRows = (cupBmRes.data ?? []) as ProfileBracketMatch[];
       }
-      setPairingsCompleted(cupCompleted);
-      setPairingsWon(cupWon);
+      const total = countProfileSeries({
+        participantId,
+        competitionFormat,
+        pairings: profilePairings as ProfileGroupPairing[],
+        bracketMatches: cupRows,
+      });
+      setPairingsCompleted(total.completed);
+      setPairingsWon(total.won);
     }
 
     // Grupo "principal" (fase mata-mata suiza/real de top4, o desempate clásico viejo tipo
@@ -1161,6 +1162,15 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           if (walkoverRes.error) {
             Alert.alert('Error', walkoverRes.error.message ?? 'No se pudieron resolver los enfrentamientos pendientes.');
             return;
+          }
+          // Grupos + Copa: además de la fase de grupos, resuelve los cruces pendientes de las llaves (Copa y Consuelo), si ya
+          // existen (apply_knockout_walkover, 0139). Antes del cierre de la fase no hay llaves y no hace nada.
+          if (eventCompetitionFormat === 'zones_knockout') {
+            const cupsRes = await supabase.rpc('apply_knockout_walkover', { p_participant_id: participantId });
+            if (cupsRes.error) {
+              Alert.alert('Error', cupsRes.error.message ?? 'No se pudo resolver la salida en las llaves.');
+              return;
+            }
           }
 
           // Fase 3 — ventana de recálculo del desempate de 1er puesto (round_robin BO3 clásico,

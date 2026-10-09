@@ -868,15 +868,24 @@ async function navigateAfterMatchMaybeComplete(
   eventId: string,
   matchId: string,
   previousEventStatus: string | null | undefined,
-  fromStandings?: boolean
+  fromStandings?: boolean,
+  fromNav?: { fromTab?: 'official' | 'revenge'; fromCup?: 'groups' | 'prima' | 'second' }
 ): Promise<void> {
-  const resultParams = { matchId, ...(fromStandings ? { fromStandings: true } : {}) };
+  const resultParams = {
+    matchId,
+    ...(fromStandings ? { fromStandings: true } : {}),
+    ...(fromNav?.fromTab ? { fromTab: fromNav.fromTab } : {}),
+    ...(fromNav?.fromCup ? { fromCup: fromNav.fromCup } : {}),
+  };
   // Copa: si esta partida cerró la FINAL de una de las dos copas (define 1er y 2do puesto), se va a Cruces de copa con
   // el tab de esa copa y el confeti. El resto de las partidas de una Copa no espera a que el evento se complete.
   const cupFinal = await cupFinalResolvedByMatch(matchId);
   if (cupFinal.isCupMatch) {
     if (cupFinal.cup) {
-      navigation.replace('Standings', { eventId, showPodiumIntro: true, cup: cupFinal.cup });
+      // Grupos + Copa: "Cruces de copa" (misma pantalla de posiciones en vista de copas); Copa sola: su cuadro.
+      const fmtRes0 = await supabase.from('draft_events').select('competition_format').eq('id', eventId).maybeSingle();
+      const isZones = (fmtRes0.data as { competition_format?: string | null } | null)?.competition_format === 'zones_knockout';
+      navigation.replace('Standings', { eventId, showPodiumIntro: true, cup: cupFinal.cup, ...(isZones ? { view: 'cups' as const } : {}) });
     } else {
       navigation.replace('MatchResult', resultParams);
     }
@@ -1679,6 +1688,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   }, [matchId]);
 
   const pairingsFromTab = route.params.fromTab ?? 'official';
+  const pairingsFromCup = route.params.fromCup;
   const fromStandings = route.params.fromStandings;
 
   useLayoutEffect(() => {
@@ -1687,10 +1697,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', {
         pairingId: pairing.id,
         fromTab: pairingsFromTab,
+        ...(pairingsFromCup ? { fromCup: pairingsFromCup } : {}),
         ...(fromStandings ? { fromStandings: true } : {}),
       }),
     });
-  }, [navigation, pairing?.id, pairingsFromTab, fromStandings]);
+  }, [navigation, pairing?.id, pairingsFromTab, pairingsFromCup, fromStandings]);
 
   const persistLife = useCallback(
     async (target: 'a' | 'b', overrideValue?: number, checkWin = true) => {
@@ -1841,10 +1852,16 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                   pairing.event_id,
                   matchId,
                   previousEventStatus,
-                  fromStandings
+                  fromStandings,
+                  { fromTab: pairingsFromTab, fromCup: pairingsFromCup }
                 );
               } else {
-                navigation.replace('MatchResult', { matchId, ...(fromStandings ? { fromStandings: true } : {}) });
+                navigation.replace('MatchResult', {
+                  matchId,
+                  ...(fromStandings ? { fromStandings: true } : {}),
+                  fromTab: pairingsFromTab,
+                  ...(pairingsFromCup ? { fromCup: pairingsFromCup } : {}),
+                });
               }
             },
           },
@@ -1917,10 +1934,16 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               pairing.event_id,
               matchId,
               previousEventStatus,
-              fromStandings
+              fromStandings,
+              { fromTab: pairingsFromTab, fromCup: pairingsFromCup }
             );
           } else {
-            navigation.replace('MatchResult', { matchId, ...(fromStandings ? { fromStandings: true } : {}) });
+            navigation.replace('MatchResult', {
+                  matchId,
+                  ...(fromStandings ? { fromStandings: true } : {}),
+                  fromTab: pairingsFromTab,
+                  ...(pairingsFromCup ? { fromCup: pairingsFromCup } : {}),
+                });
           }
         },
       },
@@ -2317,6 +2340,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
               ? navigation.navigate('PairingDetail', {
               pairingId: pairing.id,
               fromTab: pairingsFromTab,
+              ...(pairingsFromCup ? { fromCup: pairingsFromCup } : {}),
               ...(fromStandings ? { fromStandings: true } : {}),
             })
               : navigation.goBack()
@@ -2358,6 +2382,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             onPress={() => navigation.navigate('PairingDetail', {
               pairingId: pairing.id,
               fromTab: pairingsFromTab,
+              ...(pairingsFromCup ? { fromCup: pairingsFromCup } : {}),
               ...(fromStandings ? { fromStandings: true } : {}),
             })}
           >

@@ -728,6 +728,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   /** Grupos + Copa (0136/0137): zonas del evento y a qué zona pertenece cada jugador; el orden dentro de la zona sale de zone_standings. */
   const [zonesTable, setZonesTable] = useState<{ zones: { id: string; name: string }[]; zoneByParticipant: Map<string, string> } | null>(null);
   const [zoneTab, setZoneTab] = useState<string | null>(null);
+  /** Grupos + Copa: participantes de cada copa armada (event_tiebreak_group_participants); null mientras no existen las copas. */
+  const [zonesCups, setZonesCups] = useState<{ main: Set<string>; second: Set<string> | null } | null>(null);
   /** Grupos + Copa: completitud parcial por zona (pie de cada tabla) y si Consuelo se arma (N - T >= 4). */
   const [zonesCompleteness, setZonesCompleteness] = useState<Map<string, { done: number; total: number }>>(new Map());
   const [zonesConsuelo, setZonesConsuelo] = useState(false);
@@ -1072,6 +1074,25 @@ export default function StandingsScreen({ route, navigation }: Props) {
       const main = await loadBracket((mainGrpRes.data as { id: string } | null)?.id ?? null);
       const second = await loadBracket((secondGrpRes.data as { id: string } | null)?.id ?? null);
       secondGroupRow = (secondGrpRes.data as PodiumTiebreakGroupRow | null) ?? null;
+      // Grupos + Copa: quiénes clasificaron a cada copa, tal cual quedó armado (no se recalcula en el cliente).
+      if (fmt === 'zones_knockout') {
+        const mainGid = (mainGrpRes.data as { id: string } | null)?.id ?? null;
+        const secondGid = (secondGrpRes.data as { id: string } | null)?.id ?? null;
+        const gids = [mainGid, secondGid].filter((x): x is string => !!x);
+        if (mainGid && gids.length > 0) {
+          const gpRes = await supabase
+            .from('event_tiebreak_group_participants')
+            .select('group_id, participant_id')
+            .in('group_id', gids);
+          const rowsGp = (gpRes.error ? [] : (gpRes.data ?? [])) as { group_id: string; participant_id: string }[];
+          setZonesCups({
+            main: new Set(rowsGp.filter((r) => r.group_id === mainGid).map((r) => r.participant_id)),
+            second: secondGid ? new Set(rowsGp.filter((r) => r.group_id === secondGid).map((r) => r.participant_id)) : null,
+          });
+        } else {
+          setZonesCups(null);
+        }
+      }
       // Eliminados en su primer partido (lista previa al sorteo de la 2da oportunidad).
       const leftIds = new Set(
         (participants as { id: string; left_event_at?: string | null }[]).filter((p) => p.left_event_at).map((p) => String(p.id))
@@ -1600,7 +1621,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
         return bv - av;
       });
     }
-    if (rawFmt !== 'zones_knockout') setZonesTable(null);
+    if (rawFmt !== 'zones_knockout') {
+      setZonesTable(null);
+      setZonesCups(null);
+    }
     setSwissTopcutBracketView(swissTopcutBracketModel);
     setKnockoutBracket(knockoutBracketData);
     setRows(rowsBuilt);
@@ -1967,6 +1991,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
       : knockoutBracket != null && knockoutBracket.secondDrawn;
   const selectedCup: 'main' | 'second' = showSecondTab ? copaTab : 'main';
   // Grupos + Copa: una tabla por zona (tabs Grupo A, B, ...), la de la zona elegida con las filas ya ordenadas.
+  // Resalte y leyenda de copas: sólo con la fase de grupos cerrada (zones_phase_completed_at) y los grupos de llaves armados.
+  const cupsActive = !!zonesTable && zonesPhaseDone && zonesCups != null;
   const visibleRows = zonesTable ? rows.filter((r) => zonesTable.zoneByParticipant.get(r.participantId) === zoneTab) : rows;
 
   if (competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView)) {
@@ -2096,6 +2122,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 styles.row,
                 isFourthPlaceDisputant ? styles.rowFourthPlaceDispute : null,
                 r.leftEventAt ? styles.rowLeftEvent : null,
+                cupsActive ? styles.rowCupBar : null,
+                cupsActive && zonesCups?.main.has(r.participantId) ? styles.rowCupMain : null,
+                cupsActive && zonesCups?.second?.has(r.participantId) ? styles.rowCupConsuelo : null,
               ]}
               activeOpacity={0.7}
               onPress={() =>
@@ -2258,8 +2287,24 @@ export default function StandingsScreen({ route, navigation }: Props) {
       )}
 
       <View style={styles.legendLiveRow}>
-        <Text style={styles.legendStaticDot}>●</Text>
-        <Text style={styles.legendLiveCaption}> En juego</Text>
+        <View style={styles.legendCupItem}>
+          <Text style={styles.legendStaticDot}>●</Text>
+          <Text style={styles.legendLiveCaption}>En juego</Text>
+        </View>
+        {tab === 'official' && cupsActive ? (
+          <>
+            <View style={styles.legendCupItem}>
+              <View style={[styles.legendSwatch, styles.legendSwatchMain]} />
+              <Text style={styles.legendLiveCaption}>{cupPrimaName(venueName)}</Text>
+            </View>
+            {zonesCups?.second ? (
+              <View style={styles.legendCupItem}>
+                <View style={[styles.legendSwatch, styles.legendSwatchConsuelo]} />
+                <Text style={styles.legendLiveCaption}>{CUP_CONSUELO_NAME}</Text>
+              </View>
+            ) : null}
+          </>
+        ) : null}
       </View>
       {tab === 'official' && zonesTable ? (
         (() => {
@@ -2455,6 +2500,11 @@ const createStyles = (c: ThemeColors) =>
     // Mismo tono que tcMatchRowWin (resaltado de ganador en el cuadro de mata-mata suizo), para
     // que el fondo de "disputó el 4to puesto" se lea con intensidad consistente en toda la app.
     rowFourthPlaceDispute: { backgroundColor: c.status.warning.subtle },
+    // Grupos + Copa: clasificados a Copa {sede} (verde suave) y a Consuelo (marrón, bronzeRow).
+    // Barra fina a la izquierda con el color pleno de la copa; las filas sin copa la llevan transparente para no desalinear.
+    rowCupBar: { borderLeftWidth: 4, borderLeftColor: 'transparent' },
+    rowCupMain: { backgroundColor: c.status.success.subtle, borderLeftColor: c.status.success.solid },
+    rowCupConsuelo: { backgroundColor: c.bronzeRow, borderLeftColor: c.bronze.solid },
     rowContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     // La opacidad de "eliminado" va en el contenido, NUNCA en el contenedor que tiene el fondo
     // amarillo (rowFourthPlaceDispute): opacity ahí compositaría el fondo contra lo que hay
@@ -2519,7 +2569,12 @@ const createStyles = (c: ThemeColors) =>
     tourneyMetaBo3Norm: { color: c.textBody, fontWeight: '400' },
     tourneyMetaBo3Bold: { color: c.textBody, fontWeight: '700' },
     tourneyMetaBo3Sep: { color: c.textBody, fontWeight: '400' },
-    legendLiveRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+    legendCupItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    legendSwatch: { width: 10, height: 10, borderRadius: 2 },
+    legendSwatchMain: { backgroundColor: c.status.success.solid },
+    legendSwatchConsuelo: { backgroundColor: c.bronze.solid },
+    // Misma fila: [en juego] [Copa {sede}] [Copa Consuelo]; con wrap prolijo en pantallas chicas.
+    legendLiveRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 14, rowGap: 4, marginTop: 12 },
     legendStaticDot: { color: c.accent, fontWeight: '700', fontSize: 11 },
     legendLiveCaption: { color: c.textSecondary, fontSize: 11 },
     legendWrap: {

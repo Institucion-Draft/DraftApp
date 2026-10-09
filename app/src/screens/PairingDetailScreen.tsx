@@ -265,6 +265,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const {
     pairingId,
     fromTab: fromPairingsTab = 'official',
+    fromCup,
     fromPlayerProfile,
     bracketMatchId,
     fromStandings,
@@ -938,14 +939,17 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingsList', {
         eventId: pairing.event_id,
         initialTab: fromPairingsTab,
-        ...(activeTiebreakGroup?.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN
-          ? { initialCup: 'second' as const }
-          : isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
-            ? { initialCup: 'prima' as const }
-            : {}),
+        // La pestaña de la que se abrió (fromCup) manda; sin ella, se deduce de la copa del cruce.
+        ...(fromCup
+          ? { initialCup: fromCup }
+          : activeTiebreakGroup?.group_origin === KNOCKOUT_SECOND_CHANCE_ORIGIN
+            ? { initialCup: 'second' as const }
+            : isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
+              ? { initialCup: 'prima' as const }
+              : {}),
       }),
     });
-  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab, fromStandings, activeTiebreakGroup?.group_origin]);
+  }, [navigation, fromPlayerProfile, pairing?.event_id, fromPairingsTab, fromCup, fromStandings, activeTiebreakGroup?.group_origin]);
 
   if (loading) {
     return (
@@ -1288,6 +1292,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       navigation.navigate('LifeTracker', {
         matchId: String(activeRes.data.id),
         fromTab: fromPairingsTab,
+        ...(fromCup ? { fromCup } : {}),
         ...(fromStandings ? { fromStandings: true } : {}),
       });
       return;
@@ -1317,6 +1322,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     navigation.navigate('LifeTracker', {
       matchId: String(data.id),
       fromTab: fromPairingsTab,
+      ...(fromCup ? { fromCup } : {}),
       ...(fromStandings ? { fromStandings: true } : {}),
     });
   };

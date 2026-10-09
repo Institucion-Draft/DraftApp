@@ -92,6 +92,13 @@ export type ThemeColors = {
   /** Bronce (insignia del campeón de la Copa Consuelo): menos prestigiosa que `achievement` (oro). */
   bronze: StatusColors;
 
+  /**
+   * Fondo de fila para los clasificados a la Copa Consuelo en la tabla de posiciones: marrón más intenso que
+   * `bronze.subtle` y de otra familia que el amarillo de `status.warning.subtle` (clasificados a la Copa principal).
+   * Contraste del texto de la fila (`text`): claro #111 sobre #dfc2a0 ~11:1; oscuro #f3f4f6 sobre #5a3d24 ~8:1.
+   */
+  bronzeRow: string;
+
   /** Fondo semitransparente detrás de modales. */
   overlay: string;
   /** Color de sombra (iOS shadowColor). */
@@ -132,6 +139,7 @@ export const lightColors: ThemeColors = {
 
   revengeLine: '#7a1020',
   bronze: { subtle: '#f6e9dd', border: '#c98f5a', text: '#6b3a14', solid: '#b0703a', onSolid: '#ffffff' },
+  bronzeRow: '#dfc2a0',
 
   overlay: 'rgba(0,0,0,0.45)',
   shadow: '#000000',
@@ -171,6 +179,7 @@ export const darkColors: ThemeColors = {
   // Contraste contra background (#0e1116) ~3.1:1: alcanza para una línea gráfica de 3px.
   revengeLine: '#c4242f',
   bronze: { subtle: '#33231a', border: '#7a4e2c', text: '#e0a470', solid: '#cd8a52', onSolid: '#0e1116' },
+  bronzeRow: '#5a3d24',
 
   overlay: 'rgba(0,0,0,0.6)',
   shadow: '#000000',

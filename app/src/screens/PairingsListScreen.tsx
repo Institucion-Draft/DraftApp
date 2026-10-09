@@ -422,7 +422,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       navigation.setParams({ eventId, initialTab: undefined, initialCup: undefined });
     } else if (initialTab === 'official') {
       setTab('officials');
-      if (initialCup) setCupTab(initialCup);
+      if (initialCup === 'prima' || initialCup === 'second') setCupTab(initialCup);
+      // Grupos + Copa: vuelve a la pestaña de Oficiales de la que se vino (por defecto, Fase de grupos).
+      setZonesTab(initialCup ?? 'groups');
       navigation.setParams({ eventId, initialTab: undefined, initialCup: undefined });
     }
   }, [route.params.initialTab, route.params.initialCup, eventId, navigation]);
@@ -1579,7 +1581,11 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         <TouchableOpacity
           style={styles.card}
           onPress={() =>
-            navigation.navigate('PairingDetail', { pairingId: item.id, fromTab: 'official' })
+            navigation.navigate('PairingDetail', {
+              pairingId: item.id,
+              fromTab: 'official',
+              ...(competitionFormat === 'zones_knockout' ? { fromCup: zonesTab } : {}),
+            })
           }
         >
           <View style={styles.compactRow}>
@@ -1710,7 +1716,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       );
     },
-    [navigation, myUserId, eventType, competitionFormat, officialBo1, colors, styles]
+    [navigation, myUserId, eventType, competitionFormat, officialBo1, zonesTab, colors, styles]
   );
 
   // Copa: pestaña Venganzas como en Suizo (mis vs contra todos los demás jugadores del evento).
@@ -2085,6 +2091,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                             navigation.navigate('PairingDetail', {
                               pairingId: targetPairingId,
                               fromTab: 'official',
+                              ...(isZonesPhase ? { fromCup: activeZonesTab } : isCopa ? { fromCup: activeCupTab } : {}),
                               // En la fase mata-mata, pasar el bracket match para que el detalle
                               // muestre la identidad real del cruce (no la del pairing compartido).
                               ...(isBracket ? { bracketMatchId: it.id } : {}),

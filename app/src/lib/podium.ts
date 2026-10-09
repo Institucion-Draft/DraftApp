@@ -1181,7 +1181,7 @@ export function computePodium(
 
   // Copa (sólo llaves): el único podio válido sale del bracket (group_origin='knockout_bracket').
   // Sin grupo todavía (draft sin sortear), podio vacío — nunca proyectar desde pairings.
-  if (competitionFormat === 'knockout' && activeTiebreakGroup == null) {
+  if ((competitionFormat === 'knockout' || competitionFormat === 'zones_knockout') && activeTiebreakGroup == null) {
     return {
       steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
       spectators: participants,
@@ -1266,7 +1266,7 @@ export function computePodium(
         bracketMatches ?? [],
         // Copa: sus pairings son sólo de llaves y nunca tienen resultado oficial; si contaran como
         // pendientes, isFinal no se cumpliría jamás. La final y el 3er puesto resueltos alcanzan.
-        competitionFormat === 'knockout' ? [] : pairingsRemaining
+        competitionFormat === 'knockout' || competitionFormat === 'zones_knockout' ? [] : pairingsRemaining
       );
     } else {
       if (noGroupChampion) {

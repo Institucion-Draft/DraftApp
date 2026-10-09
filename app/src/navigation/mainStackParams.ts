@@ -66,10 +66,12 @@ export type MainStackParamList = {
     from?: 'Standings' | 'EventDetail';
   };
   /** `initialCup`: sub-tab de Oficiales en la Copa ('prima' | 'second'). */
-  PairingsList: { eventId: string; initialTab?: 'official' | 'revenge'; initialCup?: 'prima' | 'second' };
+  PairingsList: { eventId: string; initialTab?: 'official' | 'revenge'; initialCup?: 'groups' | 'prima' | 'second' };
   PairingDetail: {
     pairingId: string;
     fromTab?: 'official' | 'revenge';
+    /** Pestaña de Oficiales de la que se abrió (Fase de grupos / Copa {sede} / Consuelo): el Atrás vuelve a ella. */
+    fromCup?: 'groups' | 'prima' | 'second';
     /** Origen perfil: el atrás del header vuelve a PlayerProfileInEvent. */
     fromPlayerProfile?: { eventId: string; participantId: string; from?: 'Standings' | 'EventDetail' };
     /**
@@ -86,9 +88,14 @@ export type MainStackParamList = {
   CubeRoulette: { eventId: string };
   /** `fromTab` conserva la pestaña de PairingsList al volver desde LifeTracker a PairingDetail. */
   /** `fromStandings`: viene del cuadro de la Copa; se arrastra para que Atrás de PairingDetail vuelva a Standings. */
-  LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge'; fromStandings?: boolean };
+  LifeTracker: { matchId: string; fromTab?: 'official' | 'revenge'; fromCup?: 'groups' | 'prima' | 'second'; fromStandings?: boolean };
   LifeChart: { matchId: string };
-  MatchResult: { matchId: string; fromStandings?: boolean };
+  MatchResult: {
+    matchId: string;
+    fromStandings?: boolean;
+    fromTab?: 'official' | 'revenge';
+    fromCup?: 'groups' | 'prima' | 'second';
+  };
   /** `cup`: copa a mostrar en Cruces de copa ('prima' | 'second'); `showPodiumIntro` dispara el confeti. */
   Standings: { eventId: string; showPodiumIntro?: boolean; cup?: 'prima' | 'second'; view?: 'cups' };
   Playground: { workspaceId: string };
