@@ -14,7 +14,11 @@ export type HighlightZone = {
   players: { participantId: string; rank: number }[];
 };
 
-/** Consuelo se arma con N - T entre 4 y 16 (el cuadro admite hasta 16), igual que zones_build_cups. */
+/**
+ * Resalte PROVISORIO de Consuelo: sólo cuando N - T está entre 4 y 16. Con más de 16 no clasificados, quiénes pasan (los 16
+ * mejores) recién se sabe al armarse las copas, así que antes del armado no se resalta a nadie en marrón; después manda la
+ * membresía del grupo de Consuelo.
+ */
 export function consueloFits(playerCount: number, totalCupPlaces: number): boolean {
   const rest = playerCount - totalCupPlaces;
   return rest >= 4 && rest <= 16;

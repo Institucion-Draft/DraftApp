@@ -37,9 +37,6 @@ const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] 
   { value: 'knockout', label: getCompetitionFormatBaseLabel('knockout') },
 ];
 
-const KNOCKOUT_SANDBOX_TEXT =
-  'Las Copas se crean siempre en modo sandbox: todavía no suman al ranking ni a los logros.';
-
 const ZONES_HINT_TEXT =
   'Los grupos se sortean al finalizar el draft: ahí se elige la cantidad de zonas, el interzonal y cuántos pasan a la Copa.';
 
@@ -185,10 +182,6 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const hasMataMata = competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4);
   const isKnockout = competitionFormat === 'knockout';
   const isZones = competitionFormat === 'zones_knockout';
-  // Hasta que se escriba la exclusión de logros para Copa, toda Copa (sólo llaves o grupos + llaves) se crea en
-  // sandbox (is_official = false).
-  const forcedSandbox = isKnockout || isZones;
-  const effectiveIsOfficial = forcedSandbox ? false : isOfficial;
 
   const validate = (): string | null => {
     const n = name.trim();
@@ -215,7 +208,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       created_by: user.id,
       status: 'scheduled',
       turn_tracking_enabled: turnTrackingEnabled,
-      is_official: effectiveIsOfficial,
+      is_official: isOfficial,
     };
     if (competitionFormat === 'knockout') {
       // Copa (sólo llaves): sin match_format ni top_size (null); sólo el formato de las llaves.
@@ -372,12 +365,10 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           body="Los eventos sandbox no afectan las estadísticas ni el historial de los jugadores. Ideal para pruebas."
         />
         <Switch
-          value={forcedSandbox ? true : !isOfficial}
-          disabled={forcedSandbox}
+          value={!isOfficial}
           onValueChange={(v) => setIsOfficial(!v)}
         />
       </View>
-      {forcedSandbox ? <Text style={styles.formatHint}>{KNOCKOUT_SANDBOX_TEXT}</Text> : null}
 
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
