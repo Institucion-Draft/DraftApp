@@ -692,7 +692,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setMyParticipantId(mine?.id ?? null);
     setCubeName((cubeRes.data as any)?.name ?? null);
     setVenueName((venueRes.data as any)?.name ?? null);
-    if (normalizeCompetitionFormat(e.competition_format) === 'knockout') {
+    if (['knockout', 'zones_knockout'].includes(normalizeCompetitionFormat(e.competition_format))) {
       const consueloRes = await supabase
         .from('event_tiebreak_groups')
         .select('champion_user_id')
@@ -2052,13 +2052,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                       {event.champion_user_id && p.user_id === event.champion_user_id ? (
                         <View style={styles.championBadge}>
                           <Text style={styles.championBadgeText}>
-                            {normalizeCompetitionFormat(event.competition_format) === 'knockout'
+                            {['knockout', 'zones_knockout'].includes(normalizeCompetitionFormat(event.competition_format))
                               ? `${participantChampionLabel} ${cupPrimaName(venueName)}`
                               : participantChampionLabel}
                           </Text>
                         </View>
                       ) : null}
-                      {normalizeCompetitionFormat(event.competition_format) === 'knockout' &&
+                      {['knockout', 'zones_knockout'].includes(normalizeCompetitionFormat(event.competition_format)) &&
                       consueloChampionUserId &&
                       p.user_id === consueloChampionUserId ? (
                         <View style={styles.consueloBadge}>

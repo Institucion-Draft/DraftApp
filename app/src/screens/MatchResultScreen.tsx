@@ -82,7 +82,7 @@ function topcutWinsNeededClient(
 export default function MatchResultScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const { matchId, fromStandings } = route.params;
+  const { matchId, fromStandings, fromTab: routeFromTab, fromCup: routeFromCup } = route.params;
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<MatchRow | null>(null);
   const [pairing, setPairing] = useState<PairingRow | null>(null);
@@ -354,32 +354,42 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     navigation.setOptions({
       headerLeft: hierarchicalHeaderBack(navigation, 'PairingDetail', {
         pairingId: pairing.id,
+        ...(routeFromTab ? { fromTab: routeFromTab } : {}),
+        ...(routeFromCup ? { fromCup: routeFromCup } : {}),
         ...(fromStandings ? { fromStandings: true } : {}),
       }),
     });
-  }, [navigation, pairing?.id, fromStandings]);
+  }, [navigation, pairing?.id, fromStandings, routeFromTab, routeFromCup]);
 
   // Copa: "Enfrentamientos" vuelve a Oficiales con el sub-tab de la copa a la que pertenece la partida.
+  // "Enfrentamientos" vuelve a la pestaña de Oficiales de la que viene la partida (Copa {sede}, Consuelo o Fase de grupos).
+  // Una serie de llaves (tiebreak) va a la pestaña de SU copa; una partida de grupos, a Fase de grupos; una venganza, a Venganzas.
   const goToPairingsList = async () => {
     if (!pairing) return;
-    let cup: 'prima' | 'second' | null = null;
-    const bmRes = await supabase
-      .from('event_tiebreak_bracket_matches')
-      .select('group_id')
-      .eq('pairing_id', pairing.id);
-    const groupIds = ((bmRes.data ?? []) as { group_id: string }[]).map((r) => r.group_id);
-    if (groupIds.length > 0) {
-      const gRes = await supabase.from('event_tiebreak_groups').select('group_origin').in('id', groupIds);
-      const origins = ((gRes.data ?? []) as { group_origin: string }[]).map((r) => r.group_origin);
-      if (origins.includes(KNOCKOUT_SECOND_CHANCE_ORIGIN)) cup = 'second';
-      else if (origins.some((x) => isKnockoutCupOrigin(x))) cup = 'prima';
+    const isCupFormat = competitionFormat === 'zones_knockout' || competitionFormat === 'knockout';
+    let initial: { initialTab?: 'official' | 'revenge'; initialCup?: 'groups' | 'prima' | 'second' } = {};
+    if (isCupFormat) {
+      if (match?.match_type === 'revenge') {
+        initial = { initialTab: 'revenge' };
+      } else if (match?.match_type === 'tiebreak') {
+        let cup: 'prima' | 'second' | null = null;
+        const bmRes = await supabase
+          .from('event_tiebreak_bracket_matches')
+          .select('group_id')
+          .eq('pairing_id', pairing.id);
+        const groupIds = ((bmRes.data ?? []) as { group_id: string }[]).map((r) => r.group_id);
+        if (groupIds.length > 0) {
+          const gRes = await supabase.from('event_tiebreak_groups').select('group_origin').in('id', groupIds);
+          const origins = ((gRes.data ?? []) as { group_origin: string }[]).map((r) => r.group_origin);
+          if (origins.includes(KNOCKOUT_SECOND_CHANCE_ORIGIN)) cup = 'second';
+          else if (origins.some((x) => isKnockoutCupOrigin(x))) cup = 'prima';
+        }
+        if (cup) initial = { initialTab: 'official', initialCup: cup };
+      } else if (competitionFormat === 'zones_knockout') {
+        initial = { initialTab: 'official', initialCup: 'groups' };
+      }
     }
-    // Grupos + Copa: se vuelve a la pestaña Oficiales (o a Venganzas si la partida fue una venganza).
-    const zonesTab = competitionFormat === 'zones_knockout' ? (match?.match_type === 'revenge' ? 'revenge' : 'official') : null;
-    navigation.navigate('PairingsList', {
-      eventId: pairing.event_id,
-      ...(cup ? { initialTab: 'official' as const, initialCup: cup } : zonesTab ? { initialTab: zonesTab } : {}),
-    });
+    navigation.navigate('PairingsList', { eventId: pairing.event_id, ...initial });
   };
 
   if (loading || !match || !pairing || !pa || !pb) {
