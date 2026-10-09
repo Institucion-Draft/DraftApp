@@ -19,7 +19,7 @@ export type ZoneOptionText = {
   matches: string;
   /** "Interzonal: Sí" | "Interzonal: No" */
   interzonal: string;
-  /** "Jugadores que clasifican por grupo: 2" (con comodines: "2 + 2 mejores 3°") */
+  /** "2 clasificados por grupo" (con comodines: "2 clasificados por grupo + los 2 mejores terceros") */
   qualifiers: string;
   /** "Jugadores a Copa Quito: 8" */
   copa: string;
@@ -38,10 +38,52 @@ export function zoneInterzonalText(o: Pick<ZoneOption, 'interzonal'>): string {
   return `Interzonal: ${o.interzonal ? 'Sí' : 'No'}`;
 }
 
+const ORDINALS_M: Record<number, string> = {
+  2: 'segundo',
+  3: 'tercero',
+  4: 'cuarto',
+  5: 'quinto',
+  6: 'sexto',
+  7: 'séptimo',
+  8: 'octavo',
+  9: 'noveno',
+  10: 'décimo',
+};
+
+/** Ordinal masculino ("tercero" / "terceros"); fuera de la tabla, "11°" (sin plural especial). */
+export function ordinalMasculine(n: number, plural = false): string {
+  const w = ORDINALS_M[n];
+  if (!w) return `${n}°`;
+  return plural ? `${w}s` : w;
+}
+
+/**
+ * Texto ÚNICO de los clasificados (sorteo y bloque de la tabla), con singular/plural y ordinal:
+ * "1 clasificado por grupo + el mejor tercero", "2 clasificados por grupo + los 2 mejores terceros", "2 clasificados por grupo".
+ * Con wildcards, el ordinal es el del puesto siguiente a los clasificados (q + 1).
+ */
 export function zoneQualifiersText(o: Pick<ZoneOption, 'qualifiers' | 'wildcards'>): string {
-  const base = `${o.qualifiers}`;
-  const value = o.wildcards > 0 ? `${base} + ${o.wildcards} mejores ${o.qualifiers + 1}°` : base;
-  return `Jugadores que clasifican por grupo: ${value}`;
+  const q = o.qualifiers;
+  const base = `${q} ${q === 1 ? 'clasificado' : 'clasificados'} por grupo`;
+  if (o.wildcards <= 0) return base;
+  const w = o.wildcards;
+  const wild = w === 1 ? `el mejor ${ordinalMasculine(q + 1)}` : `los ${w} mejores ${ordinalMasculine(q + 1, true)}`;
+  return `${base} + ${wild}`;
+}
+
+/** Clasificados a la Copa principal: "2 clasificados por grupo + el mejor tercero a Copa Quito". */
+export function zoneQualifiersToCupText(o: Pick<ZoneOption, 'qualifiers' | 'wildcards'>, names: CupNames): string {
+  return `${zoneQualifiersText(o)} a ${names.prima}`;
+}
+
+/** Modalidad: "Grupos BO1 · Llaves BO3" (los formatos ya vienen como etiqueta, "—" si faltan). */
+export function zoneFormatLine(matchFormatLabel: string, topcutFormatLabel: string): string {
+  return `Grupos ${matchFormatLabel} · Llaves ${topcutFormatLabel}`;
+}
+
+/** Total a Consuelo, sólo el número: "8 jugadores a Copa Consuelo". */
+export function zoneConsueloTotalText(consueloSize: number, names: CupNames): string {
+  return `${consueloSize} ${consueloSize === 1 ? 'jugador' : 'jugadores'} a ${names.consuelo}`;
 }
 
 export function zoneCopaText(o: Pick<ZoneOption, 'copaSize'>, names: CupNames): string {

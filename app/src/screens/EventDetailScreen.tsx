@@ -849,7 +849,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     await load();
   };
 
-  // Copa (sólo llaves): dar por concluido deja el evento en 'concluded' tal cual están las dos copas: los cruces y
+  // Copa (sólo llaves) y Grupos + Copa: dar por concluido deja el evento en 'concluded' tal cual están las dos copas: los cruces y
   // partidas sin resolver quedan suspendidos (sin ganador, sin walkovers inventados) y cada podio queda con los
   // puestos que ya estaban resueltos. Campeón = ganador de la final de la copa principal si está resuelta; si no, null.
   const concludeCopa = async () => {
@@ -891,10 +891,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       await concludeCopa();
       return;
     }
-    // Grupos + Copa: pasa a 'concluded' tal cual está (sin inventar resultados ni tocar partidas en curso). Qué
-    // campeón/podio corresponde cuando se concluye sin Copa queda para el pasaje a la Copa (B4, ver IDEAS.md).
+    // Grupos + Copa: igual que la Copa. Concluye con lo que esté resuelto; el campeón es el de la final de la Copa principal
+    // si ya está resuelta. Si la fase de grupos no cerró no hay llaves (no se arman al concluir): sin campeón y la tabla de
+    // grupos es el resultado final.
     if (concludeFormat === 'zones_knockout') {
-      await patchEvent({ status: 'concluded', event_ended_at: new Date().toISOString(), champion_user_id: null });
+      await concludeCopa();
       return;
     }
 

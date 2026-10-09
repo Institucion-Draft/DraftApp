@@ -19,6 +19,10 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import { fetchEventVenueName } from '../lib/eventVenueName';
 import { zonePhaseCompleteness } from '../lib/zonesPairingsList';
+import { consueloFits, cupHighlightOf, provisionalCupHighlights } from '../lib/zonesCupHighlight';
+import { buildZoneOption } from '../lib/zonesPlanner';
+import { zoneConsueloTotalText, zoneFormatLine, zoneQualifiersToCupText } from '../lib/zonesPlannerText';
+import ZonesSchema from '../components/ZonesSchema';
 import { consueloWillBeCreated } from '../lib/zonesPlanner';
 import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
@@ -733,6 +737,11 @@ export default function StandingsScreen({ route, navigation }: Props) {
   /** Grupos + Copa: completitud parcial por zona (pie de cada tabla) y si Consuelo se arma (N - T >= 4). */
   const [zonesCompleteness, setZonesCompleteness] = useState<Map<string, { done: number; total: number }>>(new Map());
   const [zonesConsuelo, setZonesConsuelo] = useState(false);
+  /** Grupos + Copa: posición en la zona (zone_standings) y configuración q / w / zonas, para el resalte provisorio previo al armado. */
+  const [zonesRanks, setZonesRanks] = useState<Map<string, number>>(new Map());
+  const [zonesCfg, setZonesCfg] = useState<{ q: number; w: number; count: number } | null>(null);
+  /** Grupos + Copa: modalidad (grupos / llaves) y si hay interzonal, para el esquema bajo la tabla. */
+  const [zonesModes, setZonesModes] = useState<{ match: string | null; topcut: string | null; interzonal: boolean }>({ match: null, topcut: null, interzonal: false });
   /** Grupos + Copa: la fase de grupos terminó (zones_phase_completed_at); recién ahí se muestran las tabs de copa. */
   const [zonesPhaseDone, setZonesPhaseDone] = useState(false);
   /** True cuando el evento es swiss con match_format='bo2' (competitionFormat ya viene mapeado a 'swiss' para cualquier BO; este flag distingue matices de display). */
@@ -1528,6 +1537,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       rowsBuilt.sort((a, b) => (orderKey.get(a.participantId) ?? 1e9) - (orderKey.get(b.participantId) ?? 1e9));
       const zones = [...zoneList.values()].sort((a, b) => a.index - b.index).map((z) => ({ id: z.id, name: z.name }));
       setZonesTable({ zones, zoneByParticipant });
+      setZonesRanks(new Map(zsRows.map((z) => [z.participant_id, z.rank_in_zone])));
       const leftIdSet = new Set(
         (participants as { id: string; left_event_at?: string | null }[]).filter((p) => p.left_event_at).map((p) => String(p.id))
       );
@@ -1538,6 +1548,16 @@ export default function StandingsScreen({ route, navigation }: Props) {
       setZonesCompleteness(completeness);
       const evZ = eventRes.data as { zones_count?: number | null; zone_qualifiers?: number | null; zone_wildcards?: number | null; zones_phase_completed_at?: string | null } | null;
       setZonesPhaseDone(!!evZ?.zones_phase_completed_at);
+      setZonesModes({
+        match: rawMatchFormat ?? null,
+        topcut: (eventRes.data as { topcut_format?: string | null } | null)?.topcut_format ?? null,
+        interzonal: (pairings as { stage?: string | null }[]).some((p) => p.stage === 'interzonal'),
+      });
+      setZonesCfg(
+        evZ?.zones_count != null && evZ?.zone_qualifiers != null
+          ? { q: evZ.zone_qualifiers, w: evZ.zone_wildcards ?? 0, count: evZ.zones_count }
+          : null
+      );
       setZonesConsuelo(
         evZ?.zones_count != null && evZ?.zone_qualifiers != null
           ? consueloWillBeCreated(zoneByParticipant.size, evZ.zones_count, evZ.zone_qualifiers, evZ.zone_wildcards ?? 0)
@@ -1734,8 +1754,9 @@ export default function StandingsScreen({ route, navigation }: Props) {
   }, [load]);
 
   useEffect(() => {
-    // Copa: el confeti sólo sale al llegar desde el resultado de la final (showPodiumIntro), nunca por entrar al podio.
-    if (competitionFormat === 'knockout') return undefined;
+    // Copa (y Grupos + Copa): el confeti sólo sale al llegar desde el resultado de una final (showPodiumIntro), nunca por
+    // entrar al podio ni por un evento concluido (que puede no tener campeón).
+    if (competitionFormat === 'knockout' || competitionFormat === 'zones_knockout') return undefined;
     if (eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return undefined;
     let cancelled = false;
     let dismissT: ReturnType<typeof setTimeout> | undefined;
@@ -1768,7 +1789,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (!showPodiumIntro) return;
-    if (competitionFormat !== 'knockout' && eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return;
+    const isCupFmt = competitionFormat === 'knockout' || competitionFormat === 'zones_knockout';
+    if (!isCupFmt && eventStatusStored !== 'completed' && eventStatusStored !== 'concluded') return;
     let cancelled = false;
     setShowConfettiOnce(true);
     void (async () => {
@@ -1933,10 +1955,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
   };
 
   const buildPodiumBlock = (ps: PodiumState | null, title: string | null, isMainCup: boolean, needTop2 = false) => {
+    // Podio de una copa (needTop2): se arma por puesto resuelto, así que alcanza con que figure alguno (por ejemplo el 3º
+    // cuando la final todavía no se jugó); los puestos que faltan quedan vacíos y no hay campeón inventado.
     const filled =
       ps != null &&
-      (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0 &&
-      (!needTop2 || (ps.steps.find((s) => s.rank === 2)?.players.length ?? 0) > 0);
+      (needTop2
+        ? ps.steps.some((s) => s.players.length > 0)
+        : (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0);
     if (!ps || !filled) return null;
     return (
       <View style={styles.podiumSection}>
@@ -1992,8 +2017,32 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const selectedCup: 'main' | 'second' = showSecondTab ? copaTab : 'main';
   // Grupos + Copa: una tabla por zona (tabs Grupo A, B, ...), la de la zona elegida con las filas ya ordenadas.
   // Resalte y leyenda de copas: sólo con la fase de grupos cerrada (zones_phase_completed_at) y los grupos de llaves armados.
-  const cupsActive = !!zonesTable && zonesPhaseDone && zonesCups != null;
+  // Antes del armado el resalte es provisorio y por zona (sólo zonas con todos sus enfrentamientos cerrados); con las copas
+  // armadas manda la membresía de los grupos de llaves.
+  const provisionalCups = (() => {
+    if (!zonesTable || zonesCups != null || !zonesCfg) return new Map<string, 'main' | 'second'>();
+    const byZone = new Map<string, { participantId: string; rank: number }[]>();
+    for (const [pid, zid] of zonesTable.zoneByParticipant) {
+      if (!byZone.has(zid)) byZone.set(zid, []);
+      byZone.get(zid)!.push({ participantId: pid, rank: zonesRanks.get(pid) ?? 1e9 });
+    }
+    return provisionalCupHighlights({
+      zones: zonesTable.zones.map((z) => {
+        const c = zonesCompleteness.get(z.id);
+        return { complete: !!c && c.total > 0 && c.done >= c.total, players: byZone.get(z.id) ?? [] };
+      }),
+      qualifiers: zonesCfg.q,
+      wildcards: zonesCfg.w,
+      playerCount: zonesTable.zoneByParticipant.size,
+      zonesCount: zonesCfg.count,
+    });
+  })();
+  const highlightOf = (pid: string) => (zonesTable ? cupHighlightOf(zonesCups, provisionalCups, pid) : null);
   const visibleRows = zonesTable ? rows.filter((r) => zonesTable.zoneByParticipant.get(r.participantId) === zoneTab) : rows;
+  const visibleHighlights = visibleRows.map((r) => highlightOf(r.participantId));
+  const cupsActive = visibleHighlights.some((h) => h != null);
+  const legendMain = visibleHighlights.includes('main');
+  const legendSecond = zonesCups != null ? cupsActive && !!zonesCups.second : visibleHighlights.includes('second');
 
   if (competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView)) {
     return (
@@ -2123,8 +2172,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 isFourthPlaceDisputant ? styles.rowFourthPlaceDispute : null,
                 r.leftEventAt ? styles.rowLeftEvent : null,
                 cupsActive ? styles.rowCupBar : null,
-                cupsActive && zonesCups?.main.has(r.participantId) ? styles.rowCupMain : null,
-                cupsActive && zonesCups?.second?.has(r.participantId) ? styles.rowCupConsuelo : null,
+                highlightOf(r.participantId) === 'main' ? styles.rowCupMain : null,
+                highlightOf(r.participantId) === 'second' ? styles.rowCupConsuelo : null,
               ]}
               activeOpacity={0.7}
               onPress={() =>
@@ -2293,11 +2342,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
         </View>
         {tab === 'official' && cupsActive ? (
           <>
-            <View style={styles.legendCupItem}>
-              <View style={[styles.legendSwatch, styles.legendSwatchMain]} />
-              <Text style={styles.legendLiveCaption}>{cupPrimaName(venueName)}</Text>
-            </View>
-            {zonesCups?.second ? (
+            {legendMain ? (
+              <View style={styles.legendCupItem}>
+                <View style={[styles.legendSwatch, styles.legendSwatchMain]} />
+                <Text style={styles.legendLiveCaption}>{cupPrimaName(venueName)}</Text>
+              </View>
+            ) : null}
+            {legendSecond ? (
               <View style={styles.legendCupItem}>
                 <View style={[styles.legendSwatch, styles.legendSwatchConsuelo]} />
                 <Text style={styles.legendLiveCaption}>{CUP_CONSUELO_NAME}</Text>
@@ -2395,6 +2446,33 @@ export default function StandingsScreen({ route, navigation }: Props) {
           </>
         );
       })()}
+      {tab === 'official' && zonesTable && zonesCfg && zonesTable.zones.length > 0
+        ? (() => {
+            // Esquema informativo de la competencia (mismo componente del sorteo): visible desde que los grupos están sorteados.
+            const N = zonesTable.zoneByParticipant.size;
+            const sizes = zonesTable.zones.map((z) => {
+              let n = 0;
+              for (const zid of zonesTable.zoneByParticipant.values()) if (zid === z.id) n += 1;
+              return n;
+            });
+            const base = buildZoneOption(N, zonesCfg.count, zonesCfg.q, zonesCfg.w, zonesModes.interzonal);
+            const option = { ...base, zoneSizes: sizes, interzonal: zonesModes.interzonal, consueloCreated: consueloFits(N, base.copaSize) };
+            const names = { prima: cupPrimaName(venueName), consuelo: CUP_CONSUELO_NAME };
+            const fmtLabel = (f: string | null) => (f === 'bo1' || f === 'bo2' || f === 'bo3' ? f.toUpperCase() : '—');
+            return (
+              <>
+              <View style={styles.schemaDivider} />
+              <Text style={styles.schemaHeading}>Modalidad de clasificación</Text>
+              <View style={styles.schemaBlock}>
+                <Text style={styles.schemaLine}>{zoneFormatLine(fmtLabel(zonesModes.match), fmtLabel(zonesModes.topcut))}</Text>
+                <ZonesSchema option={option} names={names} />
+                <Text style={styles.schemaLine}>{zoneQualifiersToCupText(option, names)}</Text>
+                {option.consueloCreated ? <Text style={styles.schemaLine}>{zoneConsueloTotalText(option.consueloSize, names)}</Text> : null}
+              </View>
+              </>
+            );
+          })()
+        : null}
       {tab === 'official' && swissTopcutBracketView ? (
         <SwissTopcutBracketBlock model={swissTopcutBracketView} />
       ) : null}
@@ -2574,6 +2652,10 @@ const createStyles = (c: ThemeColors) =>
     legendSwatchMain: { backgroundColor: c.status.success.solid },
     legendSwatchConsuelo: { backgroundColor: c.bronze.solid },
     // Misma fila: [en juego] [Copa {sede}] [Copa Consuelo]; con wrap prolijo en pantallas chicas.
+    schemaDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider, marginTop: 16, marginBottom: 12 },
+    schemaHeading: { fontSize: 14, fontWeight: '700', color: c.text, textAlign: 'left' },
+    schemaBlock: { marginTop: 16, alignItems: 'center', gap: 4 },
+    schemaLine: { color: c.textSecondary, fontSize: 12, textAlign: 'center' },
     legendLiveRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 14, rowGap: 4, marginTop: 12 },
     legendStaticDot: { color: c.accent, fontWeight: '700', fontSize: 11 },
     legendLiveCaption: { color: c.textSecondary, fontSize: 11 },

@@ -24,7 +24,7 @@ import {
   ZONES_MIN,
   type ZoneOption,
 } from '../lib/zonesPlanner';
-import { zoneOptionKey, zoneOptionLines, zoneOptionText } from '../lib/zonesPlannerText';
+import { zoneFormatLine, zoneOptionKey, zoneOptionLines, zoneOptionText } from '../lib/zonesPlannerText';
 import ZonesSchema from '../components/ZonesSchema';
 import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import { fetchEventVenueName } from '../lib/eventVenueName';
@@ -201,7 +201,7 @@ export default function ZonesDrawScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.meta}>
-          {playerCount} jugadores · Grupos {formatLabel} · Llaves {topcutLabel}
+          {playerCount} jugadores · {zoneFormatLine(formatLabel, topcutLabel)}
         </Text>
 
         {alreadyDrawn ? (

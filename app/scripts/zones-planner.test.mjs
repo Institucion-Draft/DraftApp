@@ -9,7 +9,7 @@ import {
   zoneLayout,
 } from '../src/lib/zonesPlanner.ts';
 import { INTERZONAL_LABEL, buildZonesOfficialRows, pairingGroupLabel, shortGroupLabel, zonePhaseCompleteness, zonesGroupOrder } from '../src/lib/zonesPairingsList.ts';
-import { zoneConsueloText, zoneCopaText, zoneInterzonalText, zoneMatchesText, zoneOptionLines, zoneOptionText, zoneQualifiersText, zonesSchemaLayout, zonesSchemaModel } from '../src/lib/zonesPlannerText.ts';
+import { ordinalMasculine, zoneConsueloTotalText, zoneFormatLine, zoneQualifiersToCupText, zoneConsueloText, zoneCopaText, zoneInterzonalText, zoneMatchesText, zoneOptionLines, zoneOptionText, zoneQualifiersText, zonesSchemaLayout, zonesSchemaModel } from '../src/lib/zonesPlannerText.ts';
 
 let fails = 0;
 const ok = (c, m) => {
@@ -150,15 +150,15 @@ const phase = (n, k, iz) => {
   ok(t.title === '3 zonas · 4-4-4', 'texto: título ' + t.title);
   ok(t.matches === 'Partidos por jugador en fase de grupos: 3', 'texto: partidos parejos');
   ok(t.interzonal === 'Interzonal: No', 'texto: sin interzonal');
-  ok(t.qualifiers === 'Jugadores que clasifican por grupo: 2 + 2 mejores 3°', 'texto: clasificados con comodines');
+  ok(t.qualifiers === '2 clasificados por grupo + los 2 mejores terceros', 'texto: clasificados con comodines');
   ok(t.copa === 'Jugadores a Copa Quito: 8', 'texto: Copa con sede');
   ok(t.consuelo === 'Jugadores a Copa Consuelo: 4', 'texto: Consuelo');
-  ok(zoneOptionLines(t).length === 5 && zoneOptionLines(t)[2].startsWith('Jugadores que clasifican'), 'texto: 5 líneas en orden');
+  ok(zoneOptionLines(t).length === 5 && zoneOptionLines(t)[2].includes('clasificados por grupo'), 'texto: 5 líneas en orden');
   const mand = buildZoneOption(10, 3, 2, 0, false);
   ok(zoneInterzonalText(mand) === 'Interzonal: Sí' && zoneMatchesText(mand) === 'Partidos por jugador en fase de grupos: 3', 'texto: interzonal obligatorio 4-3-3 sin rótulo');
   ok(zoneInterzonalText(buildZoneOption(8, 2, 2, 0, true)) === 'Interzonal: Sí', 'texto: interzonal opcional elegido sin rótulo');
   ok(zoneMatchesText(buildZoneOption(11, 2, 2, 0, false)) === 'Partidos por jugador en fase de grupos: 4/5', 'texto: partidos desiguales');
-  ok(zoneQualifiersText(buildZoneOption(12, 3, 2, 0, false)) === 'Jugadores que clasifican por grupo: 2', 'texto: clasificados sin comodines');
+  ok(zoneQualifiersText(buildZoneOption(12, 3, 2, 0, false)) === '2 clasificados por grupo', 'texto: clasificados sin comodines');
   ok(zoneConsueloText(buildZoneOption(12, 3, 3, 0, false), names) === 'Jugadores a Copa Consuelo: 3 (no se arma)', 'texto: Consuelo con menos de 4');
   ok(zoneCopaText(buildZoneOption(12, 3, 2, 0, false), { prima: 'Copa', consuelo: 'Copa Consuelo' }) === 'Jugadores a Copa: 6', 'texto: Copa sin sede');
 
@@ -303,6 +303,33 @@ const phase = (n, k, iz) => {
   const cl = zonePhaseCompleteness('z1', lp, zoneOf, new Set(['a1', 'a2']));
   ok(cl.total === 2 && cl.done === 1, 'completitud: un par con los dos jugadores ido cuenta cerrado; con uno solo sin resolver no');
   ok(consueloWillBeCreated(12, 3, 2, 2) === true && consueloWillBeCreated(12, 3, 3, 0) === false && consueloWillBeCreated(16, 2, 4, 0) === true, 'consuelo: se arma sólo con N - T >= 4');
+}
+
+// Texto de clasificados con concordancia: q = 1..4 y w = 0..3 (tabla escrita a mano, no derivada de la función)
+{
+  const ORD = { 2: ['segundo', 'segundos'], 3: ['tercero', 'terceros'], 4: ['cuarto', 'cuartos'], 5: ['quinto', 'quintos'] };
+  let allOk = true;
+  const bad = [];
+  for (let q = 1; q <= 4; q += 1) {
+    for (let w = 0; w <= 3; w += 1) {
+      const base = q === 1 ? '1 clasificado por grupo' : q + ' clasificados por grupo';
+      const [sing, plur] = ORD[q + 1];
+      const want = w === 0 ? base : w === 1 ? base + ' + el mejor ' + sing : base + ' + los ' + w + ' mejores ' + plur;
+      const got = zoneQualifiersText({ qualifiers: q, wildcards: w });
+      if (got !== want) { allOk = false; bad.push(q + '/' + w + ': ' + got + ' != ' + want); }
+    }
+  }
+  ok(allOk, 'texto clasificados: 16 combinaciones q=1..4 x w=0..3 con singular/plural y ordinal ' + bad.join(' | '));
+  ok(zoneQualifiersText({ qualifiers: 1, wildcards: 1 }) === '1 clasificado por grupo + el mejor segundo', 'texto: 1 clasificado por grupo + el mejor segundo');
+  ok(zoneQualifiersText({ qualifiers: 2, wildcards: 1 }) === '2 clasificados por grupo + el mejor tercero', 'texto: 2 clasificados por grupo + el mejor tercero');
+  ok(zoneQualifiersText({ qualifiers: 2, wildcards: 2 }) === '2 clasificados por grupo + los 2 mejores terceros', 'texto: 2 clasificados por grupo + los 2 mejores terceros');
+  ok(zoneQualifiersText({ qualifiers: 2, wildcards: 0 }) === '2 clasificados por grupo', 'texto: 2 clasificados por grupo');
+  ok(ordinalMasculine(3) === 'tercero' && ordinalMasculine(3, true) === 'terceros' && ordinalMasculine(7, true) === 'séptimos' && ordinalMasculine(12) === '12°', 'ordinal masculino');
+  const names = { prima: 'Copa Quito', consuelo: 'Copa Consuelo' };
+  ok(zoneQualifiersToCupText({ qualifiers: 2, wildcards: 1 }, names) === '2 clasificados por grupo + el mejor tercero a Copa Quito', 'texto: clasificados a Copa {sede}');
+  ok(zoneQualifiersToCupText({ qualifiers: 2, wildcards: 0 }, names) === '2 clasificados por grupo a Copa Quito', 'texto: sin wildcards se omite el "+ ..."');
+  ok(zoneConsueloTotalText(8, names) === '8 jugadores a Copa Consuelo', 'texto: total a Consuelo');
+  ok(zoneFormatLine('BO1', 'BO3') === 'Grupos BO1 · Llaves BO3', 'texto: modalidad "Grupos {BO} · Llaves {BO}"');
 }
 
 console.log(fails === 0 ? '\nTODO OK' : `\nHAY ${fails} FALLAS`);
