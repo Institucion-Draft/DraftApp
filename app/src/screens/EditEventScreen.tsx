@@ -465,7 +465,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       {competitionFormat === 'swiss' || competitionFormat === 'knockout' || (competitionFormat === 'round_robin' && topSize === 4) ? (
         <>
           <Text style={[styles.label, topcutFormatLocked && styles.labelMuted]}>
-            {competitionFormat === 'knockout' ? 'Formato de las llaves' : 'Eliminatorias'}
+            {competitionFormat === 'knockout' ? 'Formato de los mata-mata' : 'Eliminatorias'}
           </Text>
           <View style={styles.segmented}>
             {TOPCUT_FORMAT_OPTIONS.map((opt) => {
@@ -485,7 +485,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
           {topcutFormatLocked ? (
             <Text style={styles.topcutLockedHint}>
               {competitionFormat === 'knockout'
-                ? 'Ya no editable: las llaves comenzaron.'
+                ? 'Ya no editable: los mata-mata comenzaron.'
                 : 'Ya no editable: las eliminatorias comenzaron.'}
             </Text>
           ) : null}

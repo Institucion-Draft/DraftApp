@@ -27,7 +27,7 @@ const COMPETITION_FORMAT_LABELS: Record<CompetitionFormat, string> = {
   round_robin: 'Todos contra todos',
   swiss: 'Suizo',
   zones_knockout: 'Grupos + Copa',
-  knockout: 'Copa (sólo llaves)',
+  knockout: 'Copa (solo mata-mata)',
 };
 
 export function getCompetitionFormatBaseLabel(format: CompetitionFormat): string {
@@ -37,8 +37,8 @@ export function getCompetitionFormatBaseLabel(format: CompetitionFormat): string
 /**
  * Modalidad de juego de un evento: "Todos contra todos · BO2", "Todos contra todos · BO1 + Top 4",
  * "Suizo · BO3 + Top 4", "Gigante de Dos Cabezas · Todos contra todos · BO3".
- * Los datos que falten se omiten; vacío si el evento no tiene nada cargado. Copa (sólo llaves)
- * suma el formato de las llaves: "Copa (sólo llaves) · BO1". Copa (grupos + llaves) muestra sólo la
+ * Los datos que falten se omiten; vacío si el evento no tiene nada cargado. Copa (solo mata-mata)
+ * suma el formato de las llaves: "Copa (solo mata-mata) · BO3". Copa (grupos + llaves) muestra sólo la
  * etiqueta base (su detalle se define cuando exista su pantalla de creación).
  */
 export function formatEventMode(
@@ -62,7 +62,7 @@ export function formatEventMode(
   if (known === 'zones_knockout') {
     // Grupos + Copa: dos formatos independientes, el de la fase de grupos (match_format) y el de las llaves (topcut_format).
     if (matchFormat) parts.push(`Grupos ${matchFormat.toUpperCase()}`);
-    if (topcutFormat === 'bo1' || topcutFormat === 'bo3') parts.push(`Llaves ${topcutFormat.toUpperCase()}`);
+    if (topcutFormat === 'bo1' || topcutFormat === 'bo3') parts.push(`Mata-mata ${topcutFormat.toUpperCase()}`);
     return parts.join(' · ');
   }
 

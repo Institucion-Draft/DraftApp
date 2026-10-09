@@ -19,7 +19,7 @@ import type { EventType } from '../lib/database.types';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { getEventTypeLabel } from '../lib/labels';
-import { getCompetitionFormatBaseLabel, KNOCKOUT_MAX_PLAYERS, KNOCKOUT_MIN_PLAYERS } from '../lib/eventMode';
+import { KNOCKOUT_MAX_PLAYERS, KNOCKOUT_MIN_PLAYERS } from '../lib/eventMode';
 import InfoTooltip from '../components/InfoTooltip';
 import Card from '../components/Card';
 import { useTheme, useThemedStyles } from '../theme';
@@ -33,15 +33,12 @@ type CompetitionFormat = 'round_robin' | 'swiss' | 'zones_knockout' | 'knockout'
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
   { value: 'swiss', label: 'Suizo + Top 4' },
-  { value: 'zones_knockout', label: getCompetitionFormatBaseLabel('zones_knockout') },
-  { value: 'knockout', label: getCompetitionFormatBaseLabel('knockout') },
+  // Una sola opción de modo: el toggle "Fase de grupos" elige entre 'knockout' (apagado) y 'zones_knockout' (encendido).
+  { value: 'knockout', label: 'Copa' },
 ];
 
 const KNOCKOUT_SANDBOX_TEXT =
   'Las Copas se crean siempre en modo sandbox: todavía no suman al ranking ni a los logros.';
-
-const ZONES_HINT_TEXT =
-  'Los grupos se sortean al finalizar el draft: ahí se elige la cantidad de zonas, el interzonal y cuántos pasan a la Copa.';
 
 type RegularMatchFormat = 'bo1' | 'bo2' | 'bo3';
 
@@ -79,7 +76,7 @@ function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
     return `Fase de grupos y Copa. Al finalizar el draft el organizador sortea las zonas (2 a 4), con un simulador que recomienda configuraciones. Dentro de cada zona se juega todos contra todos, con un interzonal opcional u obligatorio según la cantidad de jugadores. Los mejores de cada zona pasan a la Copa y el resto a la Copa Consuelo. ${MATCH_FORMAT_TOOLTIP_BODY}`;
   }
   if (format === 'knockout') {
-    return `Eliminación directa. Participan entre ${KNOCKOUT_MIN_PLAYERS} y ${KNOCKOUT_MAX_PLAYERS} jugadores. Al finalizar el draft se sortean los cruces y quiénes pasan directo a la ronda siguiente cuando la cantidad no es potencia de 2. Los perdedores de las semifinales juegan por el 3° y 4° puesto. Las llaves se juegan a un partido (BO1) o al mejor de tres (BO3).`;
+    return `Eliminación directa. Participan entre ${KNOCKOUT_MIN_PLAYERS} y ${KNOCKOUT_MAX_PLAYERS} jugadores. Al finalizar el draft se sortean los cruces y quiénes pasan directo a la ronda siguiente cuando la cantidad no es potencia de 2. Los perdedores de las semifinales juegan por el 3° y 4° puesto. Los mata-mata se juegan a un partido (BO1) o al mejor de tres (BO3).`;
   }
   if (format === 'round_robin') {
     return `Todos los jugadores se enfrentan entre sí. ${MATCH_FORMAT_TOOLTIP_BODY} Si se activa la fase mata-mata, los mejores 4 pasan a jugar semifinales.`;
@@ -115,14 +112,18 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [name, setName] = useState('');
   const [eventType, setEventType] = useState<EventType>('draft');
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
+  /** Copa: "Fase de grupos" (apagado = 'knockout', encendido = 'zones_knockout'). Se conserva al cambiar de modo. */
+  const [copaGroups, setCopaGroups] = useState(false);
   /** Solo round_robin: ON = top_size 4 (antes competition_format='round_robin_bo1_top4'). */
   const [top4, setTop4] = useState(false);
   /** round_robin (con o sin top4) y swiss: BO1/BO2/BO3 de la fase regular (match_format). */
   const [regularMatchFormat, setRegularMatchFormat] = useState<RegularMatchFormat>('bo3');
+  /** Copa con fase de grupos: formato de los enfrentamientos de grupos (match_format); BO1 por defecto. Estado propio para no tocar el default de Todos contra todos / Suizo. */
+  const [zonesMatchFormat, setZonesMatchFormat] = useState<RegularMatchFormat>('bo1');
   /** Suizo o round_robin+top4: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
   /** Solo Copa (sólo llaves): formato de todas las llaves; BO1 por defecto (la columna tiene default 'bo3'). */
-  const [knockoutTopcut, setKnockoutTopcut] = useState<TopcutFormat>('bo1');
+  const [knockoutTopcut, setKnockoutTopcut] = useState<TopcutFormat>('bo3');
   /** Solo swiss (cualquier BO): cantidad de rondas suizas (3, 4 o 5). */
   const [swissRoundsManual, setSwissRoundsManual] = useState<number>(3);
   const [startingLife, setStartingLife] = useState<number>(20);
@@ -179,8 +180,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const cubeLabel = useMemo(() => cubes.find((c) => c.id === cubeId)?.name ?? 'Sin definir', [cubeId, cubes]);
   const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
   const typeLabel = EVENT_TYPE_OPTIONS.find((t) => t.value === eventType)?.label ?? eventType;
+  const isCopaMode = competitionFormat === 'knockout' || competitionFormat === 'zones_knockout';
   const competitionFormatLabel =
-    COMPETITION_FORMAT_OPTIONS.find((f) => f.value === competitionFormat)?.label ?? competitionFormat;
+    COMPETITION_FORMAT_OPTIONS.find((f) => f.value === (isCopaMode ? 'knockout' : competitionFormat))?.label ?? competitionFormat;
   // Swiss siempre tiene mata-mata (fijo); round_robin solo si se activó el toggle top4.
   const hasMataMata = competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4);
   const isKnockout = competitionFormat === 'knockout';
@@ -238,7 +240,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       // Grupos + Copa: se crea SIN zones_count ni zone_qualifiers (null hasta el sorteo, draw_zones). Dos formatos
       // independientes: match_format (BO1/BO2/BO3 de la fase de grupos, como el todos contra todos) y topcut_format
       // (BO1/BO3 de las llaves: Copa principal y Consuelo, como la Copa sola).
-      insertRow.match_format = regularMatchFormat;
+      insertRow.match_format = zonesMatchFormat;
       insertRow.topcut_format = knockoutTopcut;
     }
     if (competitionFormat === 'round_robin') {
@@ -280,7 +282,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       COMPETITION_FORMAT_OPTIONS.map((opt) => ({
         id: opt.value,
         label: opt.label,
-        onPress: () => setCompetitionFormat(opt.value),
+        onPress: () => setCompetitionFormat(opt.value === 'knockout' ? (copaGroups ? 'zones_knockout' : 'knockout') : opt.value),
       }))
     );
 
@@ -332,13 +334,13 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     );
   }
 
-  // Formato de las llaves (BO1/BO3): topcut_format. Lo usa la Copa sola y, en Grupos + Copa, la Copa principal y Consuelo.
+  // Formato de los mata-mata (BO1/BO3): topcut_format. Lo usa la Copa sola y, en Grupos + Copa, la Copa principal y Consuelo.
   const llavesSelector = (
     <>
       <View style={styles.labelRow}>
-        <Text style={[styles.label, styles.labelInline, styles.labelBold]}>Formato de las llaves</Text>
+        <Text style={[styles.label, styles.labelInline, styles.labelBold]}>Formato de los mata-mata</Text>
         <InfoTooltip
-          title="Formato de las llaves"
+          title="Formato de los mata-mata"
           body={
             isZones
               ? 'Todos los cruces de la Copa y de la Copa Consuelo pueden jugarse a partido único (BO1) o al mejor de 3 (BO3). Es independiente del formato de la fase de grupos. Podés cambiar esta opción hasta que arranque el primer cruce.'
@@ -407,9 +409,25 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           <Text style={styles.formatHint}>Suizo incluye siempre fase mata-mata (Top 4); no se puede desactivar.</Text>
         ) : null}
 
-        {isKnockout ? llavesSelector : null}
+        {isCopaMode ? (
+          <View style={styles.switchRow}>
+            <View style={styles.switchLabelRow}>
+              <Text style={styles.switchLabelInline}>Fase de grupos</Text>
+              <InfoTooltip
+                title="Fase de grupos"
+                body="Apagado: la Copa se juega solo con mata-mata. Encendido: antes de la Copa hay una fase de grupos; los mejores de cada grupo pasan a la Copa y el resto a la Copa Consuelo. Los grupos se sortean al finalizar el draft: ahí se elige la cantidad de zonas, el interzonal y cuántos pasan a la Copa."
+              />
+            </View>
+            <Switch
+              value={copaGroups}
+              onValueChange={(v) => {
+                setCopaGroups(v);
+                setCompetitionFormat(v ? 'zones_knockout' : 'knockout');
+              }}
+            />
+          </View>
+        ) : null}
 
-        {isZones ? <Text style={styles.formatHint}>{ZONES_HINT_TEXT}</Text> : null}
 
         {competitionFormat === 'round_robin' || competitionFormat === 'swiss' || isZones ? (
           <>
@@ -429,12 +447,12 @@ export default function CreateEventScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.segmented}>
               {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
-                const selected = regularMatchFormat === opt.value;
+                const selected = (isZones ? zonesMatchFormat : regularMatchFormat) === opt.value;
                 return (
                   <TouchableOpacity
                     key={opt.value}
                     style={[styles.segment, selected && styles.segmentSelected]}
-                    onPress={() => setRegularMatchFormat(opt.value)}
+                    onPress={() => (isZones ? setZonesMatchFormat(opt.value) : setRegularMatchFormat(opt.value))}
                   >
                     <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
                   </TouchableOpacity>
@@ -444,7 +462,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </>
         ) : null}
 
-        {isZones ? llavesSelector : null}
+        {isCopaMode ? llavesSelector : null}
 
         {competitionFormat === 'round_robin' ? (
           <View style={styles.switchRow}>
