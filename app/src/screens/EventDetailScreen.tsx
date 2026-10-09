@@ -27,6 +27,7 @@ import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
+import { isConcludeAvailable } from '../lib/concludeAvailability';
 import { CUP_CONSUELO_NAME, KNOCKOUT_BRACKET_ORIGIN, cupPrimaName, isKnockoutCupOrigin } from '../lib/knockoutRounds';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
 import {
@@ -862,9 +863,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
       await concludeCopa();
       return;
     }
-    // Copa (grupos + llaves): todavía no se ofrece; el campeón sale de la final del bracket.
+    // Grupos + Copa: pasa a 'concluded' tal cual está (sin inventar resultados ni tocar partidas en curso). Qué
+    // campeón/podio corresponde cuando se concluye sin Copa queda para el pasaje a la Copa (B4, ver IDEAS.md).
     if (concludeFormat === 'zones_knockout') {
-      Alert.alert('No disponible', 'El cierre manual no está disponible para las Copas.');
+      await patchEvent({ status: 'concluded', event_ended_at: new Date().toISOString(), champion_user_id: null });
       return;
     }
 
@@ -2140,10 +2142,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      {canManageEvent &&
-       normalizeCompetitionFormat(event.competition_format) === 'knockout' &&
-       event.status === 'playing' &&
-       Date.now() >= new Date(event.scheduled_for).getTime() + 7 * 24 * 60 * 60 * 1000 ? (
+      {(normalizeCompetitionFormat(event.competition_format) === 'knockout' ||
+        normalizeCompetitionFormat(event.competition_format) === 'zones_knockout') &&
+       isConcludeAvailable({ canManageEvent, status: event.status, scheduledFor: event.scheduled_for }) ? (
         <View style={styles.block}>
           <TouchableOpacity
             style={styles.concludeBtn}
