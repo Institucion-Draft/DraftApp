@@ -1147,7 +1147,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
               p_participant_id: participantId,
             });
             if (knockoutRes.error) {
-              Alert.alert('Error', knockoutRes.error.message ?? 'No se pudo resolver la salida en las llaves.');
+              Alert.alert('Error', knockoutRes.error.message ?? 'No se pudo resolver la salida en el mata-mata.');
               return;
             }
             await load();
@@ -1168,7 +1168,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
           if (eventCompetitionFormat === 'zones_knockout') {
             const cupsRes = await supabase.rpc('apply_knockout_walkover', { p_participant_id: participantId });
             if (cupsRes.error) {
-              Alert.alert('Error', cupsRes.error.message ?? 'No se pudo resolver la salida en las llaves.');
+              Alert.alert('Error', cupsRes.error.message ?? 'No se pudo resolver la salida en el mata-mata.');
               return;
             }
           }

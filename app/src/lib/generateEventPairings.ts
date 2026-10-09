@@ -45,9 +45,9 @@ export async function generateEventPairings(eventId: string): Promise<GeneratePa
       if (__DEV__) {
         console.error('[generatePairings] Error draw_knockout_bracket', drawRes.error);
       }
-      return { ok: false, message: drawRes.error.message ?? 'No se pudo sortear las llaves.' };
+      return { ok: false, message: drawRes.error.message ?? 'No se pudo sortear el mata-mata.' };
     }
-    return { ok: true, message: 'Se sortearon las llaves.' };
+    return { ok: true, message: 'Se sorteó el mata-mata.' };
   }
 
   // Copa (grupos + llaves): las zonas se sortean aparte (RPC draw_zones, 0136) con la configuración que elige el

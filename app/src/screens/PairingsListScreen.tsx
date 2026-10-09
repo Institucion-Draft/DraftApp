@@ -1867,7 +1867,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           ListEmptyComponent={
             zonesCupTab ? (
               visibleTiebreakSections.length === 0 ? (
-                <Text style={styles.empty}>Llaves en preparación</Text>
+                <Text style={styles.empty}>Mata-mata en preparación</Text>
               ) : null
             ) : officialMainListEmpty && tiebreakCardsTotal === 0 ? (
               <Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>
