@@ -30,6 +30,12 @@ const run = (zones, q, w) => {
   ok(consueloFits(10, 8) === false && tags(m, ['A1', 'A4', 'A5', 'B5']) === 'main,main,-,-', '(c) N-T < 4: los de afuera no se resaltan (' + tags(m, ['A1', 'A4', 'A5', 'B5']) + ')');
   ok(consueloFits(30, 8) === false && consueloFits(24, 8) === true && consueloFits(12, 8) === true && consueloFits(11, 8) === false, '(c) Consuelo sólo con N - T entre 4 y 16');
 }
+// (c2) N - T > 16: antes del armado no se resalta Consuelo (se sabrá al armarse) pero la Copa sí
+{
+  const m = run([zone('A', 7, true), zone('B', 7, true), zone('C', 6, true), zone('D', 6, true)], 2, 0); // N=26, T=8, sobran 18
+  ok(consueloFits(26, 8) === false && tags(m, ['A1', 'A2', 'A3', 'A7']) === 'main,main,-,-', '(c2) N-T=18 > 16: sin resalte marrón provisorio; la Copa se resalta (' + tags(m, ['A1', 'A2', 'A3', 'A7']) + ')');
+}
+
 // (d) zonas desiguales 4-5-4
 {
   const m = run([zone('A', 4, true), zone('B', 5, true), zone('C', 4, false)], 2, 1); // N=13, T=7, resto 6

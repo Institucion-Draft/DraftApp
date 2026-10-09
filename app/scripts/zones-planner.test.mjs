@@ -1,6 +1,7 @@
 // Tests del planificador de zonas (app/src/lib/zonesPlanner.ts). Sin framework: node app/scripts/zones-planner.test.mjs
 import {
   buildZoneOption,
+  consueloSizeFor,
   consueloWillBeCreated,
   copaSizeRank,
   enumerateZoneOptions,
@@ -95,10 +96,10 @@ const phase = (n, k, iz) => {
         for (let w = 0; w < k; w += 1) {
           const o = buildZoneOption(n, k, q, w, lay.mode === 'mandatory');
           const t = k * q + w;
-          if (o.copaSize !== t || o.consueloSize !== n - t) { bad += 1; why.push(`T N=${n}`); }
+          if (o.copaSize !== t || o.consueloSize !== Math.min(Math.max(n - t, 0), 16)) { bad += 1; why.push(`T N=${n}`); }
           const tBlocked = o.blockers.some((b) => /entre 4 y 16/.test(b));
           if (tBlocked !== (t < 4 || t > 16)) { bad += 1; why.push(`bloqueo T N=${n} k=${k} q=${q} w=${w}`); }
-          if (o.warnings.some((x) => /Consuelo/.test(x)) !== (n - t < 4)) { bad += 1; why.push(`aviso consuelo N=${n}`); }
+          if (o.warnings.some((x) => /Consuelo tendría menos/.test(x)) !== (n - t < 4) || o.warnings.some((x) => /admite 16/.test(x)) !== (n - t > 16)) { bad += 1; why.push(`aviso consuelo N=${n}`); }
           if (o.warnings.some((x) => /2\/3/.test(x)) !== (t * 3 > 2 * n)) { bad += 1; why.push(`aviso 2/3 N=${n}`); }
           // partidos
           const ph = phase(n, k, o.interzonal);
@@ -330,6 +331,16 @@ const phase = (n, k, iz) => {
   ok(zoneQualifiersToCupText({ qualifiers: 2, wildcards: 0 }, names) === '2 clasificados por grupo a Copa Quito', 'texto: sin wildcards se omite el "+ ..."');
   ok(zoneConsueloTotalText(8, names) === '8 jugadores a Copa Consuelo', 'texto: total a Consuelo');
   ok(zoneFormatLine('BO1', 'BO3') === 'Grupos BO1 · Llaves BO3', 'texto: modalidad "Grupos {BO} · Llaves {BO}"');
+}
+
+// Consuelo con más de 16 no clasificados: M = min(N - T, 16)
+{
+  const big = buildZoneOption(26, 4, 2, 0, false); // T = 8, sobran 18
+  ok(big.consueloSize === 16 && big.consueloCreated === true && big.warnings.some((x) => /admite 16/.test(x)), 'Consuelo con 18 sobrantes: se muestran 16, se arma y avisa que el resto queda sin copa');
+  ok(consueloWillBeCreated(26, 4, 2, 0) === true && consueloWillBeCreated(26, 4, 3, 0) === true, 'consueloWillBeCreated con N - T > 16: se arma (M = min(N - T, 16))');
+  ok(consueloSizeFor(26, 8) === 16 && consueloSizeFor(20, 8) === 12 && consueloSizeFor(10, 8) === 2 && consueloSizeFor(5, 8) === 0, 'consueloSizeFor: min(N - T, 16), nunca negativo');
+  const t = zoneOptionText(big, { prima: 'Copa Quito', consuelo: 'Copa Consuelo' });
+  ok(t.consuelo === 'Jugadores a Copa Consuelo: 16' && zoneConsueloTotalText(big.consueloSize, { prima: 'Copa', consuelo: 'Copa Consuelo' }) === '16 jugadores a Copa Consuelo', 'textos: el total a Consuelo muestra 16');
 }
 
 console.log(fails === 0 ? '\nTODO OK' : `\nHAY ${fails} FALLAS`);

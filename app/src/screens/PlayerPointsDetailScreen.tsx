@@ -62,6 +62,18 @@ type EventPoints = {
 
 const MEDAL: Record<number, string> = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
+/** Copa Consuelo: las vistas de puntos codifican su puesto como 1000 + puesto (1001 campeón, 1002 subcampeón, 1003 tercero). */
+const CONSUELO_BASE = 1000;
+const isConsueloPosition = (position: number) => position > CONSUELO_BASE;
+const consueloPlace = (position: number) => position - CONSUELO_BASE;
+function positionLabel(position: number): string {
+  if (isConsueloPosition(position)) {
+    const p = consueloPlace(position);
+    return `${MEDAL[p] ?? `${p}°`} Consuelo`;
+  }
+  return MEDAL[position] ?? `${position}°`;
+}
+
 function formatMode(competitionFormat: string | null, topSize: number | null): string {
   // Copa (sólo llaves): etiqueta compartida (la vista no trae topcut_format, así que sin BO).
   if (competitionFormat === 'knockout') return formatEventMode(null, competitionFormat, topSize, null);
@@ -187,7 +199,8 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
   for (const r of rows) {
     if (!expandedEventIds.has(r.eventId)) continue;
     const tierIdx = tierIndexForPlayerCount(tiers, r.playerCount);
-    if (tierIdx != null) highlightedCells.add(`${tierIdx}-${r.position}`);
+    // Consuelo puntúa fijo (3/1/1), no por escalón: no resalta ninguna celda de la tabla.
+    if (tierIdx != null && !isConsueloPosition(r.position)) highlightedCells.add(`${tierIdx}-${r.position}`);
   }
 
   return (
@@ -206,13 +219,15 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
           return (
             <View key={r.eventId}>
               <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => toggleExpanded(r.eventId)}>
-                <Text style={styles.medal}>{MEDAL[r.position] ?? `${r.position}°`}</Text>
+                <Text style={styles.medal}>{isConsueloPosition(r.position) ? (MEDAL[consueloPlace(r.position)] ?? `${consueloPlace(r.position)}°`) : (MEDAL[r.position] ?? `${r.position}°`)}</Text>
                 <View style={styles.rowMain}>
                   <Text style={styles.eventName} numberOfLines={1}>
                     {r.eventName}
                   </Text>
                   <Text style={styles.rowSub}>
-                    {r.position}° de {r.playerCount} jugadores
+                    {isConsueloPosition(r.position)
+                      ? `${consueloPlace(r.position)}° en la Copa Consuelo`
+                      : `${r.position}° de ${r.playerCount} jugadores`}
                   </Text>
                 </View>
                 <Text style={styles.rowPoints}>+{r.points}</Text>
@@ -225,7 +240,7 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
                     {otherPodium.length > 0 ? (
                       otherPodium.map((p) => (
                         <View key={p.userId} style={styles.podiumRow}>
-                          <Text style={styles.podiumMedal}>{MEDAL[p.position] ?? `${p.position}°`}</Text>
+                          <Text style={styles.podiumMedal}>{positionLabel(p.position)}</Text>
                           <Text style={styles.podiumName} numberOfLines={1}>
                             {p.name}
                           </Text>
@@ -271,6 +286,9 @@ export default function PlayerPointsDetailScreen({ route }: Props) {
             </View>
           ))}
         </View>
+        {rows.some((r) => isConsueloPosition(r.position)) ? (
+          <Text style={styles.legendTitle}>Copa Consuelo: 3 / 1 / 1 puntos (campeón, subcampeón y tercero), sin importar la cantidad de jugadores.</Text>
+        ) : null}
       </View>
     </ScrollView>
   );

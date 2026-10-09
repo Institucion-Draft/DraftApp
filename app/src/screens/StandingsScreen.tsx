@@ -19,7 +19,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import { fetchEventVenueName } from '../lib/eventVenueName';
 import { zonePhaseCompleteness } from '../lib/zonesPairingsList';
-import { consueloFits, cupHighlightOf, provisionalCupHighlights } from '../lib/zonesCupHighlight';
+import { cupHighlightOf, provisionalCupHighlights } from '../lib/zonesCupHighlight';
 import { buildZoneOption } from '../lib/zonesPlanner';
 import { zoneConsueloTotalText, zoneFormatLine, zoneQualifiersToCupText } from '../lib/zonesPlannerText';
 import ZonesSchema from '../components/ZonesSchema';
@@ -2456,7 +2456,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
               return n;
             });
             const base = buildZoneOption(N, zonesCfg.count, zonesCfg.q, zonesCfg.w, zonesModes.interzonal);
-            const option = { ...base, zoneSizes: sizes, interzonal: zonesModes.interzonal, consueloCreated: consueloFits(N, base.copaSize) };
+            // consueloSize / consueloCreated ya vienen de buildZoneOption: M = min(N - T, 16), se arma con M >= 4.
+            const option = { ...base, zoneSizes: sizes, interzonal: zonesModes.interzonal };
             const names = { prima: cupPrimaName(venueName), consuelo: CUP_CONSUELO_NAME };
             const fmtLabel = (f: string | null) => (f === 'bo1' || f === 'bo2' || f === 'bo3' ? f.toUpperCase() : '—');
             return (

@@ -23,6 +23,13 @@ export const MATCHES_WARN_MIN = 3;
 export const MATCHES_WARN_MAX = 7;
 /** Consuelo se arma sólo con al menos esta cantidad de jugadores. */
 export const CONSUELO_MIN = 4;
+/** Consuelo admite como mucho esta cantidad de jugadores (el cuadro llega a 16): si sobran más, pasan los 16 mejores. */
+export const CONSUELO_MAX = 16;
+
+/** Jugadores que efectivamente van a Consuelo: M = min(N - T, 16) (0 si N < T). */
+export function consueloSizeFor(playerCount: number, copaSize: number): number {
+  return Math.min(Math.max(playerCount - copaSize, 0), CONSUELO_MAX);
+}
 
 export type InterzonalMode = 'optional' | 'mandatory' | 'impossible';
 
@@ -50,7 +57,7 @@ export type ZoneOption = {
   matchesMax: number;
   /** Total de la Copa: k*q + w. */
   copaSize: number;
-  /** Jugadores de Consuelo: N - T (se arma sólo con >= 4). */
+  /** Jugadores de Consuelo: min(N - T, 16) (se arma sólo con >= 4). */
   consueloSize: number;
   /** Consuelo se arma (al menos CONSUELO_MIN jugadores). */
   consueloCreated: boolean;
@@ -144,7 +151,8 @@ export function buildZoneOption(
   if (copaSize < COPA_MIN || copaSize > COPA_MAX) {
     blockers.push(`La Copa tiene que tener entre ${COPA_MIN} y ${COPA_MAX} jugadores (quedan ${copaSize}).`);
   }
-  const consueloSize = n - copaSize;
+  const sobran = n - copaSize;
+  const consueloSize = consueloSizeFor(n, copaSize);
 
   const zm = zoneMatches(layout, interzonal);
   const matchesMin = Math.min(...zm);
@@ -154,7 +162,8 @@ export function buildZoneOption(
   }
   if (matchesMin !== matchesMax) warnings.push('Partidos desiguales entre zonas.');
   if (copaSize * 3 > n * 2) warnings.push('La Copa tiene más de 2/3 de los inscriptos.');
-  if (consueloSize < CONSUELO_MIN) warnings.push(`Consuelo tendría menos de ${CONSUELO_MIN} jugadores: no se arma.`);
+  if (sobran < CONSUELO_MIN) warnings.push(`Consuelo tendría menos de ${CONSUELO_MIN} jugadores: no se arma.`);
+  if (sobran > CONSUELO_MAX) warnings.push(`Sobran ${sobran} jugadores y la Copa Consuelo admite ${CONSUELO_MAX}: pasan los ${CONSUELO_MAX} mejores y el resto queda sin copa.`);
 
   return {
     zonesCount: safeK,
@@ -303,7 +312,7 @@ export function recommendZoneOptions(input: ZonesInput): ZoneOption[] {
   return picked;
 }
 
-/** Consuelo se arma con al menos CONSUELO_MIN jugadores: N - (zonas * clasificados + comodines). */
+/** Consuelo se arma con al menos CONSUELO_MIN jugadores: M = min(N - T, 16) con T = zonas * clasificados + comodines. */
 export function consueloWillBeCreated(playerCount: number, zones: number, qualifiers: number, wildcards: number): boolean {
-  return playerCount - (zones * qualifiers + wildcards) >= CONSUELO_MIN;
+  return consueloSizeFor(playerCount, zones * qualifiers + wildcards) >= CONSUELO_MIN;
 }
