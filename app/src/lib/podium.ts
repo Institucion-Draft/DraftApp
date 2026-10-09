@@ -584,6 +584,44 @@ function podiumBracketFinalMode(
 }
 
 /**
+ * Copa (sólo llaves y Grupos + Copa) con la copa INCOMPLETA: el podio se arma por puesto resuelto, no por copa completa.
+ * Final resuelta -> 1º y 2º; 3er puesto resuelto -> 3º; lo que falta queda vacío (sin inventar campeón). Devuelve null si
+ * todavía no hay ningún puesto resuelto. Nunca es final (isFinal=false): la copa no terminó.
+ */
+function podiumCupPartialMode(
+  participants: PodiumPlayer[],
+  group: ActiveTiebreakGroupPodiumInput,
+  bracketMatches: BracketMatchPodiumInput[]
+): PodiumState | null {
+  const byPid = (pid: string | null | undefined) =>
+    pid ? participants.find((p) => p.participantId === pid) : undefined;
+  const finalRow = bracketMatches.find((m) => m.bracket_phase === 'final');
+  const thirdRow = bracketMatches.find((m) => m.bracket_phase === 'third_place');
+  let s1: PodiumPlayer[] = [];
+  let s2: PodiumPlayer[] = [];
+  let s3: PodiumPlayer[] = [];
+  if (finalRow && finalRow.winner_participant_id) {
+    const loserPid =
+      finalRow.winner_participant_id === finalRow.participant_a_id
+        ? finalRow.participant_b_id
+        : finalRow.participant_a_id;
+    const champ = byPid(finalRow.winner_participant_id);
+    const second = byPid(loserPid);
+    if (champ) s1 = [champ];
+    if (second) s2 = [second];
+  }
+  if (thirdRow && thirdRow.winner_participant_id) {
+    const third = byPid(thirdRow.winner_participant_id);
+    if (third) s3 = [third];
+  }
+  if (s1.length === 0 && s2.length === 0 && s3.length === 0) return null;
+  const gPidSet = new Set(group.participants.map((x) => x.participant_id));
+  const onPodium = new Set<string>([...s1, ...s2, ...s3].map((p) => p.participantId));
+  const spectators = participants.filter((p) => !onPodium.has(p.participantId) && !gPidSet.has(p.participantId));
+  return { steps: buildStepsWithStools(s1, s2, s3), spectators, isFinal: false };
+}
+
+/**
  * Desempate de 1er puesto de round_robin BO3 clásico ya resuelto (group_type='fourth_place',
  * group_origin='round_robin_first_place' — mismo bracket 2/3/4 con bye que ya arma
  * computeFourthPlaceTiebreakBracket para el 4to puesto de round_robin_bo1_top4, ver más abajo,
@@ -1254,6 +1292,10 @@ export function computePodium(
     const noGroupChampion = gChamp == null || String(gChamp).trim() === '';
     if (activeTiebreakGroup.group_type === 'bracket') {
       if (noGroupChampion) {
+        if (competitionFormat === 'knockout' || competitionFormat === 'zones_knockout') {
+          const partial = podiumCupPartialMode(participants, activeTiebreakGroup, bracketMatches ?? []);
+          if (partial) return partial;
+        }
         return {
           steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
           spectators: [],
