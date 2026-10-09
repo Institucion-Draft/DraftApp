@@ -26,7 +26,7 @@ export function normalizeCompetitionFormat(raw: string | null | undefined): Comp
 const COMPETITION_FORMAT_LABELS: Record<CompetitionFormat, string> = {
   round_robin: 'Todos contra todos',
   swiss: 'Suizo',
-  zones_knockout: 'Copa (grupos + llaves)',
+  zones_knockout: 'Grupos + Copa',
   knockout: 'Copa (sólo llaves)',
 };
 

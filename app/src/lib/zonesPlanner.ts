@@ -52,6 +52,8 @@ export type ZoneOption = {
   copaSize: number;
   /** Jugadores de Consuelo: N - T (se arma sólo con >= 4). */
   consueloSize: number;
+  /** Consuelo se arma (al menos CONSUELO_MIN jugadores). */
+  consueloCreated: boolean;
   /** No se puede confirmar. */
   blockers: string[];
   /** Se puede confirmar. */
@@ -165,6 +167,7 @@ export function buildZoneOption(
     matchesMax,
     copaSize,
     consueloSize,
+    consueloCreated: consueloSize >= CONSUELO_MIN,
     blockers,
     warnings,
   };

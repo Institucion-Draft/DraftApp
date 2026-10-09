@@ -7,6 +7,7 @@ import {
   recommendZoneOptions,
   zoneLayout,
 } from '../src/lib/zonesPlanner.ts';
+import { zoneConsueloText, zoneCopaText, zoneInterzonalText, zoneMatchesText, zoneOptionLines, zoneOptionText, zoneQualifiersText, zonesSchemaLayout, zonesSchemaModel } from '../src/lib/zonesPlannerText.ts';
 
 let fails = 0;
 const ok = (c, m) => {
@@ -136,6 +137,100 @@ const phase = (n, k, iz) => {
   }
   ok(bad === 0, 'recomendadas N=6..24: hasta 3, distintas, sin bloqueos, parejas cuando existen, tope 2N/3, vacías para N < 8' + (bad ? ' ' + why.slice(0, 5).join(', ') : ''));
   if (process.env.VERBOSE) console.table(rows);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Adaptador de textos de las tarjetas y modelo del esquema (zonesPlannerText.ts)
+// ---------------------------------------------------------------------------------------------------
+{
+  const names = { prima: 'Copa Quito', consuelo: 'Copa Consuelo' };
+  const t = zoneOptionText(buildZoneOption(12, 3, 2, 2, false), names);
+  ok(t.title === '3 zonas · 4-4-4', 'texto: título ' + t.title);
+  ok(t.matches === 'Partidos por jugador en fase de grupos: 3', 'texto: partidos parejos');
+  ok(t.interzonal === 'Interzonal: No', 'texto: sin interzonal');
+  ok(t.qualifiers === 'Jugadores que clasifican por grupo: 2 + 2 mejores 3°', 'texto: clasificados con comodines');
+  ok(t.copa === 'Jugadores a Copa Quito: 8', 'texto: Copa con sede');
+  ok(t.consuelo === 'Jugadores a Copa Consuelo: 4', 'texto: Consuelo');
+  ok(zoneOptionLines(t).length === 5 && zoneOptionLines(t)[2].startsWith('Jugadores que clasifican'), 'texto: 5 líneas en orden');
+  const mand = buildZoneOption(10, 3, 2, 0, false);
+  ok(zoneInterzonalText(mand) === 'Interzonal: Sí' && zoneMatchesText(mand) === 'Partidos por jugador en fase de grupos: 3', 'texto: interzonal obligatorio 4-3-3 sin rótulo');
+  ok(zoneInterzonalText(buildZoneOption(8, 2, 2, 0, true)) === 'Interzonal: Sí', 'texto: interzonal opcional elegido sin rótulo');
+  ok(zoneMatchesText(buildZoneOption(11, 2, 2, 0, false)) === 'Partidos por jugador en fase de grupos: 4/5', 'texto: partidos desiguales');
+  ok(zoneQualifiersText(buildZoneOption(12, 3, 2, 0, false)) === 'Jugadores que clasifican por grupo: 2', 'texto: clasificados sin comodines');
+  ok(zoneConsueloText(buildZoneOption(12, 3, 3, 0, false), names) === 'Jugadores a Copa Consuelo: 3 (no se arma)', 'texto: Consuelo con menos de 4');
+  ok(zoneCopaText(buildZoneOption(12, 3, 2, 0, false), { prima: 'Copa', consuelo: 'Copa Consuelo' }) === 'Jugadores a Copa: 6', 'texto: Copa sin sede');
+
+  // esquema visual
+  const m1 = zonesSchemaModel(buildZoneOption(8, 2, 2, 0, true));
+  ok(m1.sizes.join() === '4,4' && m1.arrows.length === 1 && m1.arrows[0].join() === '0,1' && m1.copaRows === 2 && m1.consueloRows === 2, 'esquema: 2 zonas iguales con interzonal -> una flecha entre las dos');
+  const m2 = zonesSchemaModel(buildZoneOption(10, 3, 2, 0, false));
+  ok(m2.sizes.join() === '4,3,3' && m2.arrows.length === 1 && m2.arrows[0].join() === '1,2', 'esquema: 4-3-3 obligatorio -> flecha SOLO entre las dos zonas chicas');
+  const m3 = zonesSchemaModel(buildZoneOption(12, 3, 2, 0, true));
+  ok(m3.arrows.length === 2 && m3.arrows[0].join() === '0,1' && m3.arrows[1].join() === '1,2', 'esquema: 3 zonas iguales con interzonal -> pares contiguos');
+  const m4 = zonesSchemaModel(buildZoneOption(16, 4, 2, 0, true));
+  ok(m4.arrows.length === 2 && m4.arrows[0].join() === '0,1' && m4.arrows[1].join() === '2,3', 'esquema: 4 zonas iguales con interzonal -> 0-1 y 2-3');
+  const m5 = zonesSchemaModel(buildZoneOption(13, 3, 2, 1, false));
+  ok(m5.sizes.join() === '5,4,4' && m5.wildcardRow.every(Boolean) && m5.arrows.length === 1 && m5.arrows[0].join() === '1,2', 'esquema: 5-4-4 con comodín (fila q+1 en las tres zonas) y flecha entre las chicas');
+  const m6 = zonesSchemaModel(buildZoneOption(12, 3, 4, 0, false));
+  ok(m6.wildcardRow.every((x) => !x) && !zonesSchemaModel(buildZoneOption(8, 2, 2, 0, false)).arrows.length, 'esquema: sin comodines no hay filas punteadas y sin interzonal no hay flechas');
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Posición de llaves y etiquetas del esquema (zonesSchemaLayout)
+// ---------------------------------------------------------------------------------------------------
+{
+  const ROW = 12;
+  const cases = [];
+  for (let n = 4; n <= 32; n += 1) {
+    for (let k = 2; k <= 4; k += 1) {
+      const lay = zoneLayout(n, k);
+      if (Math.min(...lay.sizes) < 2 || Math.max(...lay.sizes) > 8) continue;
+      for (let q = 1; q <= 4; q += 1) {
+        for (let w = 0; w <= 2; w += 1) {
+          for (const iz of [false, true]) cases.push({ n, k, q, w, iz });
+        }
+      }
+    }
+  }
+  let bad = 0, withConsuelo = 0, withoutConsuelo = 0;
+  const why = [];
+  for (const { n, k, q, w, iz } of cases) {
+    const m = zonesSchemaModel(buildZoneOption(n, k, q, w, iz));
+    for (const labelH of [13, 26, 39, 52]) {
+      const L = zonesSchemaLayout(m, ROW, labelH, labelH);
+      const tag = `N=${n} k=${k} q=${q} w=${w} label=${labelH}`;
+      const copaBottom = L.copaLabel.top + L.copaLabel.height;
+      // (a) la etiqueta de la Copa no queda por debajo de su llave
+      if (copaBottom > L.copaBracket.top + L.copaBracket.height + 1e-9) { bad += 1; why.push('a ' + tag); }
+      // primer renglón común sólo gris: después de la última fila resaltada o punteada de cualquier columna
+      let lastMarked = -1;
+      m.sizes.forEach((size, c) => {
+        for (let r = 0; r < size; r += 1) {
+          if (r < q || (r === q && m.wildcardRow[c])) lastMarked = Math.max(lastMarked, r);
+        }
+      });
+      const grayStart = lastMarked + 1;
+      if (L.consuelo) {
+        withConsuelo += 1;
+        // (b) la etiqueta de Consuelo no empieza antes del primer renglón gris común, y su llave encierra sólo grises
+        if (L.consuelo.label.top < grayStart * ROW - 1e-9 || L.consuelo.bracket.top !== grayStart * ROW) { bad += 1; why.push('b ' + tag); }
+        if (L.consuelo.bracket.height !== (m.sizes[0] - grayStart) * ROW) { bad += 1; why.push('b2 ' + tag); }
+        // (c) nunca se solapan
+        if (copaBottom > L.consuelo.label.top + 1e-9) { bad += 1; why.push('c ' + tag); }
+        // el padding inferior alcanza para lo que sobresale
+        if (L.consuelo.label.top + L.consuelo.label.height > L.height + L.padBottom + 1e-9) { bad += 1; why.push('pad-abajo ' + tag); }
+      } else {
+        withoutConsuelo += 1;
+        // (d) sin Consuelo no hay llave ni etiqueta
+        if (m.consueloCreated) { bad += 1; why.push('d ' + tag); }
+      }
+      // el padding superior alcanza para lo que sobresale hacia arriba
+      if (L.copaLabel.top + L.padTop < -1e-9) { bad += 1; why.push('pad-arriba ' + tag); }
+    }
+  }
+  ok(bad === 0 && withConsuelo > 0 && withoutConsuelo > 0, `layout del esquema: ${cases.length} combinaciones (zonas 2..4, tamaños 2..8, q 1..4, w 0..2, interzonal sí/no) x 4 alturas de etiqueta: Copa no queda bajo su llave, Consuelo no empieza antes del primer renglón gris común, nunca se solapan y sin Consuelo no se dibuja nada (${withConsuelo} con Consuelo, ${withoutConsuelo} sin)` + (bad ? ' ' + why.slice(0, 4).join(', ') : ''));
+  const L3 = zonesSchemaLayout(zonesSchemaModel(buildZoneOption(8, 3, 2, 0, false)), ROW, 26, 26);
+  ok(L3.consuelo === null, 'layout: 3 zonas 3-3-2 con 2 clasificados por zona (8 jugadores, Consuelo de 2): no se dibuja Consuelo');
 }
 
 console.log(fails === 0 ? '\nTODO OK' : `\nHAY ${fails} FALLAS`);

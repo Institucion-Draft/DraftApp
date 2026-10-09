@@ -28,17 +28,20 @@ import type { ThemeColors } from '../theme';
 type Props = NativeStackScreenProps<MainStackParamList, 'CreateEvent'>;
 type SimpleOption = { id: string; name: string };
 
-/** 'zones_knockout' (Copa grupos + llaves) todavía no se ofrece en ninguna pantalla. */
-type CompetitionFormat = 'round_robin' | 'swiss' | 'knockout';
+type CompetitionFormat = 'round_robin' | 'swiss' | 'zones_knockout' | 'knockout';
 
 const COMPETITION_FORMAT_OPTIONS: { value: CompetitionFormat; label: string }[] = [
   { value: 'round_robin', label: 'Todos contra todos' },
   { value: 'swiss', label: 'Suizo + Top 4' },
+  { value: 'zones_knockout', label: getCompetitionFormatBaseLabel('zones_knockout') },
   { value: 'knockout', label: getCompetitionFormatBaseLabel('knockout') },
 ];
 
 const KNOCKOUT_SANDBOX_TEXT =
   'Las Copas se crean siempre en modo sandbox: todavía no suman al ranking ni a los logros.';
+
+const ZONES_HINT_TEXT =
+  'Los grupos se sortean al finalizar el draft: ahí se elige la cantidad de zonas, el interzonal y cuántos pasan a la Copa.';
 
 type RegularMatchFormat = 'bo1' | 'bo2' | 'bo3';
 
@@ -72,6 +75,9 @@ const MATCH_FORMAT_TOOLTIP_BODY =
   'Los enfrentamientos pueden ser a un partido (BO1), a dos partidos (BO2), o al mejor de tres (BO3).';
 
 function getCompetitionFormatTooltipBody(format: CompetitionFormat): string {
+  if (format === 'zones_knockout') {
+    return `Fase de grupos y Copa. Al finalizar el draft el organizador sortea las zonas (2 a 4), con un simulador que recomienda configuraciones. Dentro de cada zona se juega todos contra todos, con un interzonal opcional u obligatorio según la cantidad de jugadores. Los mejores de cada zona pasan a la Copa y el resto a la Copa Consuelo. ${MATCH_FORMAT_TOOLTIP_BODY}`;
+  }
   if (format === 'knockout') {
     return `Eliminación directa. Participan entre ${KNOCKOUT_MIN_PLAYERS} y ${KNOCKOUT_MAX_PLAYERS} jugadores. Al finalizar el draft se sortean los cruces y quiénes pasan directo a la ronda siguiente cuando la cantidad no es potencia de 2. Los perdedores de las semifinales juegan por el 3° y 4° puesto. Las llaves se juegan a un partido (BO1) o al mejor de tres (BO3).`;
   }
@@ -178,8 +184,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   // Swiss siempre tiene mata-mata (fijo); round_robin solo si se activó el toggle top4.
   const hasMataMata = competitionFormat === 'swiss' || (competitionFormat === 'round_robin' && top4);
   const isKnockout = competitionFormat === 'knockout';
-  // Hasta que se escriba la exclusión de logros para Copa, toda Copa se crea en sandbox (is_official = false).
-  const effectiveIsOfficial = isKnockout ? false : isOfficial;
+  const isZones = competitionFormat === 'zones_knockout';
+  // Hasta que se escriba la exclusión de logros para Copa, toda Copa (sólo llaves o grupos + llaves) se crea en
+  // sandbox (is_official = false).
+  const forcedSandbox = isKnockout || isZones;
+  const effectiveIsOfficial = forcedSandbox ? false : isOfficial;
 
   const validate = (): string | null => {
     const n = name.trim();
@@ -224,6 +233,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       // Antes competition_format='round_robin_bo1_top4'; ahora round_robin + top_size=4 (0076).
       insertRow.top_size = 4;
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
+    }
+    if (competitionFormat === 'zones_knockout') {
+      // Grupos + Copa: se crea SIN zones_count ni zone_qualifiers (null hasta el sorteo, draw_zones); sólo el BO1/BO2/BO3
+      // de los partidos de la fase de grupos.
+      insertRow.match_format = regularMatchFormat;
     }
     if (competitionFormat === 'round_robin') {
       // BO1/BO2/BO3 de la fase regular, independiente de si hay top4 o no.
@@ -325,12 +339,12 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           body="Los eventos sandbox no afectan las estadísticas ni el historial de los jugadores. Ideal para pruebas."
         />
         <Switch
-          value={isKnockout ? true : !isOfficial}
-          disabled={isKnockout}
+          value={forcedSandbox ? true : !isOfficial}
+          disabled={forcedSandbox}
           onValueChange={(v) => setIsOfficial(!v)}
         />
       </View>
-      {isKnockout ? <Text style={styles.formatHint}>{KNOCKOUT_SANDBOX_TEXT}</Text> : null}
+      {forcedSandbox ? <Text style={styles.formatHint}>{KNOCKOUT_SANDBOX_TEXT}</Text> : null}
 
       <Text style={styles.label}>Nombre</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} />
@@ -386,7 +400,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           </>
         ) : null}
 
-        {competitionFormat === 'round_robin' || competitionFormat === 'swiss' ? (
+        {isZones ? <Text style={styles.formatHint}>{ZONES_HINT_TEXT}</Text> : null}
+
+        {competitionFormat === 'round_robin' || competitionFormat === 'swiss' || isZones ? (
           <>
             {hasMataMata ? (
               <Text style={[styles.label, styles.labelInline, styles.labelBold]}>
