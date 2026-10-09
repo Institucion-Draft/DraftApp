@@ -18,6 +18,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
 import { fetchEventVenueName } from '../lib/eventVenueName';
+import { zonePhaseCompleteness } from '../lib/zonesPairingsList';
+import { consueloWillBeCreated } from '../lib/zonesPlanner';
 import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -680,6 +682,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const { eventId, showPodiumIntro, cup } = route.params;
+  // Grupos + Copa: la misma pantalla hace de tabla por zona (por defecto) o de "Cruces de copa" (view = 'cups').
+  const cupsView = route.params.view === 'cups';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<RowView[]>([]);
@@ -721,6 +725,14 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
+  /** Grupos + Copa (0136/0137): zonas del evento y a qué zona pertenece cada jugador; el orden dentro de la zona sale de zone_standings. */
+  const [zonesTable, setZonesTable] = useState<{ zones: { id: string; name: string }[]; zoneByParticipant: Map<string, string> } | null>(null);
+  const [zoneTab, setZoneTab] = useState<string | null>(null);
+  /** Grupos + Copa: completitud parcial por zona (pie de cada tabla) y si Consuelo se arma (N - T >= 4). */
+  const [zonesCompleteness, setZonesCompleteness] = useState<Map<string, { done: number; total: number }>>(new Map());
+  const [zonesConsuelo, setZonesConsuelo] = useState(false);
+  /** Grupos + Copa: la fase de grupos terminó (zones_phase_completed_at); recién ahí se muestran las tabs de copa. */
+  const [zonesPhaseDone, setZonesPhaseDone] = useState(false);
   /** True cuando el evento es swiss con match_format='bo2' (competitionFormat ya viene mapeado a 'swiss' para cualquier BO; este flag distingue matices de display). */
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
@@ -749,8 +761,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
   // Copa (sólo llaves): la pantalla se llama "Cruces de copa" (el resto de los formatos conserva el
   // título del stack).
   useLayoutEffect(() => {
-    if (competitionFormat === 'knockout') navigation.setOptions({ title: 'Cruces de copa' });
-  }, [navigation, competitionFormat]);
+    if (competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView)) {
+      navigation.setOptions({ title: 'Cruces de copa' });
+    }
+  }, [navigation, competitionFormat, cupsView]);
 
   // Copa (sólo llaves): el cuadro se ve en horizontal. Se bloquea mientras la pantalla tiene el foco y
   // se restaura a vertical (la orientación de la app, ver app.json) al salir, incluso al navegar a
@@ -759,7 +773,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   // recarga (la suscripción en vivo sigue corriendo con la pantalla tapada) puede re-dispararlo fuera
   // del foco: el formato se lee desde un ref y todo pasa por applyLandscape/releaseLandscape.
   const knockoutRef = useRef(false);
-  knockoutRef.current = competitionFormat === 'knockout';
+  knockoutRef.current = competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView);
   const landscapeLockedRef = useRef(false);
   const applyLandscape = useCallback(() => {
     if (!knockoutRef.current || landscapeLockedRef.current || !navigation.isFocused()) return;
@@ -780,8 +794,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
   );
   // El formato se conoce recién al cargar: si ya hay foco, bloquea en ese momento.
   useEffect(() => {
-    if (competitionFormat === 'knockout') applyLandscape();
-  }, [competitionFormat, applyLandscape]);
+    if (competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView)) applyLandscape();
+  }, [competitionFormat, cupsView, applyLandscape]);
   // Al desmontar la pantalla, restaura si quedó bloqueada.
   useEffect(() => releaseLandscape, [releaseLandscape]);
 
@@ -794,6 +808,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          zone_id,
           is_shiny,
           left_event_at,
           bye_rounds,
@@ -817,13 +832,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('pairings')
         .select(
-          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id, swiss_round'
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id, swiss_round, stage'
         )
         .eq('event_id', eventId),
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type, topcut_format'
+          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type, topcut_format, zones_count, zone_qualifiers, zone_wildcards, zones_phase_completed_at'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -917,8 +932,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
     // EG/EC son redundantes con PG/PJ cuando match_format='bo1' (cada enfrentamiento ES una sola
     // partida) — aplica igual con o sin top4, son ejes independientes (antes solo miraba
     // top_size=4, ocultando EG/EC de más para BO2/BO3+top4 y de menos para BO1 sin top).
-    setIsRoundRobinBo1(rawFmt === 'round_robin' && rawMatchFormat === 'bo1');
-    setIsRoundRobinBo2(rawFmt === 'round_robin' && rawMatchFormat === 'bo2');
+    // Grupos + Copa usa la misma tabla que el todos contra todos (mismas columnas según BO1/BO2/BO3).
+    const isLeagueTable = rawFmt === 'round_robin' || rawFmt === 'zones_knockout';
+    setIsRoundRobinBo1(isLeagueTable && rawMatchFormat === 'bo1');
+    setIsRoundRobinBo2(isLeagueTable && rawMatchFormat === 'bo2');
 
     // round_robin con top_size=4 (4to puesto real) O round_robin sin top (1er puesto, 0075):
     // resaltar en la tabla a quienes disputaron el desempate (si el evento tuvo uno). Query
@@ -1010,7 +1027,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     // 2da oportunidad, 0135).
     let knockoutBracketData: typeof knockoutBracket = null;
     let secondGroupRow: PodiumTiebreakGroupRow | null = null;
-    if (fmt === 'knockout') {
+    if (fmt === 'knockout' || fmt === 'zones_knockout') {
       const loadBracket = async (groupId: string | null) => {
         if (!groupId) return { model: null as KnockoutBracketModel | null, slots: [] as KnockoutSlotRow[] };
         const [slotsRes, bmRes] = await Promise.all([
@@ -1467,6 +1484,45 @@ export default function StandingsScreen({ route, navigation }: Props) {
         // que la tabla y el cuadro rompan el empate exacto de forma idéntica.
         return a.userId.localeCompare(b.userId);
       });
+    } else if (rawFmt === 'zones_knockout') {
+      // Grupos + Copa: el orden DENTRO de cada zona lo calcula el servidor (zone_standings, 0137) con la misma cascada
+      // del todos contra todos y contando el interzonal en los números; las estadísticas de cada fila (PG, PJ, EG, EC,
+      // en vivo...) salen de TODOS los pairings del jugador, interzonal incluido, sin listarlo como partido aparte.
+      const zsRes = await supabase.rpc('zone_standings', { p_event_id: eventId });
+      const zsRows = (zsRes.error ? [] : (zsRes.data ?? [])) as {
+        zone_id: string;
+        zone_index: number;
+        zone_name: string;
+        participant_id: string;
+        rank_in_zone: number;
+      }[];
+      const zoneByParticipant = new Map<string, string>();
+      const zoneList = new Map<string, { id: string; name: string; index: number }>();
+      const orderKey = new Map<string, number>();
+      for (const z of zsRows) {
+        zoneByParticipant.set(z.participant_id, z.zone_id);
+        if (!zoneList.has(z.zone_id)) zoneList.set(z.zone_id, { id: z.zone_id, name: z.zone_name, index: z.zone_index });
+        orderKey.set(z.participant_id, z.zone_index * 1000 + z.rank_in_zone);
+      }
+      rowsBuilt.sort((a, b) => (orderKey.get(a.participantId) ?? 1e9) - (orderKey.get(b.participantId) ?? 1e9));
+      const zones = [...zoneList.values()].sort((a, b) => a.index - b.index).map((z) => ({ id: z.id, name: z.name }));
+      setZonesTable({ zones, zoneByParticipant });
+      const leftIdSet = new Set(
+        (participants as { id: string; left_event_at?: string | null }[]).filter((p) => p.left_event_at).map((p) => String(p.id))
+      );
+      const completeness = new Map<string, { done: number; total: number }>();
+      for (const z of zones) {
+        completeness.set(z.id, zonePhaseCompleteness(z.id, pairings as any, zoneByParticipant, leftIdSet));
+      }
+      setZonesCompleteness(completeness);
+      const evZ = eventRes.data as { zones_count?: number | null; zone_qualifiers?: number | null; zone_wildcards?: number | null; zones_phase_completed_at?: string | null } | null;
+      setZonesPhaseDone(!!evZ?.zones_phase_completed_at);
+      setZonesConsuelo(
+        evZ?.zones_count != null && evZ?.zone_qualifiers != null
+          ? consueloWillBeCreated(zoneByParticipant.size, evZ.zones_count, evZ.zone_qualifiers, evZ.zone_wildcards ?? 0)
+          : false
+      );
+      setZoneTab((prev) => (prev && zones.some((z) => z.id === prev) ? prev : (zones[0]?.id ?? null)));
     } else if (rawFmt === 'round_robin') {
       // Mismo orden que decide el desempate jugable de este modo (con top_size=4: el bracket de
       // top4, ver EventDetailScreen; sin top: el desempate de 1er puesto, ver 0075): desempate
@@ -1544,6 +1600,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         return bv - av;
       });
     }
+    if (rawFmt !== 'zones_knockout') setZonesTable(null);
     setSwissTopcutBracketView(swissTopcutBracketModel);
     setKnockoutBracket(knockoutBracketData);
     setRows(rowsBuilt);
@@ -1621,6 +1678,10 @@ export default function StandingsScreen({ route, navigation }: Props) {
           void load();
         }
       )
+      // Grupos + Copa: el cierre de la fase de grupos (zones_phase_completed_at) refresca la pantalla sin reiniciar.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'draft_events', filter: `id=eq.${eventId}` }, () => {
+        void load();
+      })
       .on(
         'postgres_changes',
         {
@@ -1899,9 +1960,16 @@ export default function StandingsScreen({ route, navigation }: Props) {
       />
     ) : null;
   // Hay pestañas (Copa Prima | Copa 2da chance) sólo si la 2da chance ya se sorteó.
-  const showSecondTab = knockoutBracket != null && knockoutBracket.secondDrawn;
+  // Grupos + Copa: Consuelo se muestra si se va a armar (N - T >= 4) o ya existe.
+  const showSecondTab =
+    competitionFormat === 'zones_knockout'
+      ? zonesPhaseDone && (zonesConsuelo || (knockoutBracket?.secondDrawn ?? false))
+      : knockoutBracket != null && knockoutBracket.secondDrawn;
   const selectedCup: 'main' | 'second' = showSecondTab ? copaTab : 'main';
-  if (competitionFormat === 'knockout') {
+  // Grupos + Copa: una tabla por zona (tabs Grupo A, B, ...), la de la zona elegida con las filas ya ordenadas.
+  const visibleRows = zonesTable ? rows.filter((r) => zonesTable.zoneByParticipant.get(r.participantId) === zoneTab) : rows;
+
+  if (competitionFormat === 'knockout' || (competitionFormat === 'zones_knockout' && cupsView)) {
     return (
       <View style={styles.screenRoot}>
         {showConfettiOnce ? (
@@ -1936,7 +2004,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
           ) : selectedCup === 'main' && knockoutBracket?.model ? (
             renderCopaBracket(knockoutBracket.model)
           ) : (
-            <Text style={styles.knockoutNotice}>Las llaves se sortean al finalizar el draft</Text>
+            <Text style={styles.knockoutNotice}>
+              {competitionFormat === 'zones_knockout'
+                ? zonesPhaseDone
+                  ? 'Llaves en preparación'
+                  : 'Se definen al terminar la fase de grupos'
+                : 'Las llaves se sortean al finalizar el draft'}
+            </Text>
           )}
         </ScrollView>
       </View>
@@ -1951,7 +2025,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
         </View>
       ) : null}
       <ScrollView style={styles.container} contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      {podiumBlock}
+      {competitionFormat === 'zones_knockout' ? null : podiumBlock}
       {revengeRows.length > 0 ? (
         <View style={styles.tabsRow}>
           <TouchableOpacity style={styles.tabBtn} onPress={() => setTab('official')} activeOpacity={0.7}>
@@ -1967,6 +2041,16 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
       {tab === 'official' ? (
         <>
+          {zonesTable && zonesTable.zones.length > 0 ? (
+            <View style={styles.tabsRow}>
+              {zonesTable.zones.map((z) => (
+                <TouchableOpacity key={z.id} style={styles.tabBtn} onPress={() => setZoneTab(z.id)} activeOpacity={0.7}>
+                  <Text style={[styles.tabLabel, zoneTab === z.id && styles.tabLabelActive]}>{'Grupo ' + z.name}</Text>
+                  <View style={[styles.tabUnderline, zoneTab !== z.id && styles.tabUnderlineHidden]} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
           <View style={styles.header}>
             <Text style={[styles.cell, styles.playerCol]}>Jugador</Text>
             {competitionFormat === 'swiss' ? (
@@ -2002,7 +2086,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             ) : null}
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
-          {rows.map((r) => {
+          {visibleRows.map((r) => {
             const isFourthPlaceDisputant = fourthPlaceDisputantIds.has(r.participantId);
             const isFourthPlaceEliminated = isFourthPlaceDisputant && fourthPlaceEliminatedIds.has(r.participantId);
             return (
@@ -2177,7 +2261,22 @@ export default function StandingsScreen({ route, navigation }: Props) {
         <Text style={styles.legendStaticDot}>●</Text>
         <Text style={styles.legendLiveCaption}> En juego</Text>
       </View>
-      {tab === 'official' &&
+      {tab === 'official' && zonesTable ? (
+        (() => {
+          const c = zoneTab ? zonesCompleteness.get(zoneTab) : null;
+          if (!c || c.total === 0) return null;
+          return (
+            <View style={styles.tourneyMeta}>
+              <View style={styles.tourneyMetaRow}>
+                <Text style={[styles.tourneyMetaLine, styles.tourneyMetaLeft]}>
+                  {`Completitud: ${formatPctOneDecimal(c.done / c.total)} (${c.done}/${c.total})`}
+                </Text>
+              </View>
+            </View>
+          );
+        })()
+      ) : null}
+      {tab === 'official' && !zonesTable &&
       (eventFooter.torneo ||
         (eventFooter.bo3 && !isRoundRobinBo1 && !(competitionFormat === 'swiss' && swissChampionName))) ? (
         <View style={styles.tourneyMeta}>

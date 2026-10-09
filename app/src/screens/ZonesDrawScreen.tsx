@@ -36,6 +36,8 @@ type EventRow = {
   name: string;
   competition_format: string | null;
   match_format: 'bo1' | 'bo2' | 'bo3' | null;
+  /** Formato de las llaves (Copa principal y Consuelo). */
+  topcut_format: string | null;
   status: string;
   zones_drawn_at: string | null;
 };
@@ -63,7 +65,7 @@ export default function ZonesDrawScreen({ route, navigation }: Props) {
     const [evRes, partsRes, venue] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('id, name, competition_format, match_format, status, zones_drawn_at')
+        .select('id, name, competition_format, match_format, topcut_format, status, zones_drawn_at')
         .eq('id', eventId)
         .maybeSingle(),
       // Inscriptos activos: jugadores que no usaron "Me voy".
@@ -128,6 +130,12 @@ export default function ZonesDrawScreen({ route, navigation }: Props) {
 
   const cupNames = useMemo(() => ({ prima: cupPrimaName(venueName), consuelo: CUP_CONSUELO_NAME }), [venueName]);
 
+  // Vuelve al detalle del evento ya existente en el stack y le pasa una marca nueva: el detalle recarga TODO (evento,
+  // nota de grupos sorteados y botones de Enfrentamientos y Tabla) sin depender de que el foco dispare la carga.
+  const backToEventDetail = () => {
+    navigation.popTo('EventDetail', { eventId, refresh: Date.now() });
+  };
+
   const runDraw = async (o: ZoneOption) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -153,12 +161,12 @@ export default function ZonesDrawScreen({ route, navigation }: Props) {
     const res = (data ?? {}) as DrawResult;
     if (res.already_drawn) {
       Alert.alert('Grupos ya sorteados', 'Los grupos de este evento ya se habían sorteado; no se hizo ningún cambio.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: 'OK', onPress: () => backToEventDetail() },
       ]);
       return;
     }
     Alert.alert('Grupos sorteados', 'Ya están armadas las zonas y los partidos de cada grupo.', [
-      { text: 'OK', onPress: () => navigation.goBack() },
+      { text: 'OK', onPress: () => backToEventDetail() },
     ]);
   };
 
@@ -187,12 +195,13 @@ export default function ZonesDrawScreen({ route, navigation }: Props) {
   }
 
   const formatLabel = event.match_format ? MATCH_FORMAT_LABEL[event.match_format] ?? event.match_format : '—';
+  const topcutLabel = event.topcut_format === 'bo1' || event.topcut_format === 'bo3' ? event.topcut_format.toUpperCase() : '—';
 
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.meta}>
-          {playerCount} jugadores · Enfrentamientos {formatLabel}
+          {playerCount} jugadores · Grupos {formatLabel} · Llaves {topcutLabel}
         </Text>
 
         {alreadyDrawn ? (

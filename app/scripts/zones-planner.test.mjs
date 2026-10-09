@@ -1,12 +1,14 @@
 // Tests del planificador de zonas (app/src/lib/zonesPlanner.ts). Sin framework: node app/scripts/zones-planner.test.mjs
 import {
   buildZoneOption,
+  consueloWillBeCreated,
   copaSizeRank,
   enumerateZoneOptions,
   isEvenGroupPhase,
   recommendZoneOptions,
   zoneLayout,
 } from '../src/lib/zonesPlanner.ts';
+import { INTERZONAL_LABEL, buildZonesOfficialRows, pairingGroupLabel, shortGroupLabel, zonePhaseCompleteness, zonesGroupOrder } from '../src/lib/zonesPairingsList.ts';
 import { zoneConsueloText, zoneCopaText, zoneInterzonalText, zoneMatchesText, zoneOptionLines, zoneOptionText, zoneQualifiersText, zonesSchemaLayout, zonesSchemaModel } from '../src/lib/zonesPlannerText.ts';
 
 let fails = 0;
@@ -231,6 +233,76 @@ const phase = (n, k, iz) => {
   ok(bad === 0 && withConsuelo > 0 && withoutConsuelo > 0, `layout del esquema: ${cases.length} combinaciones (zonas 2..4, tamaños 2..8, q 1..4, w 0..2, interzonal sí/no) x 4 alturas de etiqueta: Copa no queda bajo su llave, Consuelo no empieza antes del primer renglón gris común, nunca se solapan y sin Consuelo no se dibuja nada (${withConsuelo} con Consuelo, ${withoutConsuelo} sin)` + (bad ? ' ' + why.slice(0, 4).join(', ') : ''));
   const L3 = zonesSchemaLayout(zonesSchemaModel(buildZoneOption(8, 3, 2, 0, false)), ROW, 26, 26);
   ok(L3.consuelo === null, 'layout: 3 zonas 3-3-2 con 2 clasificados por zona (8 jugadores, Consuelo de 2): no se dibuja Consuelo');
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Lista de Enfrentamientos de Grupos + Copa (zonesPairingsList.ts)
+// ---------------------------------------------------------------------------------------------------
+{
+  const names = new Map([['z1', 'A'], ['z2', 'B']]);
+  ok(pairingGroupLabel('zone', 'z2', names) === 'Grupo B', 'lista: etiqueta de un pairing de zona (Grupo B)');
+  ok(pairingGroupLabel('interzonal', null, names) === INTERZONAL_LABEL, 'lista: etiqueta de un interzonal');
+  ok(pairingGroupLabel('revenge', null, names) === null && pairingGroupLabel(null, null, names) === null && pairingGroupLabel('zone', 'zx', names) === null, 'lista: otros stages o zona desconocida -> sin etiqueta');
+  ok(['Grupo A', 'Grupo B', 'Grupo C', 'Grupo D', INTERZONAL_LABEL, null].map(shortGroupLabel).join() === 'GA,GB,GC,GD,I,', 'lista: abreviaturas del pie (GA, GB, GC, GD, I) y sin etiqueta -> null');
+  ok(pairingGroupLabel('zone', 'z1', names) === 'Grupo A' && pairingGroupLabel('interzonal', null, names) === 'Interzonal', 'lista: las etiquetas completas siguen siendo "Grupo A" e "Interzonal" (headers y detalle)');
+  const order = zonesGroupOrder(['A', 'B', 'C']);
+  ok(order.join() === 'Grupo A,Grupo B,Grupo C,Interzonal', 'lista: orden de los headers en vivo (grupos y al final Interzonal)');
+  const it = (id, status, groupLabel) => ({ id, status, groupLabel });
+  // ya ordenado como la fase de liga: en vivo primero, después sin jugar, después terminados
+  const items = [it('l1', 'in_progress', 'Grupo B'), it('l2', 'in_progress', 'Interzonal'), it('l3', 'in_progress', 'Grupo B'), it('s1', 'scheduled', 'Grupo A'), it('s2', 'scheduled', 'Interzonal'), it('c1', 'completed', 'Grupo B')];
+  const rows = buildZonesOfficialRows(items, order);
+  const kinds = rows.map((r) => (r.kind === 'header' ? 'H:' + r.title : r.item.id));
+  ok(kinds.join() === 'H:Grupo B,l1,l3,H:Interzonal,l2,s1,s2,c1', 'lista: en vivo agrupadas bajo header (sólo Grupo B e Interzonal, que tienen una en vivo) y el resto en una sola lista sin headers (' + kinds.join() + ')');
+  const noLive = buildZonesOfficialRows([it('s1', 'scheduled', 'Grupo A'), it('c1', 'completed', 'Grupo B')], order);
+  ok(noLive.every((r) => r.kind === 'pairing') && noLive.length === 2, 'lista: sin partidas en vivo no hay ningún header');
+  const onlyIz = buildZonesOfficialRows([it('l1', 'in_progress', 'Interzonal'), it('s1', 'scheduled', 'Grupo A')], order);
+  ok(onlyIz.filter((r) => r.kind === 'header').map((r) => r.title).join() === 'Interzonal', 'lista: un interzonal en vivo muestra su header aunque nadie más juegue en vivo');
+  ok(new Set(rows.map((r) => r.id)).size === rows.length, 'lista: ids de fila únicos');
+  const gaps = rows.filter((r) => r.kind === 'pairing' && r.gapBefore).map((r) => r.id);
+  ok(gaps.join() === 's1', 'lista: espacio vertical (gapBefore) sólo en la primera fila de la lista general, debajo del bloque en vivo');
+  ok(noLive.every((r) => r.kind !== 'pairing' || !r.gapBefore), 'lista: sin bloque en vivo no hay espacio extra');
+  ok(buildZonesOfficialRows([it('l1', 'in_progress', 'Grupo A')], order).every((r) => r.kind !== 'pairing' || !r.gapBefore), 'lista: sólo partidas en vivo -> no hay lista debajo ni espacio');
+  const noLabel = buildZonesOfficialRows([it('l9', 'in_progress', null), it('s1', 'scheduled', 'Grupo A')], order);
+  ok(noLabel.length === 2 && noLabel[0].kind === 'pairing', 'lista: una partida en vivo sin etiqueta queda arriba sin header');
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Completitud parcial por zona (pie de la tabla de posiciones)
+// ---------------------------------------------------------------------------------------------------
+{
+  const mk = (stage, a, b, resolved = false, draw = false) => ({ stage, participant_a_id: a, participant_b_id: b, official_winner_participant_id: resolved ? a : null, official_draw: draw });
+  const none = new Set();
+  // 2 zonas de 5 con interzonal: 10 de zona + 5 interzonales = 15 por grupo
+  const A = ['a1', 'a2', 'a3', 'a4', 'a5'], B = ['b1', 'b2', 'b3', 'b4', 'b5'];
+  const zoneOf = new Map([...A.map((x) => [x, 'z1']), ...B.map((x) => [x, 'z2'])]);
+  const pairs = (arr) => arr.flatMap((x, i) => arr.slice(i + 1).map((y) => [x, y]));
+  const prs = [
+    ...pairs(A).map(([x, y], i) => mk('zone', x, y, i < 6)),
+    ...pairs(B).map(([x, y], i) => mk('zone', x, y, i < 2)),
+    ...A.map((x, i) => mk('interzonal', x, B[i], i < 3)),
+    mk('revenge', 'a1', 'b2', true), mk('bracket', 'a1', 'a2', true),
+  ];
+  const c1 = zonePhaseCompleteness('z1', prs, zoneOf, none);
+  const c2 = zonePhaseCompleteness('z2', prs, zoneOf, none);
+  ok(c1.total === 15 && c2.total === 15, 'completitud: 2 zonas de 5 con interzonal -> 15 por grupo (10 de zona + 5 interzonales; un interzonal cuenta en ambos)');
+  ok(c1.done === 9 && c2.done === 5 && c1.done / c1.total !== c2.done / c2.total, 'completitud: dos grupos con distinta cantidad jugada muestran distinto % (' + c1.done + '/15 vs ' + c2.done + '/15), sin contar venganzas ni llaves');
+  // zonas desiguales sin interzonal (11 jugadores en 6-5): cada zona compara sus propios partidos
+  const U1 = ['u1', 'u2', 'u3', 'u4', 'u5', 'u6'], U2 = ['v1', 'v2', 'v3', 'v4', 'v5'];
+  const zu = new Map([...U1.map((x) => [x, 'z1']), ...U2.map((x) => [x, 'z2'])]);
+  const pu = [...pairs(U1).map(([x, y]) => mk('zone', x, y, true)), ...pairs(U2).map(([x, y], i) => mk('zone', x, y, i < 4))];
+  const cu1 = zonePhaseCompleteness('z1', pu, zu, none), cu2 = zonePhaseCompleteness('z2', pu, zu, none);
+  ok(cu1.total === 15 && cu1.done === 15 && cu2.total === 10 && cu2.done === 4, 'completitud: zonas desiguales 6-5 -> 15/15 y 4/10');
+  // zonas desiguales con interzonal obligatorio (4-3-3): el interzonal sólo cuenta en las dos zonas chicas
+  const Z1 = ['p1', 'p2', 'p3', 'p4'], Z2 = ['q1', 'q2', 'q3'], Z3 = ['r1', 'r2', 'r3'];
+  const zz = new Map([...Z1.map((x) => [x, 'z1']), ...Z2.map((x) => [x, 'z2']), ...Z3.map((x) => [x, 'z3'])]);
+  const pz = [...pairs(Z1).map(([x, y]) => mk('zone', x, y)), ...pairs(Z2).map(([x, y]) => mk('zone', x, y)), ...pairs(Z3).map(([x, y]) => mk('zone', x, y)), ...Z2.map((x, i) => mk('interzonal', x, Z3[i], true))];
+  const cz = ['z1', 'z2', 'z3'].map((z) => zonePhaseCompleteness(z, pz, zz, none));
+  ok(cz.map((c) => c.total).join() === '6,6,6' && cz.map((c) => c.done).join() === '0,3,3', 'completitud: 4-3-3 con interzonal entre las chicas -> 6/6/6 y el interzonal sólo suma en las zonas chicas (' + cz.map((c) => c.done + '/' + c.total).join(' ') + ')');
+  // un par donde los dos se fueron cuenta cerrado; con uno solo ido (sin resolver) no
+  const lp = [mk('zone', 'a1', 'a2'), mk('zone', 'a1', 'a3')];
+  const cl = zonePhaseCompleteness('z1', lp, zoneOf, new Set(['a1', 'a2']));
+  ok(cl.total === 2 && cl.done === 1, 'completitud: un par con los dos jugadores ido cuenta cerrado; con uno solo sin resolver no');
+  ok(consueloWillBeCreated(12, 3, 2, 2) === true && consueloWillBeCreated(12, 3, 3, 0) === false && consueloWillBeCreated(16, 2, 4, 0) === true, 'consuelo: se arma sólo con N - T >= 4');
 }
 
 console.log(fails === 0 ? '\nTODO OK' : `\nHAY ${fails} FALLAS`);

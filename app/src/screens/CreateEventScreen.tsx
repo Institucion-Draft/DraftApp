@@ -235,9 +235,11 @@ export default function CreateEventScreen({ route, navigation }: Props) {
       insertRow.topcut_format = eliminatoriasBo3 ? 'bo3' : 'bo1';
     }
     if (competitionFormat === 'zones_knockout') {
-      // Grupos + Copa: se crea SIN zones_count ni zone_qualifiers (null hasta el sorteo, draw_zones); sólo el BO1/BO2/BO3
-      // de los partidos de la fase de grupos.
+      // Grupos + Copa: se crea SIN zones_count ni zone_qualifiers (null hasta el sorteo, draw_zones). Dos formatos
+      // independientes: match_format (BO1/BO2/BO3 de la fase de grupos, como el todos contra todos) y topcut_format
+      // (BO1/BO3 de las llaves: Copa principal y Consuelo, como la Copa sola).
       insertRow.match_format = regularMatchFormat;
+      insertRow.topcut_format = knockoutTopcut;
     }
     if (competitionFormat === 'round_robin') {
       // BO1/BO2/BO3 de la fase regular, independiente de si hay top4 o no.
@@ -330,6 +332,37 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     );
   }
 
+  // Formato de las llaves (BO1/BO3): topcut_format. Lo usa la Copa sola y, en Grupos + Copa, la Copa principal y Consuelo.
+  const llavesSelector = (
+    <>
+      <View style={styles.labelRow}>
+        <Text style={[styles.label, styles.labelInline, styles.labelBold]}>Formato de las llaves</Text>
+        <InfoTooltip
+          title="Formato de las llaves"
+          body={
+            isZones
+              ? 'Todos los cruces de la Copa y de la Copa Consuelo pueden jugarse a partido único (BO1) o al mejor de 3 (BO3). Es independiente del formato de la fase de grupos. Podés cambiar esta opción hasta que arranque el primer cruce.'
+              : 'Todos los cruces de la Copa pueden jugarse a partido único (BO1) o al mejor de 3 (BO3). Podés cambiar esta opción hasta que arranque el primer cruce.'
+          }
+        />
+      </View>
+      <View style={styles.segmented}>
+        {TOPCUT_FORMAT_OPTIONS.map((opt) => {
+          const selected = knockoutTopcut === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.value}
+              style={[styles.segment, selected && styles.segmentSelected]}
+              onPress={() => setKnockoutTopcut(opt.value)}
+            >
+              <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </>
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <View style={styles.sandboxRow}>
@@ -374,31 +407,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           <Text style={styles.formatHint}>Suizo incluye siempre fase mata-mata (Top 4); no se puede desactivar.</Text>
         ) : null}
 
-        {isKnockout ? (
-          <>
-            <View style={styles.labelRow}>
-              <Text style={[styles.label, styles.labelInline, styles.labelBold]}>Formato de las llaves</Text>
-              <InfoTooltip
-                title="Formato de las llaves"
-                body="Todos los cruces de la Copa pueden jugarse a partido único (BO1) o al mejor de 3 (BO3). Podés cambiar esta opción hasta que arranque el primer cruce."
-              />
-            </View>
-            <View style={styles.segmented}>
-              {TOPCUT_FORMAT_OPTIONS.map((opt) => {
-                const selected = knockoutTopcut === opt.value;
-                return (
-                  <TouchableOpacity
-                    key={opt.value}
-                    style={[styles.segment, selected && styles.segmentSelected]}
-                    onPress={() => setKnockoutTopcut(opt.value)}
-                  >
-                    <Text style={[styles.segmentTxt, selected && styles.segmentTxtSelected]}>{opt.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </>
-        ) : null}
+        {isKnockout ? llavesSelector : null}
 
         {isZones ? <Text style={styles.formatHint}>{ZONES_HINT_TEXT}</Text> : null}
 
@@ -411,9 +420,12 @@ export default function CreateEventScreen({ route, navigation }: Props) {
             ) : null}
             <View style={styles.labelRow}>
               <Text style={[styles.label, styles.labelInline, hasMataMata ? styles.labelNormal : styles.labelBold]}>
-                Formato de enfrentamientos
+                {isZones ? 'Formato de la fase de grupos' : 'Formato de enfrentamientos'}
               </Text>
-              <InfoTooltip title="Formato de enfrentamientos" body={MATCH_FORMAT_TOOLTIP_BODY} />
+              <InfoTooltip
+                title={isZones ? 'Formato de la fase de grupos' : 'Formato de enfrentamientos'}
+                body={MATCH_FORMAT_TOOLTIP_BODY}
+              />
             </View>
             <View style={styles.segmented}>
               {REGULAR_MATCH_FORMAT_OPTIONS.map((opt) => {
@@ -431,6 +443,8 @@ export default function CreateEventScreen({ route, navigation }: Props) {
             </View>
           </>
         ) : null}
+
+        {isZones ? llavesSelector : null}
 
         {competitionFormat === 'round_robin' ? (
           <View style={styles.switchRow}>

@@ -886,6 +886,12 @@ async function navigateAfterMatchMaybeComplete(
     navigation.replace('MatchResult', resultParams);
     return;
   }
+  // Grupos + Copa: el evento no se completa al terminar una partida de la fase de grupos (no hay podio acá): no se espera.
+  const fmtRes = await supabase.from('draft_events').select('competition_format').eq('id', eventId).maybeSingle();
+  if ((fmtRes.data as { competition_format?: string | null } | null)?.competition_format === 'zones_knockout') {
+    navigation.replace('MatchResult', resultParams);
+    return;
+  }
   const delays = [1500, 700, 700];
   for (const ms of delays) {
     await new Promise((r) => setTimeout(r, ms));
