@@ -12,6 +12,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { fetchEventVenueName } from '../lib/eventVenueName';
+import { pairingGroupLabel } from '../lib/zonesPairingsList';
 import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -50,6 +51,9 @@ type PairingRow = {
   official_draw: boolean | null;
   super_cup_winner_participant_id: string | null;
   revenge_cup_winner_participant_id: string | null;
+  /** Grupos + Copa: 'zone' | 'interzonal' (fase de grupos), 'revenge', ... */
+  stage?: string | null;
+  zone_id?: string | null;
 };
 
 type MatchRow = {
@@ -79,6 +83,8 @@ type OfficialH2HRow = {
   opponentWins: number;
   sortTier: 0 | 1 | 2;
   isDraw: boolean;
+  /** Grupos + Copa: "Grupo A" / "Interzonal" del cruce de la fase de grupos. */
+  groupLabel?: string | null;
   /** Solo presente en filas de fase mata-mata: identifica el cruce del bracket. */
   bracketMatchId?: string | null;
   /** true si ESTE pairing tiene alguna match walkover ganada por el dueño del perfil — el
@@ -471,7 +477,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       supabase
         .from('pairings')
         .select(
-          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id'
+          'id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, super_cup_winner_participant_id, revenge_cup_winner_participant_id, stage, zone_id'
         )
         .eq('event_id', eventId),
     ]);
@@ -634,7 +640,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
     const isTop4 = rawCompetitionFormat === 'round_robin' && rawTopSize === 4;
     setIsRoundRobinTop4(isTop4);
     setIsRoundRobinBo1(
-      (rawCompetitionFormat === 'round_robin' || rawCompetitionFormat === 'swiss') && rawMatchFormat === 'bo1'
+      (rawCompetitionFormat === 'round_robin' || rawCompetitionFormat === 'swiss' || rawCompetitionFormat === 'zones_knockout') &&
+        rawMatchFormat === 'bo1'
     );
     const rawTopcutFormat = (evRow as { topcut_format?: string | null } | null)?.topcut_format;
     setTopcutFormat(
@@ -642,10 +649,24 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         ? rawTopcutFormat
         : 'bo3'
     );
+    // Grupos + Copa: cada cruce de la fase de grupos lleva su grupo ("Grupo A" / "Interzonal"). Sólo se listan los
+    // pairings que existen (zona e interzonal); no se inventan cruces contra el resto de los jugadores.
+    if (competitionFormat === 'zones_knockout') {
+      const zonesRes = await supabase.from('event_zones').select('id, name').eq('event_id', eventId);
+      const zoneNameById = new Map<string, string>(
+        ((zonesRes.error ? [] : (zonesRes.data ?? [])) as { id: string; name: string }[]).map((z) => [z.id, z.name])
+      );
+      for (const row of officialRows) {
+        const pr = pairings.find((p) => p.id === row.pairingId);
+        row.groupLabel = pr ? pairingGroupLabel(pr.stage, pr.zone_id, zoneNameById) : null;
+      }
+    }
     // Copa (sólo llaves): los cruces oficiales son los de la sección de llaves; no hay lista regular.
     const officialH2hFiltered =
       competitionFormat === 'knockout'
         ? []
+        : competitionFormat === 'zones_knockout'
+        ? officialRows.filter((row) => !!row.groupLabel)
         : competitionFormat === 'swiss'
         ? officialRows.filter((row) => {
             if (!row.pairingId) return false;
@@ -773,7 +794,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     // 2da oportunidad (0135): sus cruces del jugador, en sección aparte de la copa principal.
     let secondBuckets: MataPhaseBuckets | null = null;
-    if (competitionFormat === 'knockout') {
+    // Copa sola y Grupos + Copa (hoy sin llaves en este formato, listo para el pasaje a la Copa): Consuelo aparte.
+    if (competitionFormat === 'knockout' || competitionFormat === 'zones_knockout') {
       const secRes = await supabase
         .from('event_tiebreak_groups')
         .select('id')
@@ -1943,7 +1965,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
 
     const secondChanceSection = () =>
       profileSecondByPhase
-        ? renderMataBuckets(profileSecondByPhase, <Text style={styles.sectionTitle}>{CUP_CONSUELO_NAME}</Text>)
+        ? renderMataBuckets(profileSecondByPhase, <Text style={styles.sectionTitle}>
+              {eventCompetitionFormat === 'zones_knockout' ? `Fase ${CUP_CONSUELO_NAME}` : CUP_CONSUELO_NAME}
+            </Text>)
         : null;
 
     const swissMataBracketSection = () => {
@@ -1971,7 +1995,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
       return renderMataBuckets(
         profileMataByPhase,
-        showMataHeader ? (
+        eventCompetitionFormat === 'zones_knockout' ? (
+          <Text style={styles.sectionTitle}>{`Fase ${cupPrimaName(venueName)}`}</Text>
+        ) : showMataHeader ? (
           <Text style={styles.sectionTitle}>Fase mata-mata</Text>
         ) : profileSecondByPhase ? (
           <Text style={styles.sectionTitle}>{cupPrimaName(venueName)}</Text>
@@ -2061,7 +2087,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {tiebreakRoundRobinCards()}
             {eventCompetitionFormat === 'knockout' ? null : (
               <Text style={styles.sectionTitle}>
-                {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
+                {isRoundRobinTop4 ? 'Fase todos contra todos' : eventCompetitionFormat === 'zones_knockout' ? 'Fase de grupos' : 'Enfrentamientos'}
               </Text>
             )}
             {officialH2h.map((row) => officialPairingCard(row, 'blue'))}

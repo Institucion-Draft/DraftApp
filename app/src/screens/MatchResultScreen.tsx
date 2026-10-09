@@ -374,9 +374,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       if (origins.includes(KNOCKOUT_SECOND_CHANCE_ORIGIN)) cup = 'second';
       else if (origins.some((x) => isKnockoutCupOrigin(x))) cup = 'prima';
     }
+    // Grupos + Copa: se vuelve a la pestaña Oficiales (o a Venganzas si la partida fue una venganza).
+    const zonesTab = competitionFormat === 'zones_knockout' ? (match?.match_type === 'revenge' ? 'revenge' : 'official') : null;
     navigation.navigate('PairingsList', {
       eventId: pairing.event_id,
-      ...(cup ? { initialTab: 'official' as const, initialCup: cup } : {}),
+      ...(cup ? { initialTab: 'official' as const, initialCup: cup } : zonesTab ? { initialTab: zonesTab } : {}),
     });
   };
 
@@ -406,7 +408,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       : match.match_type === 'revenge'
         ? 'Otra venganza'
         : (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw) &&
-            competitionFormat === 'round_robin'
+            (competitionFormat === 'round_robin' || competitionFormat === 'zones_knockout')
           ? 'Iniciar venganza'
           : completedPairingMatchCount >= 2
             ? 'Jugar el bueno'
@@ -451,7 +453,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       (match.match_type !== 'tiebreak' && (
         match.match_type === 'revenge' ||
         officialBo3StillOpen ||
-        (competitionFormat === 'round_robin' &&
+        ((competitionFormat === 'round_robin' || competitionFormat === 'zones_knockout') &&
           (pairing.official_winner_participant_id != null || officialResolvedByBo1 || pairing.official_draw))
       )));
 

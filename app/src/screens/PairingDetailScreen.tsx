@@ -18,6 +18,7 @@ import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/event
 import { countSeriesWins } from '../lib/bracketSeries';
 import {
   KNOCKOUT_SECOND_CHANCE_ORIGIN,
+  cupFullName,
   cupNameSuffix,
   bracketPhaseShortName,
   bracketPhaseSingularName,
@@ -56,6 +57,8 @@ type PairingInfo = {
   swiss_round: number | null;
   /** 'bracket' en los cruces de llaves de la Copa; null en el resto de los formatos. */
   stage: string | null;
+  /** Grupos + Copa: zona del pairing 'zone'. */
+  zone_id?: string | null;
   tiebreak_winner_participant_id: string | null;
   tiebreak_resolved_at: string | null;
 };
@@ -336,7 +339,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const { data: pData, error: pErr } = await supabase
       .from('pairings')
       .select(
-        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage, tiebreak_winner_participant_id, tiebreak_resolved_at'
+        'id, event_id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage, zone_id, tiebreak_winner_participant_id, tiebreak_resolved_at'
       )
       .eq('id', pairingId)
       .maybeSingle();
@@ -459,7 +462,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     // vez que BO1 existe para Suizo), son ejes independientes de competition_format/top_size
     // (antes solo miraba round_robin, dejando Suizo BO1 con 2 píldoras por error).
     setOfficialBo1(
-      (evFlags?.competition_format === 'round_robin' || evFlags?.competition_format === 'swiss') &&
+      (evFlags?.competition_format === 'round_robin' ||
+        evFlags?.competition_format === 'swiss' ||
+        evFlags?.competition_format === 'zones_knockout') &&
         evFlags?.match_format === 'bo1'
     );
     setIsRoundRobinClassic(evFlags?.competition_format === 'round_robin' && evFlags?.top_size == null);
@@ -1046,8 +1051,15 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const mataTieWinsA = countSeriesWins(tiebreakMs, mataAId);
   const mataTieWinsB = countSeriesWins(tiebreakMs, mataBId);
   const showTiebreakSection = tiebreakMs.length > 0 || isTiebreakPending;
+  // Grupos + Copa: la fase de las llaves se titula "Fase Copa {sede}" / "Fase Copa Consuelo" (preparado para el pasaje a la
+  // Copa: hoy no hay cruces de llaves en este formato; sin grupo de llaves activo el título es null y no se usa).
+  const zonesCupPhaseTitle =
+    competitionFormat === 'zones_knockout' && isKnockoutCupOrigin(activeTiebreakGroup?.group_origin)
+      ? `Fase ${cupFullName(activeTiebreakGroup?.group_origin, venueName)}`
+      : null;
   const tiebreakSectionTitle =
-    isKnockoutCupOrigin(activeTiebreakGroup?.group_origin) && bracketMatchRow
+    zonesCupPhaseTitle ??
+    (isKnockoutCupOrigin(activeTiebreakGroup?.group_origin) && bracketMatchRow
       ? bracketPhaseShortName(bracketMatchRow.bracket_phase) + cupNameSuffix(activeTiebreakGroup?.group_origin, venueName)
       : activeTiebreakGroup?.group_origin === 'swiss_topcut' ||
     activeTiebreakGroup?.group_origin === 'round_robin_topcut' ||
@@ -1057,7 +1069,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
         ? 'Desempate por el 4to puesto'
         : activeTiebreakGroup?.group_origin === 'round_robin_first_place'
           ? 'Desempate por el 1er puesto'
-          : 'Desempate';
+          : 'Desempate');
   // Layout de bracket: top cut suizo o top 4 de round_robin_bo1_top4.
   const useSwissTopcutBracketDetailLayout =
     bracketMatchRow != null &&
@@ -1110,7 +1122,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   // BO2: oficial resuelto también con official_draw=true (1-1, sin ganador).
   const officialResolved =
     pairing.official_winner_participant_id != null ||
-    (competitionFormat === 'round_robin' && matchFormat === 'bo2' && pairing.official_draw === true) ||
+    ((competitionFormat === 'round_robin' || competitionFormat === 'zones_knockout') &&
+      matchFormat === 'bo2' &&
+      pairing.official_draw === true) ||
     (officialBo1 && (winsA >= 1 || winsB >= 1));
   const revengeCompleted = revengeMs.filter((m) => m.status === 'completed');
   const revengeWinsA = revengeCompleted.filter(
@@ -1626,7 +1640,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               {officialMs.length > 0 ? (
                 <View style={styles.subAccBlue}>
                   <Text style={styles.subTitleSwissBlue}>
-                    {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Ronda suiza'}
+                    {isRoundRobinTop4 ? 'Fase todos contra todos' : competitionFormat === 'zones_knockout' ? 'Fase de grupos' : 'Ronda suiza'}
                   </Text>
                   {officialMs.map(renderDraftRow)}
                 </View>
@@ -1634,9 +1648,10 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
               {showTiebreakSection ? (
                 <View style={[styles.subAccGreen, officialMs.length > 0 && styles.subAccGreenSpaced]}>
                   <Text style={styles.subTitleSwissGreen}>
-                    {isKnockoutPairing && bracketMatchRow
-                      ? bracketPhaseShortName(bracketMatchRow.bracket_phase) + cupNameSuffix(activeTiebreakGroup?.group_origin, venueName)
-                      : 'Fase mata-mata'}
+                    {zonesCupPhaseTitle ??
+                      (isKnockoutPairing && bracketMatchRow
+                        ? bracketPhaseShortName(bracketMatchRow.bracket_phase) + cupNameSuffix(activeTiebreakGroup?.group_origin, venueName)
+                        : 'Fase mata-mata')}
                   </Text>
                   {tiebreakMs.length === 0 ? null : tiebreakMs.map(renderTiebreakRow)}
                   {showPrimaryInSwissMata ? (
@@ -1683,9 +1698,11 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           </>
         ) : (
           <>
-            {isRoundRobinTop4 ? (
+            {isRoundRobinTop4 || competitionFormat === 'zones_knockout' ? (
               <View style={styles.subAccBlue}>
-                <Text style={styles.subTitleSwissBlue}>Fase todos contra todos</Text>
+                <Text style={styles.subTitleSwissBlue}>
+                  {competitionFormat === 'zones_knockout' ? 'Fase de grupos' : 'Fase todos contra todos'}
+                </Text>
                 {officialMs.length === 0 ? (
                   <Text style={styles.muted}>Todavía no hay partidas oficiales jugadas.</Text>
                 ) : (

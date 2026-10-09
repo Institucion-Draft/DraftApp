@@ -59,7 +59,12 @@ export function formatEventMode(
     if (topcutFormat === 'bo1' || topcutFormat === 'bo3') parts.push(topcutFormat.toUpperCase());
     return parts.join(' · ');
   }
-  if (known === 'zones_knockout') return parts.join(' · ');
+  if (known === 'zones_knockout') {
+    // Grupos + Copa: dos formatos independientes, el de la fase de grupos (match_format) y el de las llaves (topcut_format).
+    if (matchFormat) parts.push(`Grupos ${matchFormat.toUpperCase()}`);
+    if (topcutFormat === 'bo1' || topcutFormat === 'bo3') parts.push(`Llaves ${topcutFormat.toUpperCase()}`);
+    return parts.join(' · ');
+  }
 
   let tail = matchFormat ? matchFormat.toUpperCase() : '';
   if (topSize && topSize > 0) tail = tail ? `${tail} + Top ${topSize}` : `Top ${topSize}`;

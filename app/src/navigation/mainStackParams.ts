@@ -44,7 +44,8 @@ export type MainStackParamList = {
    * evento no llega a cargar (borrado, error de red, etc.) — cuando se conoce en el caller, hay
    * que pasarlo. event?.workspace_id (una vez cargado) sigue siendo la fuente de verdad normal.
    */
-  EventDetail: { eventId: string; workspaceId?: string };
+  /** `refresh`: cualquier valor nuevo fuerza recargar todo el detalle (p. ej. al volver del sorteo de grupos). */
+  EventDetail: { eventId: string; workspaceId?: string; refresh?: number };
   EventDiary: { eventId: string };
   ProDeC: { eventId: string };
   EditEvent: { eventId: string };
@@ -89,7 +90,7 @@ export type MainStackParamList = {
   LifeChart: { matchId: string };
   MatchResult: { matchId: string; fromStandings?: boolean };
   /** `cup`: copa a mostrar en Cruces de copa ('prima' | 'second'); `showPodiumIntro` dispara el confeti. */
-  Standings: { eventId: string; showPodiumIntro?: boolean; cup?: 'prima' | 'second' };
+  Standings: { eventId: string; showPodiumIntro?: boolean; cup?: 'prima' | 'second'; view?: 'cups' };
   Playground: { workspaceId: string };
   ContextFreeMatches: { workspaceId: string };
   ContextFreeEncounter: { workspaceId: string; userAId: string; userBId: string };

@@ -302,3 +302,8 @@ export function recommendZoneOptions(input: ZonesInput): ZoneOption[] {
   }
   return picked;
 }
+
+/** Consuelo se arma con al menos CONSUELO_MIN jugadores: N - (zonas * clasificados + comodines). */
+export function consueloWillBeCreated(playerCount: number, zones: number, qualifiers: number, wildcards: number): boolean {
+  return playerCount - (zones * qualifiers + wildcards) >= CONSUELO_MIN;
+}

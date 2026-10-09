@@ -13,6 +13,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { fetchEventVenueName } from '../lib/eventVenueName';
+import { consueloWillBeCreated } from '../lib/zonesPlanner';
+import { buildZonesOfficialRows, pairingGroupLabel, shortGroupLabel, zonesGroupOrder } from '../lib/zonesPairingsList';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
@@ -24,6 +26,8 @@ import {
   KNOCKOUT_SECOND_CHANCE_ORIGIN,
   bracketPhaseSortKey,
   bracketPhaseTitle,
+  CUP_CONSUELO_NAME,
+  cupPrimaName,
   cupShortName,
   isKnockoutCupOrigin,
   type BracketPhase,
@@ -44,11 +48,15 @@ type PairingRow = {
   swiss_round: number | null;
   /** 'bracket' en los cruces de llaves de la Copa (se muestran en su sección, no como cruces regulares). */
   stage?: string | null;
+  /** Grupos + Copa: zona del pairing 'zone' (null en el interzonal). */
+  zone_id?: string | null;
 };
 
 type ParticipantRow = {
   id: string;
   user_id: string;
+  /** Grupos + Copa: zona del jugador (null si no se sorteó). */
+  zone_id?: string | null;
   member_b_user_id?: string | null;
   giant_name?: string | null;
   bye_rounds?: number[] | null;
@@ -71,6 +79,8 @@ type ParticipantRow = {
 };
 
 type ItemView = PairingRow & {
+  /** Grupos + Copa: "Grupo A" / "Interzonal" (null en los demás formatos). */
+  groupLabel?: string | null;
   status: 'in_progress' | 'scheduled' | 'completed';
   aName: string;
   bName: string;
@@ -353,6 +363,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const [tab, setTab] = useState<'officials' | 'revenge'>('officials');
   // Copa: sub-tab de Oficiales (la 2da chance sólo aparece si existe).
   const [cupTab, setCupTab] = useState<'prima' | 'second'>('prima');
+  /** Grupos + Copa: nombres de las zonas en orden (A, B, ...), para los headers de partidas en vivo. */
+  const [zoneNames, setZoneNames] = useState<string[]>([]);
+  /** Grupos + Copa: tab de Oficiales ('groups' | copa principal | Consuelo) y si Consuelo se arma (N - T >= 4). */
+  const [zonesTab, setZonesTab] = useState<'groups' | 'prima' | 'second'>('groups');
+  const [zonesConsuelo, setZonesConsuelo] = useState(false);
+  /** Grupos + Copa: la fase de grupos terminó (zones_phase_completed_at); recién ahí aparecen las tabs de copa. */
+  const [zonesPhaseDone, setZonesPhaseDone] = useState(false);
   // Nombre de la sede del evento (para "Copa {sede}"); sin sede, "Copa" a secas.
   const [venueName, setVenueName] = useState<string | null>(null);
   const venueEventId = route.params.eventId;
@@ -419,13 +436,13 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, event_type, topcut_format, workspace_id'
+          'status, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, event_type, topcut_format, workspace_id, zones_count, zone_qualifiers, zone_wildcards, zones_phase_completed_at'
         )
         .eq('id', eventId)
         .maybeSingle(),
       supabase
         .from('pairings')
-        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage')
+        .select('id, participant_a_id, participant_b_id, official_winner_participant_id, official_draw, swiss_round, stage, zone_id')
         .eq('event_id', eventId),
       supabase
         .from('event_participants')
@@ -433,6 +450,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           `
           id,
           user_id,
+          zone_id,
           member_b_user_id,
           giant_name,
           bye_rounds,
@@ -489,7 +507,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     const isTop4 = eventFlags?.competition_format === 'round_robin' && eventFlags?.top_size === 4;
     setIsRoundRobinTop4(isTop4);
     setOfficialBo1(
-      (eventFlags?.competition_format === 'round_robin' || eventFlags?.competition_format === 'swiss') &&
+      (eventFlags?.competition_format === 'round_robin' ||
+        eventFlags?.competition_format === 'swiss' ||
+        eventFlags?.competition_format === 'zones_knockout') &&
         eventFlags?.match_format === 'bo1'
     );
     const csrRaw = eventFlags?.current_swiss_round;
@@ -538,7 +558,27 @@ export default function PairingsListScreen({ route, navigation }: Props) {
         : pairingsAll
     ).filter((p) => p.stage !== 'bracket' && p.stage !== 'revenge');
 
+    // Grupos + Copa: nombres de las zonas (event_zones) para etiquetar cada cruce.
+    const zoneNameById = new Map<string, string>();
+    if (competitionFormat === 'zones_knockout') {
+      const zonesRes = await supabase.from('event_zones').select('id, name, zone_index').eq('event_id', eventId).order('zone_index');
+      const zr = (zonesRes.error ? [] : (zonesRes.data ?? [])) as { id: string; name: string }[];
+      for (const z of zr) zoneNameById.set(z.id, z.name);
+      setZoneNames(zr.map((z) => z.name));
+    } else {
+      setZoneNames([]);
+    }
+
     const participants = (participantsRes.data ?? []) as ParticipantRow[];
+    {
+      const evZ = eventFlags as { zones_count?: number | null; zone_qualifiers?: number | null; zone_wildcards?: number | null; zones_phase_completed_at?: string | null } | null;
+      setZonesPhaseDone(competitionFormat === 'zones_knockout' && !!evZ?.zones_phase_completed_at);
+      setZonesConsuelo(
+        competitionFormat === 'zones_knockout' && evZ?.zones_count != null && evZ?.zone_qualifiers != null
+          ? consueloWillBeCreated(participants.filter((p) => p.zone_id).length, evZ.zones_count, evZ.zone_qualifiers, evZ.zone_wildcards ?? 0)
+          : false
+      );
+    }
     const pMap = new Map<string, ParticipantRow>(participants.map((p) => [p.id, p]));
     setCopaPlayers(
       // Quien se fue (left_event_at) también puede jugar venganzas: sólo pierde sus oficiales pendientes.
@@ -704,6 +744,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
 
       return {
         ...pairing,
+        groupLabel: pairingGroupLabel(pairing.stage, pairing.zone_id, zoneNameById),
         status,
         aName,
         bName,
@@ -728,7 +769,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     });
 
     // Fase de liga round_robin (no Suizo, no 2HG): criterio propio. El resto, igual que antes.
-    if (competitionFormat === 'round_robin' && eventFlags?.event_type !== 'two_headed_giant') {
+    if (
+      (competitionFormat === 'round_robin' && eventFlags?.event_type !== 'two_headed_giant') ||
+      competitionFormat === 'zones_knockout'
+    ) {
       mapped.sort((a, b) => sortLeagueItemsForDisplay(a, b, currentUserId));
     } else {
       mapped.sort((a, b) => sortOfficialItemsForDisplay(a, b, currentUserId));
@@ -1375,6 +1419,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
         void load();
       })
+      // Grupos + Copa: al cerrarse la fase de grupos (zones_phase_completed_at) aparecen las tabs de copa sin reiniciar.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'draft_events', filter: `id=eq.${eventId}` }, () => {
+        void load();
+      })
       .on(
         'postgres_changes',
         {
@@ -1402,7 +1450,8 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     setRefreshing(false);
   }, [load]);
   // Suizo y Copa: cada jugador ve sus venganzas + sus vs posibles; las de los demás van debajo ("Otras venganzas").
-  const revengeScoped = competitionFormat === 'swiss' || competitionFormat === 'knockout';
+  const revengeScoped =
+    competitionFormat === 'swiss' || competitionFormat === 'knockout' || competitionFormat === 'zones_knockout';
   const liveRevengeItems = revengeItems
     .filter((item) => item.status === 'in_progress')
     .filter((item) => !revengeScoped || item.mine)
@@ -1473,6 +1522,14 @@ export default function PairingsListScreen({ route, navigation }: Props) {
     return buildSwissOfficialFlatRows(items, currentSwissRoundStored, officialByeByRound, myUserId);
   }, [isSwissOfficialSectioned, items, currentSwissRoundStored, officialByeByRound, myUserId]);
 
+  // Grupos + Copa: las partidas en vivo suben agrupadas bajo un header por grupo (sólo los que tienen una en vivo);
+  // debajo, el resto de los cruces en una sola lista, sin headers.
+  const isZonesPhase = competitionFormat === 'zones_knockout';
+  const zonesFlatRows = useMemo(
+    () => (isZonesPhase ? buildZonesOfficialRows(items, zonesGroupOrder(zoneNames)) : []),
+    [isZonesPhase, items, zoneNames]
+  );
+
   const officialMainListEmpty = isSwissOfficialSectioned
     ? officialSwissFlatRows.length === 0
     : items.length === 0;
@@ -1482,7 +1539,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const isGiantEvent = eventType === 'two_headed_giant';
       // Cruces ajenos de fase de liga round_robin (no Suizo, no 2HG): a la izquierda siempre el
       // menor alfabéticamente, igual que la clave de agrupamiento de sortLeagueItemsForDisplay.
-      const leagueOther = competitionFormat === 'round_robin' && !isGiantEvent && !item.mine;
+      const leagueOther = (competitionFormat === 'round_robin' || competitionFormat === 'zones_knockout') && !isGiantEvent && !item.mine;
       const swapSides = leagueOther
         ? item.aName.localeCompare(item.bName, 'es', { sensitivity: 'base' }) > 0
         : !!myUserId &&
@@ -1508,7 +1565,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       const liveR = swapSides ? item.liveScoreA : item.liveScoreB;
       // Marca de progreso: solo fase de liga round_robin (no Suizo, no 2HG). En vivo no lleva marca;
       // virgen tampoco.
-      const showProgressMark = competitionFormat === 'round_robin' && !isGiantEvent;
+      const showProgressMark = (competitionFormat === 'round_robin' || competitionFormat === 'zones_knockout') && !isGiantEvent;
       const progress = leagueProgress(item);
       const progressMarkColor =
         !showProgressMark || item.status === 'in_progress'
@@ -1638,7 +1695,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
               {item.status === 'in_progress' ? (
                 <Text style={styles.liveCentered}>● EN VIVO</Text>
               ) : (
-                <Text style={styles.status}>{getPairingStatusLabel(item.status)}</Text>
+                <Text style={styles.status}>
+                  {getPairingStatusLabel(item.status)}
+                  {item.groupLabel ? ` · ${shortGroupLabel(item.groupLabel)}` : ''}
+                </Text>
               )}
             </View>
             <View style={[styles.footerRight, styles.footerRightMark]}>
@@ -1660,7 +1720,20 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   const copaHasSecond = tiebreakOfficialSections.some((s) => s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN);
   const activeCupTab = copaHasSecond ? cupTab : 'prima';
   // Copa: una pestaña por cuadro (la general de Venganzas es aparte); el resto de los formatos muestra todas las secciones.
-  const visibleTiebreakSections = isCopa
+  // Grupos + Copa: la tab "Fase de grupos" muestra la lista de siempre; las tabs de copa muestran sólo las secciones de
+  // cruces por instancia de su cuadro (las mismas que usa la Copa sola; aparecen solas cuando B4 arme las llaves).
+  const zonesCupTab = isZonesPhase && zonesPhaseDone && zonesTab !== 'groups';
+  const zonesHasSecond = tiebreakOfficialSections.some((s) => s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN);
+  const showZonesConsuelo = zonesConsuelo || zonesHasSecond;
+  // Antes del cierre de la fase de grupos: sólo el contenido de "Fase de grupos", sin barra de tabs.
+  const activeZonesTab = !zonesPhaseDone ? 'groups' : zonesTab === 'second' && !showZonesConsuelo ? 'groups' : zonesTab;
+  const visibleTiebreakSections = isZonesPhase
+    ? activeZonesTab === 'groups'
+      ? []
+      : tiebreakOfficialSections.filter(
+          (s) => (activeZonesTab === 'second') === (s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN) && isKnockoutCupOrigin(s.groupOrigin)
+        )
+    : isCopa
     ? tiebreakOfficialSections.filter(
         (s) => (activeCupTab === 'second') === (s.groupOrigin === KNOCKOUT_SECOND_CHANCE_ORIGIN)
       )
@@ -1668,11 +1741,16 @@ export default function PairingsListScreen({ route, navigation }: Props) {
   // Copa, vs posibles: todos los demás jugadores del evento (incluidos los que se fueron), salvo quien tiene un
   // oficial pendiente CONMIGO (cruce de llaves sin resolver entre los dos). Un oficial pendiente contra un
   // tercero no excluye a nadie. Los que ya tienen venganza jugada o en vivo no van acá: están en el historial.
+  const playedRevengePairings = new Set(revengeItems.map((it) => it.pairingId));
   const copaRevengeRows: SwissRevengeStandaloneRow[] = [];
-  if (isCopa && myCopaPlayer) {
+  // Copa (sólo llaves) y Grupos + Copa: lista de todos los rivales del evento (ensure_revenge_pairing crea el pairing si no existe).
+  const usesFullRivalList = isCopa || competitionFormat === 'zones_knockout';
+  if (usesFullRivalList && myCopaPlayer) {
     for (const p of copaPlayers) {
       if (p.id === myCopaPlayer.id) continue;
       const existing = copaPairingByPair.get(pairKey(myCopaPlayer.id, p.id)) ?? null;
+      // Con una venganza jugada o en vivo, el rival se ve sólo en el bloque de venganzas (el contador lleva al detalle).
+      if (existing && playedRevengePairings.has(existing)) continue;
       copaRevengeRows.push({
         pairingId: existing,
         participantAId: myCopaPlayer.id,
@@ -1684,7 +1762,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       });
     }
   }
-  const standaloneRows = isCopa ? copaRevengeRows : swissRevengeStandalone;
+  const standaloneRows = usesFullRivalList ? copaRevengeRows : swissRevengeStandalone;
   const revengeListEmpty =
     myRevengeGroups.length === 0 &&
     liveRevengeItems.length === 0 &&
@@ -1738,6 +1816,24 @@ export default function PairingsListScreen({ route, navigation }: Props) {
       </View>
       {tab !== 'revenge' ? (
         <>
+        {isZonesPhase && zonesPhaseDone ? (
+          <View style={styles.tabsRow}>
+            {(
+              [
+                ['groups', 'Fase de grupos'],
+                ['prima', cupPrimaName(venueName)],
+                ...(showZonesConsuelo ? ([['second', CUP_CONSUELO_NAME]] as const) : []),
+              ] as readonly (readonly ['groups' | 'prima' | 'second', string])[]
+            ).map(([key, label]) => (
+              <TouchableOpacity key={key} style={styles.tabBtn} onPress={() => setZonesTab(key)} activeOpacity={0.7}>
+                <Text style={[styles.tabLabel, activeZonesTab === key && styles.tabLabelActive]} numberOfLines={1}>
+                  {label}
+                </Text>
+                <View style={[styles.tabUnderline, activeZonesTab !== key && styles.tabUnderlineHidden]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
         {isCopa && copaHasSecond ? (
           <View style={styles.tabsRow}>
             <TouchableOpacity style={styles.tabBtn} onPress={() => setCupTab('prima')} activeOpacity={0.7}>
@@ -1751,13 +1847,23 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           </View>
         ) : null}
         <FlatList<ItemView | OfficialListRow>
-          data={isSwissOfficialSectioned ? officialSwissFlatRows : items}
+          data={isSwissOfficialSectioned ? officialSwissFlatRows : isZonesPhase ? (zonesCupTab ? [] : zonesFlatRows) : items}
           keyExtractor={(it) => it.id}
           contentContainerStyle={
-            officialMainListEmpty && tiebreakCardsTotal === 0 ? styles.emptyWrap : styles.listWrap
+            zonesCupTab
+              ? visibleTiebreakSections.length === 0
+                ? styles.emptyWrap
+                : styles.listWrap
+              : officialMainListEmpty && tiebreakCardsTotal === 0
+                ? styles.emptyWrap
+                : styles.listWrap
           }
           ListEmptyComponent={
-            officialMainListEmpty && tiebreakCardsTotal === 0 ? (
+            zonesCupTab ? (
+              visibleTiebreakSections.length === 0 ? (
+                <Text style={styles.empty}>Llaves en preparación</Text>
+              ) : null
+            ) : officialMainListEmpty && tiebreakCardsTotal === 0 ? (
               <Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>
             ) : null
           }
@@ -2015,7 +2121,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                 })}
                   </View>
                 ))}
-                {!isSwissOfficialSectioned && competitionFormat !== 'knockout' ? (
+                {!isSwissOfficialSectioned && competitionFormat !== 'knockout' && !zonesCupTab ? (
                   <Text style={[styles.groupHeader, styles.officialListSectionTitle]}>
                     {isRoundRobinTop4 ? 'Fase todos contra todos' : 'Enfrentamientos'}
                   </Text>
@@ -2051,6 +2157,9 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                     </View>
                   </View>
                 );
+              }
+              if (item.kind === 'pairing' && 'gapBefore' in item && item.gapBefore) {
+                return <View style={styles.liveBlockGap}>{renderOfficialPairingCard(item.item)}</View>;
               }
               return renderOfficialPairingCard(item.item);
             }
@@ -2397,6 +2506,8 @@ const createStyles = (c: ThemeColors) =>
     groupHeader: { fontSize: 16, fontWeight: '800', color: c.text, marginBottom: 8, marginTop: 2 },
     tiebreakOfficialHeaderWrap: { marginBottom: 4 },
     officialListSectionTitle: { marginTop: 18 },
+    // Mismo orden de magnitud que el espacio entre dos headers de grupo en vivo (marginTop del header + margen de la fila).
+    liveBlockGap: { marginTop: 20 },
     swissRoundHeader: { marginBottom: 6 },
     tiebreakRoundSubheader: { marginTop: 12, marginBottom: 2 },
     bracketPhaseSubheader: {
