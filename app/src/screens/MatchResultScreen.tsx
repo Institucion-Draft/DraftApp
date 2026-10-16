@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { KNOCKOUT_SECOND_CHANCE_ORIGIN, isKnockoutCupOrigin, type BracketPhase } from '../lib/knockoutRounds';
 import { resolveRematchType } from '../lib/matchTypeRules';
+import { countRevengeWins } from '../lib/bracketSeries';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -90,6 +91,8 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [pb, setPb] = useState<ParticipantRow | null>(null);
   const [winsA, setWinsA] = useState(0);
   const [winsB, setWinsB] = useState(0);
+  const [revengeWinsA, setRevengeWinsA] = useState(0);
+  const [revengeWinsB, setRevengeWinsB] = useState(0);
   const [completedPairingMatchCount, setCompletedPairingMatchCount] = useState(0);
   const [tiebreakWinsA, setTiebreakWinsA] = useState(0);
   const [tiebreakWinsB, setTiebreakWinsB] = useState(0);
@@ -139,7 +142,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setSuperCupWinnerName(null);
     setRevengeCupWinnerName(null);
 
-    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, superCupWinnerRes, revengeCupWinnerRes, eventFlagsRes, tiebreakGroupRes] =
+    const [partsRes, winsRes, tiebreakWinsRes, completedCountRes, revengeMatchesRes, superCupWinnerRes, revengeCupWinnerRes, eventFlagsRes, tiebreakGroupRes] =
       await Promise.all([
       supabase
         .from('event_participants')
@@ -177,6 +180,11 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         .select('id', { count: 'exact', head: true })
         .eq('pairing_id', p.id)
         .eq('status', 'completed'),
+      supabase
+        .from('matches')
+        .select('match_type, status, winner_participant_id, is_walkover')
+        .eq('pairing_id', p.id)
+        .eq('match_type', 'revenge'),
       p.super_cup_winner_participant_id
         ? supabase
             .from('event_participants')
@@ -220,6 +228,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       winsRes.error ||
       tiebreakWinsRes.error ||
       completedCountRes.error ||
+      revengeMatchesRes.error ||
       superCupWinnerRes.error ||
       revengeCupWinnerRes.error ||
       eventFlagsRes.error ||
@@ -250,6 +259,14 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     );
     setSuperCupWinnerName(superWinnerUser?.display_name ?? null);
     setRevengeCupWinnerName(revengeWinnerUser?.display_name ?? null);
+    const revengeRows = (revengeMatchesRes.data ?? []) as {
+      match_type: string;
+      status: string | null;
+      winner_participant_id: string | null;
+      is_walkover: boolean | null;
+    }[];
+    setRevengeWinsA(countRevengeWins(revengeRows, p.participant_a_id));
+    setRevengeWinsB(countRevengeWins(revengeRows, p.participant_b_id));
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
     const eventFlags = eventFlagsRes.data as {
       turn_tracking_enabled?: boolean | null;
@@ -484,14 +501,26 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const scoreLine1 =
     match.match_type === 'tiebreak'
       ? `${aName}: ${tiebreakWinsA} · ${bName}: ${tiebreakWinsB}`
-      : `${aName}: ${winsA} · ${bName}: ${winsB}`;
+      : match.match_type === 'revenge'
+        ? `Venganzas: ${aName} ${revengeWinsA} · ${bName} ${revengeWinsB}`
+        : `${aName}: ${winsA} · ${bName}: ${winsB}`;
   const extraLines: string[] = [];
   if (match.match_type === 'revenge') {
-    if (superCupTriggeredHere) {
-      extraLines.push(`${superCupWinnerName ?? '...'} gana la Super Copa 🏆`);
+    // Copas del par después de esta partida (las fija la base, igual que el perfil): las que ya tienen
+    // ganador se muestran siempre; si esta partida decidió una, se destaca.
+    if (pairing.revenge_cup_winner_participant_id) {
+      extraLines.push(
+        revengeCupTriggeredHere
+          ? `¡${revengeCupWinnerName ?? '...'} ganó la Copa Venganza! 🏆`
+          : `Copa Venganza: gana ${revengeCupWinnerName ?? '...'}`
+      );
     }
-    if (revengeCupTriggeredHere) {
-      extraLines.push(`${revengeCupWinnerName ?? '...'} gana la Copa Venganza 🏆`);
+    if (pairing.super_cup_winner_participant_id) {
+      extraLines.push(
+        superCupTriggeredHere
+          ? `¡${superCupWinnerName ?? '...'} ganó la Super Copa! 🏆`
+          : `Super Copa: gana ${superCupWinnerName ?? '...'}`
+      );
     }
   } else if (!isOfficialOpen) {
     extraLines.push(`${winsA >= officialWinsNeeded ? aName : bName} gana el enfrentamiento`);
