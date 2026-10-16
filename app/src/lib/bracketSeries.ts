@@ -21,3 +21,15 @@ export function countSeriesWins(matches: readonly SeriesMatch[], participantId: 
       !m.is_walkover
   ).length;
 }
+
+/**
+ * Venganzas ganadas por un jugador entre los dos del pairing (un único pairing por par y evento:
+ * unique (event_id, participant_a_id, participant_b_id)). Criterio de los triggers de las copas de
+ * venganza (0010/0011): match_type='revenge', completada y con ganador. Por eso NO filtra walkover:
+ * el marcador tiene que coincidir con lo que la base usó para otorgar las copas.
+ */
+export function countRevengeWins(matches: readonly SeriesMatch[], participantId: string): number {
+  return matches.filter(
+    (m) => m.match_type === 'revenge' && m.status === 'completed' && m.winner_participant_id === participantId
+  ).length;
+}

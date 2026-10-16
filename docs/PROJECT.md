@@ -229,7 +229,7 @@ Cronómetro opcional para la fase de armado de mazo (antes de que arranque el to
 ### Venganzas y Copas extra-torneo
 
 - Venganza: `match_type='revenge'` posterior al cierre del enfrentamiento oficial. No impacta `pairing.official_winner_participant_id` ni las columnas oficiales de Standings (PG, PJ, EG, EC). Pestaña propia "Venganzas" en PairingsList y en Standings.
-- **Copa Venganza**: única por par de jugadores en el evento, la gana el primero que llega a 3 venganzas ganadas. **Súper Copa**: única por par, la gana el primero con 2 de diferencia. Ambas se cierran una vez ganadas y no se reabren; son independientes entre sí. Columnas `super_cup_winner_participant_id`/`revenge_cup_winner_participant_id` en `pairings`.
+- **Copa Venganza**: única por par de jugadores en el evento, la gana el primero que llega a 3 venganzas ganadas. **Súper Copa**: única por par, la gana el primero que gana 2 venganzas seguidas (las dos últimas venganzas completadas con ganador del par, ordenadas por `match_number`, las ganó la misma persona; se evalúa tras cada venganza y el primer cumplimiento la fija). Solo cuentan partidas `match_type='revenge'` con `status='completed'`; las abortadas o en curso se ignoran (y una venganza sin ganador no cuenta para la racha). Los triggers no filtran `is_walkover`. Ambas se cierran una vez ganadas y no se reabren (aunque después se sigan jugando venganzas); son independientes entre sí. Triggers: `update_pairing_revenge_cup` (0010) y `update_pairing_super_cup` (0001, corregido en 0011). Columnas `super_cup_winner_participant_id`/`revenge_cup_winner_participant_id` en `pairings`.
 
 ### Sistema de posta (organizador puntual de un evento)
 
