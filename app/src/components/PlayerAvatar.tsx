@@ -6,6 +6,7 @@ import { avatarPublicUrl, defaultAvatarPublicUrl } from '../lib/avatarUrl';
 import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from './ColorFlag';
 import { useTheme } from '../theme';
+import { DITTO_TRANSFORM_DURATION_MS } from '../lib/dittoMirror';
 
 export type PlayerAvatarSize = 'tiny' | 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -80,7 +81,29 @@ type Props = {
   memberColors?: MtgColor[];
   /** Cuando true, usa member_b_rotated_avatar_id / member_b_is_shiny del participante. */
   isMemberB?: boolean;
+  /**
+   * Ditto en el life tracker: el sprite (y su estado shiny) se resuelve desde este otro participante/miembro en
+   * vez del propio. El anillo de colores sigue siendo el del participante real. Sólo cuando se pasa.
+   */
+  mirrorOf?: { participantId: string; isMemberB?: boolean };
+  /**
+   * Con `mirrorOf`: si el espejo aparece estando ya montado el avatar con otro sprite, hace la transformación
+   * (fundido cruzado + squish + destello) en vez de cambiar de golpe. Sin esto el cambio es directo.
+   */
+  animateMirror?: boolean;
 };
+
+/** Clave del caché de imagen; el espejo va en la clave para no pisar el sprite del participante real. */
+function avatarCacheKey(
+  participantId: string | undefined,
+  isMemberB: boolean,
+  mirrorPid: string | undefined,
+  mirrorIsB: boolean
+): string | null {
+  if (participantId == null || participantId === '') return null;
+  const base = `${participantId}|${isMemberB ? 'b' : 'a'}`;
+  return mirrorPid ? `${base}>${mirrorPid}|${mirrorIsB ? 'b' : 'a'}` : base;
+}
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
@@ -264,7 +287,11 @@ export default function PlayerAvatar({
   giantSide,
   memberColors,
   isMemberB = false,
+  mirrorOf,
+  animateMirror = false,
 }: Props) {
+  const mirrorPid = mirrorOf?.participantId || undefined;
+  const mirrorIsB = !!mirrorOf?.isMemberB;
   const { colors } = useTheme();
   const diameter = diameterProp ?? SIZE_PT[size];
   const bw = withColorBorder ? borderWidth : 0;
@@ -280,8 +307,8 @@ export default function PlayerAvatar({
   /** Borde exterior del anillo de color (borde del SVG / fondo). */
   const outerRingOutlineRx = Math.min(rStroke + bw / 2, (outer - RING_OUTLINE_W) / 2);
 
-  const _initCacheKey = !outsideEvent && participantId != null && participantId !== ''
-    ? `${participantId}|${isMemberB ? 'b' : 'a'}`
+  const _initCacheKey = !outsideEvent
+    ? avatarCacheKey(participantId, isMemberB, mirrorPid, mirrorIsB)
     : null;
   const _initCached = _initCacheKey != null ? avatarImageCache.get(_initCacheKey) : undefined;
 
@@ -292,14 +319,22 @@ export default function PlayerAvatar({
   const [borderColors, setBorderColors] = useState<MtgColor[]>([]);
   const [imageFailed, setImageFailed] = useState(false);
   const [isShiny, setIsShiny] = useState(_initCached?.isShiny ?? false);
+  // Transformación de Ditto: sprite anterior (debajo) mientras el nuevo aparece por fundido.
+  const [transitionFrom, setTransitionFrom] = useState<{ uri: string; shiny: boolean } | null>(null);
+  const [mirrorBurst, setMirrorBurst] = useState(false);
+  const displayedRef = useRef<{ uri: string; shiny: boolean } | null>(null);
+  const morphFade = useRef(new Animated.Value(0)).current;
+  const morphScaleX = useRef(new Animated.Value(1)).current;
+  const morphScaleY = useRef(new Animated.Value(1)).current;
+  const morphFlash = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let cancelled = false;
-    const key = !outsideEvent && participantId != null && participantId !== ''
-      ? `${participantId}|${isMemberB ? 'b' : 'a'}`
-      : null;
+    const key = !outsideEvent ? avatarCacheKey(participantId, isMemberB, mirrorPid, mirrorIsB) : null;
     const hasCached = key != null && avatarImageCache.has(key);
-    if (!hasCached) {
+    // Si va a haber transformación, se sigue viendo el sprite anterior mientras carga el nuevo (sin "?").
+    const keepOld = animateMirror && !!mirrorPid && displayedRef.current != null;
+    if (!hasCached && !keepOld) {
       setLoading(true);
       setIsShiny(false);
     }
@@ -319,48 +354,57 @@ export default function PlayerAvatar({
         .eq('id', userId)
         .maybeSingle();
 
-      const partPromise =
-        !outsideEvent && participantId != null && participantId !== ''
-          ? isMemberB
-            ? supabase
-                .from('event_participants')
-                .select(
-                  withColorBorder
-                    ? `
+      const fetchPart = (pid: string, memberB: boolean, withColors: boolean) =>
+        memberB
+          ? supabase
+              .from('event_participants')
+              .select(
+                withColors
+                  ? `
                   member_b_rotated_avatar_id,
                   member_b_is_shiny,
                   default_avatars!event_participants_member_b_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
                   participant_colors (color, member)
                 `
-                    : `
+                  : `
                   member_b_rotated_avatar_id,
                   member_b_is_shiny,
                   default_avatars!event_participants_member_b_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
                 `
-                )
-                .eq('id', participantId)
-                .maybeSingle()
-            : supabase
-                .from('event_participants')
-                .select(
-                  withColorBorder
-                    ? `
+              )
+              .eq('id', pid)
+              .maybeSingle()
+          : supabase
+              .from('event_participants')
+              .select(
+                withColors
+                  ? `
                 rotated_avatar_id,
                 is_shiny,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
                 participant_colors (color, member)
               `
-                    : `
+                  : `
                 rotated_avatar_id,
                 is_shiny,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
               `
-                )
-                .eq('id', participantId)
-                .maybeSingle()
+              )
+              .eq('id', pid)
+              .maybeSingle();
+
+      const partPromise =
+        !outsideEvent && participantId != null && participantId !== ''
+          ? fetchPart(participantId, isMemberB, withColorBorder)
           : Promise.resolve({ data: null, error: null });
 
-      const [uRes, pRes] = await Promise.all([userPromise, partPromise]);
+      // Espejo (Ditto en el life tracker): sólo el sprite y el shiny salen de otro participante; los colores no.
+      const mirrorPromise =
+        !outsideEvent && participantId != null && participantId !== '' && mirrorPid
+          ? fetchPart(mirrorPid, mirrorIsB, false)
+          : Promise.resolve({ data: null, error: null });
+
+      const [uRes, pRes, mRes] = await Promise.all([userPromise, partPromise, mirrorPromise]);
 
       if (cancelled) return;
 
@@ -392,8 +436,18 @@ export default function PlayerAvatar({
           participant_colors?: { color: string; member?: string | null } | { color: string; member?: string | null }[] | null;
         };
         shinyFlag = isMemberB ? !!p.member_b_is_shiny : !!p.is_shiny;
+        let spriteDa = relationOne(p.default_avatars);
+        if (mirrorPid && !mRes.error && mRes.data) {
+          // Si el espejo no tiene Pokémon (o la consulta falla) se queda el sprite propio.
+          const m = mRes.data as unknown as typeof p;
+          const mirrorDa = relationOne(m.default_avatars);
+          if (mirrorDa) {
+            spriteDa = mirrorDa;
+            shinyFlag = mirrorIsB ? !!m.member_b_is_shiny : !!m.is_shiny;
+          }
+        }
         setIsShiny(shinyFlag);
-        const rotDa = relationOne(p.default_avatars);
+        const rotDa = spriteDa;
         const shinyPath = rotDa?.storage_path_shiny ?? null;
         const normalPath = rotDa?.storage_path ?? null;
         rotatedStoragePath = shinyFlag && shinyPath ? shinyPath : normalPath;
@@ -425,6 +479,54 @@ export default function PlayerAvatar({
       if (key) {
         avatarImageCache.set(key, { imageUri: uri, isShiny: shinyFlag });
       }
+
+      // Transformación Ditto -> sprite del rival: sólo si el espejo recién aparece y el sprite realmente cambia.
+      const from = displayedRef.current;
+      const willMorph = animateMirror && !!mirrorPid && !!uri && !!from && from.uri !== uri;
+      if (willMorph && uri && from) {
+        try {
+          await Image.prefetch(uri);
+        } catch {
+          // Si falla el prefetch igual se transforma; la imagen carga mientras se funde.
+        }
+        if (cancelled) return;
+        morphFade.setValue(0);
+        morphScaleX.setValue(1);
+        morphScaleY.setValue(1);
+        morphFlash.setValue(0);
+        setTransitionFrom(from);
+        const k = DITTO_TRANSFORM_DURATION_MS / 700;
+        const ms = (n: number) => Math.round(n * k);
+        Animated.parallel([
+          // Fundido cruzado en el momento del destello (150-350 ms).
+          Animated.sequence([
+            Animated.delay(ms(150)),
+            Animated.timing(morphFade, { toValue: 1, duration: ms(200), useNativeDriver: true }),
+          ]),
+          // Squish: se achica a lo ancho / estira a lo alto, rebota al revés y vuelve.
+          Animated.sequence([
+            Animated.timing(morphScaleX, { toValue: 0.8, duration: ms(200), useNativeDriver: true }),
+            Animated.timing(morphScaleX, { toValue: 1.12, duration: ms(250), useNativeDriver: true }),
+            Animated.timing(morphScaleX, { toValue: 1, duration: ms(250), useNativeDriver: true }),
+          ]),
+          Animated.sequence([
+            Animated.timing(morphScaleY, { toValue: 1.15, duration: ms(200), useNativeDriver: true }),
+            Animated.timing(morphScaleY, { toValue: 0.9, duration: ms(250), useNativeDriver: true }),
+            Animated.timing(morphScaleY, { toValue: 1, duration: ms(250), useNativeDriver: true }),
+          ]),
+          // Destello blanco breve.
+          Animated.sequence([
+            Animated.timing(morphFlash, { toValue: 0.95, duration: ms(150), useNativeDriver: true }),
+            Animated.delay(ms(100)),
+            Animated.timing(morphFlash, { toValue: 0, duration: ms(250), useNativeDriver: true }),
+          ]),
+        ]).start(({ finished }) => {
+          if (!finished) return;
+          setTransitionFrom(null);
+          // Si el sprite copiado es shiny, las estrellas salen recién ahora, ya transformado.
+          if (shinyFlag) setMirrorBurst(true);
+        });
+      }
       setImageUri(uri);
       setBorderColors(colors);
       setLoading(false);
@@ -433,9 +535,16 @@ export default function PlayerAvatar({
     return () => {
       cancelled = true;
     };
-  }, [userId, participantId, withColorBorder, outsideEvent, memberColors, isMemberB]);
+  }, [userId, participantId, withColorBorder, outsideEvent, memberColors, isMemberB, mirrorPid, mirrorIsB, animateMirror]);
 
-  const playShinyBurst = showShinyAnimation && isShiny && !loading && !outsideEvent;
+  useEffect(() => {
+    if (!mirrorBurst) return undefined;
+    const id = setTimeout(() => setMirrorBurst(false), 4000);
+    return () => clearTimeout(id);
+  }, [mirrorBurst]);
+
+  const playShinyBurst =
+    (showShinyAnimation && isShiny && !loading && !outsideEvent && transitionFrom == null) || mirrorBurst;
 
   const initial = useMemo(() => {
     const n = (displayName.trim() || username.trim());
@@ -447,6 +556,9 @@ export default function PlayerAvatar({
 
   const showPlaceholder = loading || imageFailed || !imageUri;
   const spriteIsShiny = isShiny && !showPlaceholder && !outsideEvent && !!participantId;
+  useEffect(() => {
+    if (!showPlaceholder && imageUri) displayedRef.current = { uri: imageUri, shiny: spriteIsShiny };
+  }, [showPlaceholder, imageUri, spriteIsShiny]);
   const fontSize = Math.max(10, Math.round(diameter * 0.42));
 
   const T_p = strokeW - 2 * rStroke;
@@ -589,27 +701,50 @@ export default function PlayerAvatar({
               },
             ]}
           >
-            <Image
-              source={{ uri: imageUri as string }}
-              style={
-                spriteIsShiny
-                  ? {
-                      width: diameter,
-                      height: diameter,
-                      backgroundColor: '#f3f4f6',
-                      transform: [{ scale: 1.3 }],
-                    }
-                  : {
-                      width: diameter,
-                      height: diameter,
-                      borderRadius: rInner,
-                      backgroundColor: '#f3f4f6',
-                      transform: [{ scale: 1.3 }],
-                    }
-              }
-              resizeMode={spriteIsShiny ? 'contain' : 'cover'}
-              onError={() => setImageFailed(true)}
-            />
+            {(() => {
+              const sprite = (uri: string, shiny: boolean) => (
+                <Image
+                  source={{ uri }}
+                  style={
+                    shiny
+                      ? {
+                          width: diameter,
+                          height: diameter,
+                          backgroundColor: '#f3f4f6',
+                          transform: [{ scale: 1.3 }],
+                        }
+                      : {
+                          width: diameter,
+                          height: diameter,
+                          borderRadius: rInner,
+                          backgroundColor: '#f3f4f6',
+                          transform: [{ scale: 1.3 }],
+                        }
+                  }
+                  resizeMode={shiny ? 'contain' : 'cover'}
+                  onError={() => setImageFailed(true)}
+                />
+              );
+              if (transitionFrom == null) return sprite(imageUri as string, spriteIsShiny);
+              return (
+                <Animated.View
+                  style={{
+                    width: diameter,
+                    height: diameter,
+                    transform: [{ scaleX: morphScaleX }, { scaleY: morphScaleY }],
+                  }}
+                >
+                  {sprite(transitionFrom.uri, transitionFrom.shiny)}
+                  <Animated.View style={[StyleSheet.absoluteFill, { opacity: morphFade }]}>
+                    {sprite(imageUri as string, spriteIsShiny)}
+                  </Animated.View>
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[StyleSheet.absoluteFill, { backgroundColor: '#fff', opacity: morphFlash }]}
+                  />
+                </Animated.View>
+              );
+            })()}
           </View>
         )}
       </View>
