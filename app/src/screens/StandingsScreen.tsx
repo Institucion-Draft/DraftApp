@@ -412,22 +412,6 @@ function computeMatchDmv(events: LifeEvRow[], myPid: string, oppPid: string): nu
   return weightedSum;
 }
 
-function formatDmvCell(dmv: number | null): string {
-  if (dmv == null) return '—';
-  const rounded = Math.round(dmv * 10) / 10;
-  if (rounded > 0) return `+${rounded.toFixed(1)}`;
-  if (rounded === 0) return '0.0';
-  return rounded.toFixed(1);
-}
-
-/** Color del diferencial de vida ponderado (DMV) según su signo: positivo / negativo / neutro. */
-function dmvCellColor(dmv: number | null, colors: ThemeColors): string {
-  if (dmv == null) return colors.textSecondary;
-  if (dmv > 1e-9) return colors.status.success.solid;
-  if (dmv < -1e-9) return colors.status.error.solid;
-  return colors.textSecondary;
-}
-
 /** TMP en minutos para la tabla; cálculo interno sigue en segundos. */
 function formatTmpDisplay(tmpSeconds: number | null): string {
   if (tmpSeconds == null || !Number.isFinite(tmpSeconds)) return '—';
@@ -727,7 +711,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
 
   const [eventStatusStored, setEventStatusStored] = useState<string | null>(null);
   const [showConfettiOnce, setShowConfettiOnce] = useState(false);
-  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** Grupos + Copa (0136/0137): zonas del evento y a qué zona pertenece cada jugador; el orden dentro de la zona sale de zone_standings. */
   const [zonesTable, setZonesTable] = useState<{ zones: { id: string; name: string }[]; zoneByParticipant: Map<string, string> } | null>(null);
@@ -748,7 +731,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [isSwissBo2, setIsSwissBo2] = useState(false);
   /** True cuando es round_robin con top_size=4: sin EG/EC (no hay BO3 en fase regular). */
   const [isRoundRobinBo1, setIsRoundRobinBo1] = useState(false);
-  /** True cuando es round_robin con match_format='bo2': tabla con PTS/EG/EE/EP en vez de PG/PJ, sin DMVT ni % E_2-0/E_2-1. */
+  /** True cuando es round_robin con match_format='bo2': tabla con PTS/EG/EE/EP en vez de PG/PJ, sin % E_2-0/E_2-1. */
   const [isRoundRobinBo2, setIsRoundRobinBo2] = useState(false);
   /** round_robin con top_size=4: participantIds que disputaron el desempate por el 4to puesto (si lo hubo). */
   const [fourthPlaceDisputantIds, setFourthPlaceDisputantIds] = useState<Set<string>>(new Set());
@@ -925,7 +908,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const turnTrackOn = !!(
       eventRes.data as { turn_tracking_enabled?: boolean | null } | null
     )?.turn_tracking_enabled;
-    setTurnTrackingEnabled(turnTrackOn);
     const rawFmt = (eventRes.data as { competition_format?: string | null } | null)?.competition_format;
     // Paso 1 de la unificación (ver 0076): round_robin_bo1_top4 pasa a ser
     // competition_format='round_robin' + top_size=4. "Todos contra todos con top4" ya no es
@@ -2158,9 +2140,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
                 ) : null}
               </>
             )}
-            {!isSwissBo2 && !isRoundRobinBo2 && eventTypeStored !== 'two_headed_giant' ? (
-              <Text style={[styles.cell, styles.dmvCol]}>{turnTrackingEnabled ? 'DMVt' : 'DMV'}</Text>
-            ) : null}
             <Text style={[styles.cell, styles.tmpCol]}>TMP</Text>
           </View>
           {visibleRows.map((r) => {
@@ -2271,17 +2250,6 @@ export default function StandingsScreen({ route, navigation }: Props) {
                   ) : null}
                 </>
               )}
-              {!isSwissBo2 && !isRoundRobinBo2 && eventTypeStored !== 'two_headed_giant' ? (
-                <Text
-                  style={[
-                    styles.cell,
-                    styles.dmvCol,
-                    { color: dmvCellColor(turnTrackingEnabled ? r.dmvt : r.dmv, colors) },
-                  ]}
-                >
-                  {formatDmvCell(turnTrackingEnabled ? r.dmvt : r.dmv)}
-                </Text>
-              ) : null}
               <Text style={[styles.cell, styles.tmpCol]} numberOfLines={1}>
                 {formatTmpDisplay(r.tmp)}
               </Text>
@@ -2407,21 +2375,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
             ? competitionFormat === 'swiss'
               ? isSwissBo2
                 ? 'Pts: Puntos (victoria=3, empate=1, bye=2) · OMW%: Rendimiento medio de los rivales (mín. 33%) · GW%: Porcentaje de partidas individuales ganadas · PF: Partidas individuales finalizadas · TMP: Tiempo Medio por Partida'.split(' · ')
-                : (
-                    turnTrackingEnabled
-                      ? 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
-                      : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
-                  ).split(' · ')
+                : 'Pts: Puntos suizos · OMW%: Porcentaje de victorias en enfrentamientos de los rivales (mín. 33% por rival) · GW%: Porcentaje de partidas oficiales ganadas · TMP: Tiempo Medio por Partida'.split(' · ')
               : isRoundRobinBo2
                 ? 'Pts: Puntos (victoria=3, empate=1, derrota=0) · EG: Enfrentamientos Ganados · EE: Enfrentamientos Empatados · EP: Enfrentamientos Perdidos · TMP: Tiempo Medio por Partida'.split(
                     ' · '
                   )
                 : [
-                  ...(
-                    turnTrackingEnabled
-                      ? 'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMVt: Diferencial Medio de Vida por turno · TMP: Tiempo Medio por Partida'
-                      : 'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · DMV: Diferencial Medio de Vida · TMP: Tiempo Medio por Partida'
-                  ).split(' · '),
+                  ...'PG: Partidas Ganadas · PJ: Partidas Jugadas · EG: Enfrentamientos Ganados (BO3) · EC: Enfrentamientos Completados · TMP: Tiempo Medio por Partida'.split(' · '),
                   'E_2-0: Porcentaje de Enfrentamientos definidos en 2 partidas',
                   'E_2-1: Porcentaje de Enfrentamientos definidos en 3 partidas',
                   // round_robin con top_size=4: sin métricas de BO3 en la fase regular.
@@ -2599,7 +2559,6 @@ const createStyles = (c: ThemeColors) =>
     playerCol: { flex: 1, width: 'auto', minWidth: 108, textAlign: 'left' },
     statCol: { width: 34, minWidth: 34, fontSize: 11 },
     swissPctCol: { width: 44, minWidth: 44, fontSize: 10 },
-    dmvCol: { width: 40, minWidth: 40, fontSize: 11 },
     playerCell: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 },
     standingsAvatar: { marginRight: 6 },
     giantAvatarPairStandings: { flexDirection: 'row', alignItems: 'center', marginRight: 6 },

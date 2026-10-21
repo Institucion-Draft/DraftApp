@@ -25,7 +25,8 @@ import { hasUnseenEventAchievements } from '../lib/achievements';
 import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
-import { getEventStatusLabel, getEventTypeLabel } from '../lib/labels';
+import { getEventStatusLabel } from '../lib/labels';
+import { formatEventMode } from '../lib/eventMode';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
 import { isConcludeAvailable } from '../lib/concludeAvailability';
 import { CUP_CONSUELO_NAME, KNOCKOUT_BRACKET_ORIGIN, cupPrimaName, isKnockoutCupOrigin } from '../lib/knockoutRounds';
@@ -54,7 +55,8 @@ type EventRow = {
   avatar_path: string | null;
   status: 'scheduled' | 'drafting' | 'playing' | 'completed' | 'cancelled' | 'concluded';
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
-  competition_format?: 'round_robin' | 'swiss' | null;
+  competition_format?: 'round_robin' | 'swiss' | 'zones_knockout' | 'knockout' | null;
+  topcut_format?: 'bo1' | 'bo3' | null;
   top_size?: number | null;
   match_format?: 'bo1' | 'bo2' | 'bo3' | null;
   current_swiss_round?: number | null;
@@ -244,7 +246,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, topcut_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -1515,7 +1517,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         )}
         <Text style={styles.title}>{event.name}</Text>
         <Text style={styles.meta}>Estado: {getEventStatusLabel(event.status)}</Text>
-        <Text style={styles.meta}>Tipo de evento: {getEventTypeLabel(event.event_type)}</Text>
+        {(() => {
+          // Modalidad (qué se juega): mismo texto que la lista de eventos. Si no se puede determinar, no se muestra la línea.
+          const mode = formatEventMode(event.event_type, event.competition_format ?? null, event.top_size ?? null, event.match_format ?? null, event.topcut_format ?? null);
+          return mode ? <Text style={styles.meta}>Modalidad: {mode}</Text> : null;
+        })()}
       </View>
 
       {showTiebreakPendingBanner ? (
