@@ -38,7 +38,7 @@ Tácitos pero importantes:
   - PostgreSQL para datos, 120 migraciones aplicadas (`supabase/migrations/0001` a `0120`)
   - Auth nativo
   - Realtime para sincronización en vivo (life events, pairings)
-  - Storage para avatares (bucket `default-avatars` con 251 sprites de Pokémon Gen 1+2, incluye variantes shiny)
+  - Storage para avatares (bucket `default-avatars` con 251 sprites de Pokémon Gen 1+2 + 135 de Gen 3 (desbloqueables, 0142) + 27 formas extra de Unown, incluye variantes shiny)
   - Row-Level Security en TODAS las tablas
 
 ### Infraestructura
@@ -113,7 +113,7 @@ Por estar trabajando solo, el ruleset de protección de main está disabled (Set
 **Auth y usuarios:**
 - `auth.users` (gestionado por Supabase Auth)
 - `public.users`: extiende auth con `display_name`, `username`, `gender`, `birth_date`, `default_avatar_id`, `custom_avatar_path`, `display_name_changed_at`. Ojo: existe también una columna `birthday` de 0001, muerta desde que 0015 introdujo `birth_date` como el campo real en uso (ver `BUGS_AND_REVIEW.md`).
-- `public.default_avatars`: 251 Pokémon, cada uno con `storage_path` (y `storage_path_shiny` para la variante shiny) en bucket
+- `public.default_avatars`: 251 Pokémon Gen 1-2 + 135 de Gen 3 + 27 formas extra de Unown (413 filas, 0142; `generation`, `unown_form`), cada uno con `storage_path` (y `storage_path_shiny` para la variante shiny) en bucket
 
 **Workspaces:**
 - `public.workspaces`, `public.workspace_members` (`role`: `organizer`/`member`), `public.workspace_invites`, `public.workspace_join_requests`
@@ -155,7 +155,7 @@ Por estar trabajando solo, el ruleset de protección de main está disabled (Set
 - `public.season_frozen_events` / `public.season_frozen_positions`: snapshot de los podios "asegurados" al forzar el cierre de una temporada con eventos inconclusos
 
 **Storage:**
-- Bucket `default-avatars`: 251 PNGs de Pokémon (con variantes shiny)
+- Bucket `default-avatars`: 413 PNGs de Pokémon (con variantes shiny; la carpeta `gen3-unown-upload/` trae los 162 de la 0142)
 
 ### Vistas SQL (`v_*`, además de `cubes_with_stats`/`venues_with_stats`)
 

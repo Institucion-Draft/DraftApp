@@ -1,0 +1,9 @@
+{
+  "name": "draftapp-sql-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests de migraciones SQL contra PGlite (no usa Supabase real). npm install && node gen3-unown.test.mjs",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0"
+  }
+}
