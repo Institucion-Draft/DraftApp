@@ -827,8 +827,14 @@ begin
   if v_gen3 <> 135 then
     raise exception '0142: se esperaban 135 Pokémon de Gen 3 y hay %', v_gen3;
   end if;
-  if v_unown <> 28 then
-    raise exception '0142: se esperaban 28 formas de Unown y hay % (¿falta la fila unown.png?)', v_unown;
+  -- En una base reconstruida desde cero no están los 251 originales (se cargan a mano): sin la fila unown.png no hay
+  -- forma 'a' y sólo se esperan las 27 nuevas.
+  if exists (select 1 from public.default_avatars where storage_path = 'default-avatars/unown.png') then
+    if v_unown <> 28 then
+      raise exception '0142: se esperaban 28 formas de Unown y hay %', v_unown;
+    end if;
+  elsif v_unown <> 27 then
+    raise exception '0142: se esperaban 27 formas nuevas de Unown y hay %', v_unown;
   end if;
   if v_null > 0 then
     raise warning '0142: % avatares activos sin generación (se tratan como Gen 1)', v_null;
