@@ -15,6 +15,9 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
+import { fetchVenueStats, type VenueStats } from '../lib/placeStatsApi';
+import PlaceStatsCard from '../components/PlaceStatsCard';
+import { venueSections } from '../lib/placeStatsSections';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -37,6 +40,7 @@ export default function EditVenueScreen({ route, navigation }: Props) {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [notes, setNotes] = useState('');
+  const [stats, setStats] = useState<VenueStats | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -56,6 +60,11 @@ export default function EditVenueScreen({ route, navigation }: Props) {
       setName(row.name);
       setAddress(row.address ?? '');
       setNotes(row.notes ?? '');
+
+      // Estadísticas de la sede (con el nombre guardado, no el que se esté editando).
+      void fetchVenueStats(row.workspace_id, row.id, row.name)
+        .then((s) => setStats(s))
+        .catch(() => setStats(null));
     })();
   }, [navigation, venueId]);
 
@@ -145,6 +154,8 @@ export default function EditVenueScreen({ route, navigation }: Props) {
         <TouchableOpacity style={styles.deleteBtn} disabled={submitting} onPress={onDelete}>
           <Text style={styles.deleteTxt}>Borrar sede</Text>
         </TouchableOpacity>
+
+        <PlaceStatsCard sections={venueSections(stats)} />
       </ScrollView>
     </KeyboardAvoidingView>
   );

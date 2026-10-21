@@ -17,6 +17,9 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
+import { fetchCubeStats, type CubeStats } from '../lib/placeStatsApi';
+import PlaceStatsCard from '../components/PlaceStatsCard';
+import { cubeSections } from '../lib/placeStatsSections';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -43,6 +46,7 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOrganizer, setIsOrganizer] = useState(false);
+  const [stats, setStats] = useState<CubeStats | null>(null);
   const firstLoadRef = useRef(true);
 
   const load = useCallback(async () => {
@@ -61,6 +65,11 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
     }
     const cube = data as CubeStatsRow;
     setRow(cube);
+
+    // Estadísticas del cubo (no bloquean la pantalla: aparecen cuando llegan).
+    void fetchCubeStats(cube.workspace_id, cube.id, cube.name)
+      .then((s) => setStats(s))
+      .catch(() => setStats(null));
 
     const meRes = await supabase.auth.getUser();
     const currentUserId = meRes.data.user?.id ?? null;
@@ -175,6 +184,8 @@ export default function CubeDetailScreen({ route, navigation }: Props) {
           <Text style={styles.linkBtnText}>Ver en CubeCobra</Text>
         </TouchableOpacity>
       ) : null}
+
+      <PlaceStatsCard sections={cubeSections(stats)} />
     </ScrollView>
   );
 }
