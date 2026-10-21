@@ -234,8 +234,9 @@ const MOVEPOOL: Record<PokemonType, Movepool> = {
   },
 };
 
-// Mapeo de Pokémon (nombre del avatar: minúsculas, guión bajo) → tipos. Kanto + Johto.
-const POKEMON_TYPES: Record<string, PokemonType[]> = {
+// Mapeo de Pokémon (nombre del avatar: minúsculas, guión bajo) → tipos. Kanto + Johto + Hoenn (Gen 3).
+// Las 28 formas de Unown comparten la entrada 'unown' (ver normalizePokemonKey).
+export const POKEMON_TYPES: Record<string, PokemonType[]> = {
   // KANTO - Starters
   bulbasaur: ['grass', 'poison'], ivysaur: ['grass', 'poison'], venusaur: ['grass', 'poison'],
   charmander: ['fire'], charmeleon: ['fire'], charizard: ['fire', 'flying'],
@@ -401,6 +402,41 @@ const POKEMON_TYPES: Record<string, PokemonType[]> = {
   lugia: ['psychic', 'flying'],
   ho_oh: ['fire', 'flying'],
   celebi: ['psychic', 'grass'],
+  // HOENN (Gen 3) - desbloqueable por logros de temporada (users.gen3_unlocked_at)
+  treecko: ['grass'], grovyle: ['grass'], sceptile: ['grass'], torchic: ['fire'],
+  combusken: ['fire', 'fighting'], blaziken: ['fire', 'fighting'], mudkip: ['water'], marshtomp: ['water', 'ground'],
+  swampert: ['water', 'ground'], poochyena: ['dark'], mightyena: ['dark'], zigzagoon: ['normal'],
+  linoone: ['normal'], wurmple: ['bug'], silcoon: ['bug'], beautifly: ['bug', 'flying'],
+  cascoon: ['bug'], dustox: ['bug', 'poison'], lotad: ['water', 'grass'], lombre: ['water', 'grass'],
+  ludicolo: ['water', 'grass'], seedot: ['grass'], nuzleaf: ['grass', 'dark'], shiftry: ['grass', 'dark'],
+  taillow: ['normal', 'flying'], swellow: ['normal', 'flying'], wingull: ['water', 'flying'], pelipper: ['water', 'flying'],
+  ralts: ['psychic'], kirlia: ['psychic'], gardevoir: ['psychic'], surskit: ['bug', 'water'],
+  masquerain: ['bug', 'flying'], shroomish: ['grass'], breloom: ['grass', 'fighting'], slakoth: ['normal'],
+  vigoroth: ['normal'], slaking: ['normal'], nincada: ['bug', 'ground'], ninjask: ['bug', 'flying'],
+  shedinja: ['bug', 'ghost'], whismur: ['normal'], loudred: ['normal'], exploud: ['normal'],
+  makuhita: ['fighting'], hariyama: ['fighting'], azurill: ['normal'], nosepass: ['rock'],
+  skitty: ['normal'], delcatty: ['normal'], sableye: ['dark', 'ghost'], mawile: ['steel'],
+  aron: ['steel', 'rock'], lairon: ['steel', 'rock'], aggron: ['steel', 'rock'], meditite: ['fighting', 'psychic'],
+  medicham: ['fighting', 'psychic'], electrike: ['electric'], manectric: ['electric'], plusle: ['electric'],
+  minun: ['electric'], volbeat: ['bug'], illumise: ['bug'], roselia: ['grass', 'poison'],
+  gulpin: ['poison'], swalot: ['poison'], carvanha: ['water', 'dark'], sharpedo: ['water', 'dark'],
+  wailmer: ['water'], wailord: ['water'], numel: ['fire', 'ground'], camerupt: ['fire', 'ground'],
+  torkoal: ['fire'], spoink: ['psychic'], grumpig: ['psychic'], spinda: ['normal'],
+  trapinch: ['ground'], vibrava: ['ground', 'dragon'], flygon: ['ground', 'dragon'], cacnea: ['grass'],
+  cacturne: ['grass', 'dark'], swablu: ['normal', 'flying'], altaria: ['dragon', 'flying'], zangoose: ['normal'],
+  seviper: ['poison'], lunatone: ['rock', 'psychic'], solrock: ['rock', 'psychic'], barboach: ['water', 'ground'],
+  whiscash: ['water', 'ground'], corphish: ['water'], crawdaunt: ['water', 'dark'], baltoy: ['ground', 'psychic'],
+  claydol: ['ground', 'psychic'], lileep: ['rock', 'grass'], cradily: ['rock', 'grass'], anorith: ['rock', 'bug'],
+  armaldo: ['rock', 'bug'], feebas: ['water'], milotic: ['water'], castform: ['normal'],
+  kecleon: ['normal'], shuppet: ['ghost'], banette: ['ghost'], duskull: ['ghost'],
+  dusclops: ['ghost'], tropius: ['grass', 'flying'], chimecho: ['psychic'], absol: ['dark'],
+  wynaut: ['psychic'], snorunt: ['ice'], glalie: ['ice'], spheal: ['ice', 'water'],
+  sealeo: ['ice', 'water'], walrein: ['ice', 'water'], clamperl: ['water'], huntail: ['water'],
+  gorebyss: ['water'], relicanth: ['water', 'rock'], luvdisc: ['water'], bagon: ['dragon'],
+  shelgon: ['dragon'], salamence: ['dragon', 'flying'], beldum: ['steel', 'psychic'], metang: ['steel', 'psychic'],
+  metagross: ['steel', 'psychic'], regirock: ['rock'], regice: ['ice'], registeel: ['steel'],
+  latias: ['dragon', 'psychic'], latios: ['dragon', 'psychic'], kyogre: ['water'], groudon: ['ground'],
+  rayquaza: ['dragon', 'flying'], jirachi: ['steel', 'psychic'], deoxys: ['psychic'],
 };
 
 // Pokémon con comportamiento especial
@@ -411,6 +447,16 @@ const SPECIAL_BEHAVIOR: Record<string, 'ditto' | 'metronome'> = {
   clefairy: 'metronome',
   clefable: 'metronome',
 };
+
+/**
+ * Clave de POKEMON_TYPES / SPECIAL_BEHAVIOR a partir del nombre del avatar (nombre de archivo del sprite):
+ * minúsculas, espacios y guiones a guión bajo ('ho-oh' -> 'ho_oh', 'nidoran-f' -> 'nidoran_f'), y cualquier forma de
+ * Unown ('unown-b', 'unown-exclamation', ...) -> 'unown'.
+ */
+export function normalizePokemonKey(pokemonName: string): string {
+  const key = pokemonName.toLowerCase().replace(/[\s-]+/g, '_');
+  return key.startsWith('unown_') ? 'unown' : key;
+}
 
 /**
  * Determina la categoría de movimiento según los deltas de vida del turno.
@@ -440,7 +486,7 @@ export function pickMove(
   category: MoveCategory,
   otherDelta: number
 ): Move {
-  const normalized = pokemonName.toLowerCase().replace(/\s+/g, '_');
+  const normalized = normalizePokemonKey(pokemonName);
   const types = POKEMON_TYPES[normalized] ?? ['normal'];
 
   const pickFromTypes = (cat: MoveCategory): Move | null => {
@@ -507,6 +553,6 @@ export function pickRandomMoveFromAll(): Move {
  * Para Ditto/metronome: devuelve el tipo de comportamiento especial, o null si es normal.
  */
 export function getSpecialBehavior(pokemonName: string): 'ditto' | 'metronome' | null {
-  const normalized = pokemonName.toLowerCase().replace(/\s+/g, '_');
+  const normalized = normalizePokemonKey(pokemonName);
   return SPECIAL_BEHAVIOR[normalized] ?? null;
 }
