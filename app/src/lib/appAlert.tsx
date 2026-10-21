@@ -32,6 +32,8 @@ type AlertItem = {
   message?: string;
   buttons: AlertButton[];
   options?: AlertOptions;
+  /** Contenido extra entre el mensaje y los botones (ej. imágenes). Sólo con showAppAlert; Alert.alert no lo usa. */
+  content?: React.ReactNode;
 };
 
 /** Cola de carteles: el primero es el que está abierto. */
@@ -55,6 +57,26 @@ function closeCurrent(): void {
 
 let installed = false;
 let originalAlert: typeof Alert.alert | null = null;
+
+/**
+ * Abre un cartel con contenido extra (children) entre el mensaje y los botones. Misma cola, mismo Modal y mismo
+ * estilo que Alert.alert; no requiere installAppAlert, sí el <AppAlertHost /> de la raíz.
+ */
+export function showAppAlert(item: {
+  title: string;
+  message?: string;
+  buttons?: AlertButton[];
+  options?: AlertOptions;
+  content?: React.ReactNode;
+}): void {
+  enqueue({
+    title: item.title,
+    message: item.message,
+    buttons: item.buttons && item.buttons.length > 0 ? item.buttons : [{ text: 'OK' }],
+    options: item.options,
+    content: item.content,
+  });
+}
 
 /** Reemplaza Alert.alert por la versión basada en Modal. Idempotente. */
 export function installAppAlert(): void {
@@ -134,6 +156,7 @@ export function AppAlertHost() {
               <Text style={styles.message}>{current.message}</Text>
             </ScrollView>
           ) : null}
+          {current.content ? <View style={styles.content}>{current.content}</View> : null}
           <View style={[styles.buttons, stacked && styles.buttonsStacked]}>
             {current.buttons.map((b, i) => {
               const isCancel = b.style === 'cancel';
@@ -198,6 +221,7 @@ function createStyles(c: ThemeColors) {
     },
     messageScroll: { maxHeight: 240, paddingHorizontal: 20 },
     message: { fontSize: 14, color: c.textBody, textAlign: 'center', paddingBottom: 4 },
+    content: { alignItems: 'center', paddingHorizontal: 20 },
     buttons: {
       flexDirection: 'row',
       marginTop: 16,
