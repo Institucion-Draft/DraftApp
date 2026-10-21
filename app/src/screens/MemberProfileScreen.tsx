@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -46,11 +46,22 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
     setLoading(false);
   }, [userId, workspaceId]);
 
+  // Carga sólo la primera vez (o si cambian usuario/workspace). Al recuperar el foco —por ejemplo al volver del
+  // historial de Pokemones— NO se vuelve a cargar ni se pone el spinner: si se hiciera, el early return de
+  // `loading` desmontaría el ScrollView y CrossEventStats, perdiendo el scroll y repitiendo todas las consultas.
+  const loadedKeyRef = useRef<string | null>(null);
+  const loadingKeyRef = useRef<string | null>(null);
   useFocusEffect(
     useCallback(() => {
+      const key = `${userId}|${workspaceId}`;
+      if (loadedKeyRef.current === key || loadingKeyRef.current === key) return;
+      loadingKeyRef.current = key;
       setLoading(true);
-      void load();
-    }, [load])
+      void load().finally(() => {
+        loadedKeyRef.current = key;
+        loadingKeyRef.current = null;
+      });
+    }, [load, userId, workspaceId])
   );
 
   useLayoutEffect(() => {

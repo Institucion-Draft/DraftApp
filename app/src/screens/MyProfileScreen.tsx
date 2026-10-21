@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -89,10 +89,20 @@ export default function MyProfileScreen({ navigation, route }: Props) {
     setLoading(false);
   }, []);
 
+  // Carga sólo la primera vez. Al recuperar el foco (ej. al volver del historial de Pokemones) no se recarga ni se
+  // muestra el spinner: el early return de `loading` desmontaría el ScrollView y CrossEventStats (scroll y consultas
+  // perdidos). El nombre se edita en esta misma pantalla y actualiza su estado al guardar, así que no depende del refresco.
+  const loadedRef = useRef(false);
+  const loadingRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      if (loadedRef.current || loadingRef.current) return;
+      loadingRef.current = true;
       setLoading(true);
-      void load();
+      void load().finally(() => {
+        loadedRef.current = true;
+        loadingRef.current = false;
+      });
     }, [load])
   );
 

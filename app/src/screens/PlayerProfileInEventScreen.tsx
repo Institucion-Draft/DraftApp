@@ -2243,6 +2243,8 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             {memberBUserId ? (
               <PlayerAvatar
                 userId={memberBUserId}
+                participantId={participantId}
+                isMemberB
                 size="xlarge"
                 withColorBorder
                 borderWidth={5}
