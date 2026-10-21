@@ -1,3 +1,4 @@
+import PokemonReceivedSection from './PokemonReceivedSection';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -481,6 +482,9 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           </View>
         </View>
       )}
+
+      {/* ── Pokemones ──────────────────────────────────────────────────── */}
+      <PokemonReceivedSection userId={userId} workspaceId={workspaceId} />
     </>
   );
 }

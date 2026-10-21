@@ -6,6 +6,7 @@ import MyProfileScreen from '../screens/MyProfileScreen';
 import MemberProfileScreen from '../screens/MemberProfileScreen';
 import CreateWorkspaceScreen from '../screens/CreateWorkspaceScreen';
 import WorkspaceDetailScreen from '../screens/WorkspaceDetailScreen';
+import PokemonHistoryScreen from '../screens/PokemonHistoryScreen';
 import WorkspaceDiaryScreen from '../screens/WorkspaceDiaryScreen';
 import WorkspaceRankingScreen from '../screens/WorkspaceRankingScreen';
 import WorkspaceSeasonScreen from '../screens/WorkspaceSeasonScreen';
@@ -115,6 +116,11 @@ export default function MainStackNavigator() {
             title: 'Detalle del grupo',
             headerBackTitle: 'Atrás',
           }}
+        />
+        <Stack.Screen
+          name="PokemonHistory"
+          component={PokemonHistoryScreen}
+          options={{ title: 'Pokemones', headerBackTitle: 'Atrás' }}
         />
         <Stack.Screen
           name="WorkspaceDiary"

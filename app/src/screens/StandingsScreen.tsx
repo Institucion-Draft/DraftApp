@@ -1912,6 +1912,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
               />
               <PlayerAvatar
                 userId={pl.memberBUserId}
+                participantId={pl.participantId}
+                isMemberB
                 size="small"
                 withColorBorder
                 borderWidth={avatarBorder}
@@ -2201,6 +2203,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
                       <View style={{ alignItems: 'center' }}>
                         <PlayerAvatar
                           userId={r.memberBUserId}
+                          participantId={r.participantId}
+                          isMemberB
                           size="tiny"
                           withColorBorder={false}
                         />
