@@ -23,6 +23,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import UnseenDot from '../components/UnseenDot';
 import { hasUnseenAchievements, syncWorkspaceAchievements } from '../lib/achievements';
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
+import { maybeShowGen3Notice } from '../lib/gen3Notice';
 import { formatEventMode } from '../lib/eventMode';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -217,6 +218,13 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
       void loadSeasons();
       void loadTodayEvents();
     }, [loadSeasons, loadTodayEvents])
+  );
+
+  // Aviso de una sola vez al desbloquear la Gen 3 (llegue el jugador desde donde llegue a esta pantalla).
+  useFocusEffect(
+    useCallback(() => {
+      void maybeShowGen3Notice(user?.id);
+    }, [user?.id])
   );
 
   // Fade in/out del badge HOY: misma animación que el "ES HOY!" de la lista de eventos
