@@ -2,7 +2,22 @@
 
 Casos pendientes de revisión que no son ideas nuevas (para eso está [IDEAS.md](IDEAS.md)), sino comportamientos existentes a auditar o mejorar.
 
-## Sistema "Me voy" - revisión pendiente de casos y reglas
+> **Regla de ordenamiento:** toda entrada nueva se inserta en el semáforo que le corresponde según tiempo/complejidad estimada de punta a punta (diseño, migración, UI y prueba). Las entradas son `###` dentro de su grupo; al resolverse pasan a "Resueltos" con la marca `[RESUELTO]`.
+> - 🟢 **Verde:** hasta unas pocas horas; un cambio acotado, sin schema nuevo.
+> - 🟠 **Naranja:** 1 a 3 sesiones; toca schema o varias pantallas.
+> - 🔴 **Rojo:** muchas sesiones, o con decisiones de diseño abiertas / cambios al modelo de datos.
+
+## 🟢 Verde
+
+(vacío)
+
+## 🟠 Naranja
+
+(vacío)
+
+## 🔴 Rojo
+
+### Sistema "Me voy" - revisión pendiente de casos y reglas
 
 Necesita una revisión completa de reglas y situaciones. Casos identificados hasta ahora:
 
@@ -12,7 +27,9 @@ Necesita una revisión completa de reglas y situaciones. Casos identificados has
 
 **Pendiente:** mapear todos los casos límite de "me voy" (en todos los formatos: round_robin sin/con top, swiss) y decidir para cada uno si el comportamiento actual es el correcto o necesita ajuste.
 
-## [RESUELTO] Drift entre el historial de migraciones y la base real
+## ✅ Resueltos
+
+### [RESUELTO] Drift entre el historial de migraciones y la base real
 
 **Resuelto.** Las 127 migraciones ahora se reconstruyen desde cero sin errores (verificado con PGlite, no con Supabase real) y el resultado coincide con prod en lo que se tocó. Cambios, todos inocuos para prod (las migraciones viejas ya estaban aplicadas y prod no tiene tabla `schema_migrations`, así que no hay checksums):
 
@@ -22,7 +39,7 @@ Necesita una revisión completa de reglas y situaciones. Casos identificados has
 
 Pendiente: la prueba de reconstrucción usó stubs de `auth`/`storage`, no Supabase real, y no se compararon tablas, índices ni policies contra prod (solo las vistas y el constraint tocados).
 
-## [RESUELTO] Historial de posiciones en el perfil de jugador muestra la posición de fase liga, no la final del torneo
+### [RESUELTO] Historial de posiciones en el perfil de jugador muestra la posición de fase liga, no la final del torneo
 
 En el perfil de un jugador (dentro del workspace), el historial de "últimos drafts" muestra la posición equivocada cuando el evento tiene fase mata-mata (top4). Caso concreto: Esteban terminó 4° en la fase todos-contra-todos de "Último Draft de Invierno", pero clasificó al top4 y GANÓ la final (quedó 1° del torneo). El perfil le muestra "4°" en vez de "1°" - está mostrando la posición de la tabla de la fase liga en vez de la posición final real del torneo (que ya calculamos correctamente en otros lados, como computePodium/eventPodium.ts).
 
@@ -30,10 +47,10 @@ Investigar dónde vive ese historial en PlayerProfile o pantalla equivalente, y 
 
 **Resuelto.** `CrossEventStats.tsx` (usado por `MemberProfileScreen`/`MyProfileScreen`) ahora llama a `fetchEventPodiums` (lote, en `lib/eventPodium.ts`) para obtener el 1°/2°/3° real de cada evento del historial — la misma fuente que ya usan `StandingsScreen` y el cierre de temporada. Híbrido acordado: si el jugador quedó en el podio (1-3), se usa esa posición; si no, se mantiene el `placement` que ya traía `v_participant_event_placement` (rank por winrate de fase regular), sin tocar. Validado con el set de 18 escenarios de podio ya usados en la sesión de Temporadas más una prueba nueva de fetch en lote (varios eventos a la vez, sin contaminación cruzada).
 
-## [RESUELTO] Perfil de jugador: "últimos drafts jugados" incluía eventos two_headed_giant
+### [RESUELTO] Perfil de jugador: "últimos drafts jugados" incluía eventos two_headed_giant
 
 **Resuelto** en la migración `0126`: `v_participant_event_placement` (y `v_head_to_head_stats`, `v_player_streaks`, `v_player_color_stats`) ahora filtran `event_type <> 'two_headed_giant'`.
 
-## [RESUELTO] Perfil de jugador: posición incorrecta para quien no llega al podio en round robin con top
+### [RESUELTO] Perfil de jugador: posición incorrecta para quien no llega al podio en round robin con top
 
 **Resuelto** en la migración `0126`: `v_participant_event_placement` ahora usa el bracket real (`round_robin_topcut`/`swiss_topcut`, no superseded) también en round robin con top, así el perdedor del 3°/4° queda 4° y el resto desde 5°. Caso que lo destapó: Eli en "Último Draft de Invierno" (salía 2°, es 4°).

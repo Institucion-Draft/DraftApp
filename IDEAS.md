@@ -2,28 +2,36 @@
 
 Registro de ideas y features futuras que todavía no están agendadas como pendientes técnicos concretos. Se va a ir extendiendo sesión a sesión.
 
-- Modo oscuro (dark mode) para toda la app. Sistema de theme con paleta de colores semánticos, toggle en settings del usuario, refactor de pantallas existentes para usar variables de tema.
+> **Regla de ordenamiento:** toda entrada nueva se inserta en el semáforo que le corresponde según tiempo/complejidad estimada de punta a punta (diseño, migración, UI y prueba). Las entradas son `###` dentro de su grupo.
+> - 🟢 **Verde:** hasta unas pocas horas; un cambio acotado, sin schema nuevo.
+> - 🟠 **Naranja:** 1 a 3 sesiones; toca schema o varias pantallas.
+> - 🔴 **Rojo:** muchas sesiones, o con decisiones de diseño abiertas / cambios al modelo de datos.
 
-## Logros/Achievements (por temporada)
+## 🟢 Verde
 
-**Nota arquitectónica:** los logros son por TEMPORADA, no globales/eternos — cada temporada tiene su propia colección que los jugadores pueden desbloquear. Son booleanos (se cumplen o no), con alguna forma de notificación/celebración. Mecanismo de visualización a definir más adelante: notificación push, pantalla al entrar al workspace, badge visible para todos aunque la persona no esté usando la app en ese momento, etc.
+### "vs" estilizado
 
-- Cagarle el invicto a alguien en la fase todos contra todos (solo perdió contra vos)
-- Ídem, pero además fuiste el último partido que jugó
-- Dar vuelta un 0-1 en un BO3
-- Ganar un desempate por 4to puesto y ganar el top4
-- Ganar un desempate por el primer lugar
-- Invicto en todas las rondas suizas
-- Invicto en fase todos contra todos
-- Ganar algún partido porque tu rival se fue (walkover)
-- Ganar por tanta diferencia de vida (a definir el umbral)
-- Partido de más de tanto tiempo (a definir el umbral)
-- Partido de menos de tanto tiempo (a definir el umbral)
-- 3 veces seguidas el mismo tipo de Pokémon (elegido en Life Tracker)
-- 5 veces el mismo tipo de Pokémon
-- Copa oficial: achv_regular_pairings (achv_participant_outcomes) toma todos los pairings de formato distinto de Suizo; filtrar por stage (excluir 'bracket' y 'revenge') antes de habilitar Copas oficiales.
+- En PairingDetail header, fuente custom
+- Opciones: Bangers, Bungee, Permanent Marker (Google Fonts vía expo-font)
 
-## Personalización avanzada de Temporadas (opciones de organizador)
+### Mejor miniatura/icono de la app
+
+- Icon, splash, adaptive-icon
+- Reemplazar los defaults de Expo
+
+### Quién empieza: ruleta visual + alternancia sugerida
+
+El elegir y persistir quién empieza cada partida ya está implementado (`matches.who_started_participant_id`, LifeTracker). Falta:
+- Animación tipo ruleta (botón "Aleatorizar" que enciende/apaga avatares) en vez de selección directa
+- En partidas siguientes del mismo enfrentamiento, sugerir quién empieza por alternancia
+
+### PJ no debe sumar hasta que la partida se completa
+
+- PJ no debería sumar hasta que la partida se completa (hoy suma con in_progress). Acrónimo se mantiene PJ, leyenda dice "Partidas Jugadas Finalizadas".
+
+## 🟠 Naranja
+
+### Personalización avanzada de Temporadas (opciones de organizador)
 
 Las temporadas hoy son 100% automáticas por estación (hora de Buenos Aires). Posibles opciones futuras, todas en "opciones avanzadas" del organizador:
 
@@ -31,40 +39,13 @@ Las temporadas hoy son 100% automáticas por estación (hora de Buenos Aires). P
 - Elegir qué columnas mostrar en la tabla de la temporada.
 - Ocultar el segmento de Ranking completo para los no-organizadores.
 
-## Métrica de eficiencia relativa: Puntos / Puntos disputados
-
-Idea para comparar "calidad" de desempeño entre jugadores que asistieron a distinta cantidad/tamaño de eventos, como indicador secundario (NO de desempate de podio, ya que el podio se define por puntos totales absolutos).
-
-Definición propuesta: "Puntos disputados" = suma de los puntos máximos posibles que el jugador podría haber ganado (como si hubiera salido 1° en TODOS los eventos donde participó, según el escalón de puntos de cada evento). La métrica sería Puntos reales / Puntos disputados.
-
-Analogía de otros deportes: similar a "puntos por carrera" en F1 (promedio, indicador informativo, no define el campeonato que sí usa la suma total).
-
-**Problema de diseño detectado, sin resolver todavía:** esta métrica tiene un sesgo estadístico real hacia el tamaño de los eventos jugados. Quien asiste a eventos GRANDES tiene un denominador más alto, así que perder en un evento grande "cuesta" más puntos posibles perdidos que perder en uno chico, aunque el mérito relativo (ej. ambos quedaron 2°) sea el mismo. Además, si hay un patrón sistemático en el grupo (ej. eventos chicos = solo el núcleo fiel, eventos grandes = todos incluyendo ocasionales), la métrica terminaría reflejando "qué tipo de eventos tiende a jugar cada uno" en vez de "qué tan bien juega". Necesita pensarse con más cuidado antes de implementar: no hay solución obvia y simple.
-
-## Bugs/UX menores identificados, sin resolver
-
-- En LifeTracker: cambiar el menú "..." (3 puntos arriba) por un ícono de tacho de basura a la derecha del bloque del match. Requiere doble confirmación: ambos jugadores tocan "Abortar" desde sus dispositivos para concretar. Ventana de 3 minutos para que el segundo confirme.
-- PJ no debería sumar hasta que la partida se completa (hoy suma con in_progress). Acrónimo se mantiene PJ, leyenda dice "Partidas Jugadas Finalizadas".
-
-## Subir foto custom en Mi Perfil
+### Subir foto custom en Mi Perfil
 
 - Avatar custom que sobreescribe el Pokémon en todos lados
 - Requiere `expo-image-picker` (paquete nativo, requiere rebuild APK)
 - Subir a Supabase Storage en bucket `avatars`
 
-## Racha de últimas 5 partidas (distinto de "mayor racha", que ya existe)
-
-- Última 5 partidas oficiales: pelotitas V (verde) / D (roja)
-- Última 5 partidas totales (oficiales + venganzas): otra fila
-- Mostrar en perfil del jugador
-
-## Quién empieza: ruleta visual + alternancia sugerida
-
-El elegir y persistir quién empieza cada partida ya está implementado (`matches.who_started_participant_id`, LifeTracker). Falta:
-- Animación tipo ruleta (botón "Aleatorizar" que enciende/apaga avatares) en vez de selección directa
-- En partidas siguientes del mismo enfrentamiento, sugerir quién empieza por alternancia
-
-## Sistema de Copas con campeón actual (distinto de Copa Venganza/Súper Copa, que ya existen)
+### Sistema de Copas con campeón actual (distinto de Copa Venganza/Súper Copa, que ya existen)
 
 - Distinción Draft común vs Copa/Torneo
 - Cada Copa (Quito, Cordero, Galicia, etc.) tiene un dibujo propio (assets externos)
@@ -72,21 +53,11 @@ El elegir y persistir quién empieza cada partida ya está implementado (`matche
 - Cuando otro gana la siguiente edición, el dibujo pasa al nuevo campeón
 - Schema: tabla `cups` o campo en eventos para distinguir tipo
 
-## "vs" estilizado
-
-- En PairingDetail header, fuente custom
-- Opciones: Bangers, Bungee, Permanent Marker (Google Fonts vía expo-font)
-
-## Mejor miniatura/icono de la app
-
-- Icon, splash, adaptive-icon
-- Reemplazar los defaults de Expo
-
-## Auto-actualización entre live updates más reactivos
+### Auto-actualización entre live updates más reactivos
 
 Más allá del refresh de 15 seg de PairingsList, ver si vale la pena suscribirse a realtime de matches ahí (hoy solo NewsTicker en LifeTracker hace polling propio; PairingsList sigue en polling de 15s).
 
-## Tabla histórica del grupo con filtros combinables
+### Tabla histórica del grupo con filtros combinables
 
 El Ranking Global ya cubre "stats acumulados de todos los eventos del workspace" (ver PROJECT.md). Falta el sistema de filtros combinables estilo Excel:
 - Por cubo
@@ -99,13 +70,13 @@ El Ranking Global ya cubre "stats acumulados de todos los eventos del workspace"
 - Por tipo de evento (Draft, Copa, Pepidraft)
 - Incluye oficiales + venganzas (a diferencia de la tabla del evento)
 
-## Foro de memes
+### Foro de memes
 
 - Sección por evento con upload de imágenes
 - Reacciones (likes, comentarios)
 - Límites razonables de tamaño
 
-## Sistema "El Vasquito" (empanadas)
+### Sistema "El Vasquito" (empanadas)
 
 - Pantalla de pedido por evento
 - Cada uno marca cuántas de cada gusto quiere
@@ -113,33 +84,23 @@ El Ranking Global ya cubre "stats acumulados de todos los eventos del workspace"
 - Botón "Yo hago el pedido": al que aprieta le aparece pedido completo y total general
 - A los demás: su pedido individual + alias del que recoge
 
-## Votación próximo cubo
+### Votación próximo cubo
 
 - Sección con opciones que carga la gente
 - Cada cubo: nombre, link a CubeCobra, descripción, número de cartas
 - Cada usuario tiene 2 votos: uno de 2 puntos, otro de 1 punto
 - Cierre automático según calendario (día anterior al evento)
 
-## Realtime para todos
+### Realtime para todos
 
 - Ruleta de cubos sincronizada con todos los espectadores (no solo el organizer)
 - Updates en tiempo real de cualquier cambio relevante en la app
 
-## Importación de bitácoras viejas
-
-- Procesar fotos de bitácora histórica (vía OCR o tipeo manual)
-- Insertar eventos, pairings, resultados
-- Solo permite stats agregadas (no DMV histórico - faltan timestamps de life_events)
-
-## Correlación valoración personal vs partidas ganadas (Standings)
+### Correlación valoración personal vs partidas ganadas (Standings)
 
 Scatter plot con avatares como puntos, R² mostrado, aparece en Standings después de las 23:59 hora Argentina. Animación de podio al cierre del torneo también pendiente (el cierre automático del status y la lógica del podio en sí ya están implementados).
 
-## Formato de evento: N grupos + playoffs
-
-BO1/BO2/BO3 y Suizo ya están implementados. Falta la variante de N grupos + playoffs (cantidad de grupos según jugadores), con su propia generación de pairings y criterios de cierre.
-
-## Decoradores temporales sobre avatar
+### Decoradores temporales sobre avatar
 
 - Sistema general de "layers" sobre avatar
 - Activación según condiciones: fecha, clima, evento especial
@@ -150,7 +111,42 @@ BO1/BO2/BO3 y Suizo ya están implementados. Falta la variante de N grupos + pla
   - Navidad, fiestas patrias
   - Otros que se vayan ocurriendo
 
-## Stats Estacionales ("Estad-Estac") — distinto del sistema de Temporadas ya implementado
+### Intro animada al abrir la app
+
+Video corto generado con IA que termine visualmente en el mismo gráfico que hoy es el logo/ícono de WelcomeScreen, como transición hacia el resto de la app. No afecta el ícono real del sistema operativo, que sigue siendo estático.
+
+**A definir**:
+- Si se muestra siempre o solo la primera vez (flag en AsyncStorage)
+- Herramienta de generación del video
+- Peso del archivo en el bundle
+
+### Pestaña de estadísticas de Gigante de Dos Cabezas en el perfil de jugador
+
+Hoy 2HG está totalmente ausente de cualquier stat agregada del jugador, ya que se excluye de `CrossEventStats`. Idea: una pestaña nueva en el perfil de jugador dedicada a stats de 2HG.
+
+**A definir**:
+- Qué datos mostrar: partidas jugadas en equipo, victorias/derrotas, compañeros frecuentes, rivales frecuentes
+- Cómo atribuir stats a ambos integrantes del equipo, dado que en 2HG solo el miembro A tiene fila en `event_participants`
+
+## 🔴 Rojo
+
+### Métrica de eficiencia relativa: Puntos / Puntos disputados
+
+Idea para comparar "calidad" de desempeño entre jugadores que asistieron a distinta cantidad/tamaño de eventos, como indicador secundario (NO de desempate de podio, ya que el podio se define por puntos totales absolutos).
+
+Definición propuesta: "Puntos disputados" = suma de los puntos máximos posibles que el jugador podría haber ganado (como si hubiera salido 1° en TODOS los eventos donde participó, según el escalón de puntos de cada evento). La métrica sería Puntos reales / Puntos disputados.
+
+Analogía de otros deportes: similar a "puntos por carrera" en F1 (promedio, indicador informativo, no define el campeonato que sí usa la suma total).
+
+**Problema de diseño detectado, sin resolver todavía:** esta métrica tiene un sesgo estadístico real hacia el tamaño de los eventos jugados. Quien asiste a eventos GRANDES tiene un denominador más alto, así que perder en un evento grande "cuesta" más puntos posibles perdidos que perder en uno chico, aunque el mérito relativo (ej. ambos quedaron 2°) sea el mismo. Además, si hay un patrón sistemático en el grupo (ej. eventos chicos = solo el núcleo fiel, eventos grandes = todos incluyendo ocasionales), la métrica terminaría reflejando "qué tipo de eventos tiende a jugar cada uno" en vez de "qué tan bien juega". Necesita pensarse con más cuidado antes de implementar: no hay solución obvia y simple.
+
+### Importación de bitácoras viejas
+
+- Procesar fotos de bitácora histórica (vía OCR o tipeo manual)
+- Insertar eventos, pairings, resultados
+- Solo permite stats agregadas (no DMV histórico - faltan timestamps de life_events)
+
+### Stats Estacionales ("Estad-Estac") — distinto del sistema de Temporadas ya implementado
 
 El sistema de Temporadas (ranking de puntos por escalón, automático por estación, con podio de cierre) ya está implementado y cubre el concepto general de "período = estación del año". Esta idea es un diseño DISTINTO y más elaborado, con premios por categoría de stats en vez de ranking de puntos — nada de esto está construido:
 
@@ -188,24 +184,7 @@ El sistema de Temporadas (ranking de puntos por escalón, automático por estaci
 - Cargar data estática de tipos para los 251 Pokémon
 - Frecuencia base de cada tipo en los 251 (data estática)
 
-## Intro animada al abrir la app
-
-Video corto generado con IA que termine visualmente en el mismo gráfico que hoy es el logo/ícono de WelcomeScreen, como transición hacia el resto de la app. No afecta el ícono real del sistema operativo, que sigue siendo estático.
-
-**A definir**:
-- Si se muestra siempre o solo la primera vez (flag en AsyncStorage)
-- Herramienta de generación del video
-- Peso del archivo en el bundle
-
-## Pestaña de estadísticas de Gigante de Dos Cabezas en el perfil de jugador
-
-Hoy 2HG está totalmente ausente de cualquier stat agregada del jugador, ya que se excluye de `CrossEventStats`. Idea: una pestaña nueva en el perfil de jugador dedicada a stats de 2HG.
-
-**A definir**:
-- Qué datos mostrar: partidas jugadas en equipo, victorias/derrotas, compañeros frecuentes, rivales frecuentes
-- Cómo atribuir stats a ambos integrantes del equipo, dado que en 2HG solo el miembro A tiene fila en `event_participants`
-
-## Definir la modalidad de competencia después del draft
+### Definir la modalidad de competencia después del draft
 
 Hoy la modalidad se fija al crear el evento. La idea es crear el evento con cubo, sede y cronómetro, hacer el draft, y elegir la modalidad recién al finalizarlo, cuando ya se sabe cuántos jugadores hay. Ventaja: las validaciones de cantidad (por ejemplo, jugadores divisibles por la cantidad de zonas) pasan a hacerse en el momento de elegir.
 
@@ -215,17 +194,7 @@ Hoy la modalidad se fija al crear el evento. La idea es crear el evento con cubo
 - El cierre automático del draft por cronómetro
 - Los textos de modalidad en las listas
 
-## Copa de perdedores
-
-En la Copa (sólo llaves), los 4 perdedores de los cuartos de final juegan sus propias semis, final y partido por el 3° puesto, con su propio podio. Con entre 8 y 16 jugadores los cuartos siempre tienen 4 cruces, así que siempre hay exactamente 4 perdedores y la cantidad de jugadores no complica este árbol. Queda por definir si ese podio da puntos.
-
-**A evaluar**:
-- Un segundo árbol en el motor de llaves (knockout_slots ya enlaza cada cruce con el siguiente)
-- Podio y puntos de la Copa de perdedores
-- Qué pasa con quienes pierden antes de los cuartos (octavos): no participan
-- Dejar lugar para dos árboles al diseñar el cuadro de llaves de Standings (fase 1c)
-
-## Desacoplar el evento de draft del evento de competencia
+### Desacoplar el evento de draft del evento de competencia
 
 Hoy cada evento es a la vez un draft y una competencia. La idea es separarlos: un evento de draft (cubo, sede, cronómetro, inscriptos y mazos) que puede contener más de una competencia, por ejemplo un todos contra todos + top 4 hoy y una Copa mañana con los mismos mazos, sin volver a draftear. Al crear una competencia se elige quiénes participan de los que drafteron, porque pueden no estar todos. Las estadísticas quedan por draft, con varias competencias adentro. Las venganzas pasarían a ser un bloque aparte, con su propio botón en el evento de draft, sin depender de ninguna competencia. Incluye la idea de definir la modalidad después del draft.
 
@@ -237,11 +206,72 @@ Hoy cada evento es a la vez un draft y una competencia. La idea es separarlos: u
 - La rotación de avatares, que hoy es por evento
 - Cómo conviven con los eventos ya existentes
 
-## Toggle de "otra competencia del mismo draft" al crear un evento
+### Toggle de "otra competencia del mismo draft" al crear un evento
 
 Alternativa más simple y menos radical a "Desacoplar el evento de draft del evento de competencia" (entrada anterior). Al crear un evento nuevo, en configuración avanzada, un toggle "¿Es otra competencia de un mismo draft?". Si está activo, al evento nuevo se le fijan los datos del draft ya hecho (tiempo de draft, cubo) y se omite la parte del draft. La sede NO se fija, porque puede cambiar. A evaluar cuando lleguemos a la sesión de diseño draft/competencia, antes de zonas.
 
-## Copa: segunda oportunidad y Copa desde 4 jugadores
+## ✅ Resueltos
+
+### [RESUELTO] Racha de últimas 5 partidas
+
+**Resuelto.** Pelotitas V/D en el perfil del jugador (`PlayerProfileInEventScreen.tsx`).
+
+
+- Última 5 partidas oficiales: pelotitas V (verde) / D (roja)
+- Última 5 partidas totales (oficiales + venganzas): otra fila
+- Mostrar en perfil del jugador
+
+### [RESUELTO] Modo oscuro
+
+**Resuelto.** `ThemeContext` con modo persistido en AsyncStorage y switch en Settings.
+
+- Modo oscuro (dark mode) para toda la app. Sistema de theme con paleta de colores semánticos, toggle en settings del usuario, refactor de pantallas existentes para usar variables de tema.
+
+### [RESUELTO] Logros/Achievements (por temporada)
+
+**Resuelto.** 23 logros en las migraciones 0121–0141, con pantalla, medallas e indicador de logros sin ver (`seen_at`). El filtro de `stage` de `achv_regular_pairings` quedó en la 0141. La notificación es un badge dentro de la app, no un push.
+
+
+**Nota arquitectónica:** los logros son por TEMPORADA, no globales/eternos — cada temporada tiene su propia colección que los jugadores pueden desbloquear. Son booleanos (se cumplen o no), con alguna forma de notificación/celebración. Mecanismo de visualización a definir más adelante: notificación push, pantalla al entrar al workspace, badge visible para todos aunque la persona no esté usando la app en ese momento, etc.
+
+- Cagarle el invicto a alguien en la fase todos contra todos (solo perdió contra vos)
+- Ídem, pero además fuiste el último partido que jugó
+- Dar vuelta un 0-1 en un BO3
+- Ganar un desempate por 4to puesto y ganar el top4
+- Ganar un desempate por el primer lugar
+- Invicto en todas las rondas suizas
+- Invicto en fase todos contra todos
+- Ganar algún partido porque tu rival se fue (walkover)
+- Ganar por tanta diferencia de vida (a definir el umbral)
+- Partido de más de tanto tiempo (a definir el umbral)
+- Partido de menos de tanto tiempo (a definir el umbral)
+- 3 veces seguidas el mismo tipo de Pokémon (elegido en Life Tracker)
+- 5 veces el mismo tipo de Pokémon
+- Copa oficial: achv_regular_pairings (achv_participant_outcomes) toma todos los pairings de formato distinto de Suizo; filtrar por stage (excluir 'bracket' y 'revenge') antes de habilitar Copas oficiales.
+
+### [RESUELTO] LifeTracker: tacho de basura con doble confirmación
+
+**Resuelto.** `PairingDetailScreen.tsx` + migración 0020, ventana de 3 minutos.
+
+- En LifeTracker: cambiar el menú "..." (3 puntos arriba) por un ícono de tacho de basura a la derecha del bloque del match. Requiere doble confirmación: ambos jugadores tocan "Abortar" desde sus dispositivos para concretar. Ventana de 3 minutos para que el segundo confirme.
+
+### [RESUELTO] Copa de perdedores
+
+**Resuelto.** Cubierta por Copa Consuelo / 2da oportunidad (0135, 0139, 0141), que es un diseño distinto: entran todos los que pierden su primer partido real, no solo los perdedores de cuartos.
+
+
+En la Copa (sólo llaves), los 4 perdedores de los cuartos de final juegan sus propias semis, final y partido por el 3° puesto, con su propio podio. Con entre 8 y 16 jugadores los cuartos siempre tienen 4 cruces, así que siempre hay exactamente 4 perdedores y la cantidad de jugadores no complica este árbol. Queda por definir si ese podio da puntos.
+
+**A evaluar**:
+- Un segundo árbol en el motor de llaves (knockout_slots ya enlaza cada cruce con el siguiente)
+- Podio y puntos de la Copa de perdedores
+- Qué pasa con quienes pierden antes de los cuartos (octavos): no participan
+- Dejar lugar para dos árboles al diseñar el cuadro de llaves de Standings (fase 1c)
+
+### [RESUELTO] Copa: segunda oportunidad y Copa desde 4 jugadores
+
+**Resuelto.** Copa desde 4 jugadores en la 0133; 2da oportunidad en la 0135; Grupos + Copa con Consuelo en la 0139; puntos de Consuelo en la 0141. Pendiente de revisar: Grupos + Copa concluido sin Copa sorteada (ver el último bullet de "Grupos + Copa concluido sin Copa").
+
 
 Dos ideas relacionadas para la Copa: una segunda copa en paralelo para quienes caen en su primer partido, y bajar el mínimo de jugadores de la Copa.
 
@@ -254,3 +284,16 @@ Dos ideas relacionadas para la Copa: una segunda copa en paralelo para quienes c
 - **Ditto en el life tracker:** si un jugador tiene a Ditto, en su life tracker contra otros jugadores el avatar tiene que mostrar el Pokémon del rival que tiene enfrente.
 - **Grupos + Copa concluido sin Copa:** "Dar por concluido" deja el evento en `concluded` sin campeón ni podio (no inventa resultados). Falta definir en B4 qué campeón/podio corresponde si se concluye con la fase de grupos completa o a medias y sin Copa sorteada (p. ej. podio por posición en la zona, o sin podio), y cómo se muestran las tablas por zona de un evento concluido.
 - **B4 (pasaje a la Copa) · pairings compartidos:** `pairings` tiene unique(event_id, participant_a_id, participant_b_id). Un cruce de la Copa entre dos jugadores que ya tienen un pairing `zone` o `interzonal` tiene que REUSAR esa fila SIN cambiarle el `stage` ni su `official_winner_participant_id` / `official_draw`: si no, se rompen la tabla de la zona (`zone_standings`) y el cierre de la fase de grupos (`zones_check_phase_complete`, `zones_phase_completed_at`). Las partidas de la serie de la llave se distinguen por `match_type = 'tiebreak'` y por `event_tiebreak_bracket_matches` (como en la Copa sola: `knockout_materialize` hoy pasa un pairing `revenge` a `bracket`; para pares con `zone`/`interzonal` NO hay que tocar el stage). Los pairings `revenge` entre jugadores de zonas distintas (0138) también pueden volver a cruzarse en la Copa: mismo criterio, la serie corre con `tiebreak` y las partidas viejas de venganza no cuentan.
+
+### [RESUELTO] Formato de evento: N grupos + playoffs
+
+**Resuelto.** Formato `zones_knockout`, migraciones 0136–0141.
+
+
+BO1/BO2/BO3 y Suizo ya están implementados. Falta la variante de N grupos + playoffs (cantidad de grupos según jugadores), con su propia generación de pairings y criterios de cierre.
+
+### [RESUELTO] Ditto en el life tracker
+
+**Resuelto.** `lib/dittoMirror.ts` decide a quién copia cada Ditto (hash estable de partida + participante) y `PlayerAvatar` recibe `mirrorOf`; solo en `LifeTrackerScreen`. Test: `app/scripts/ditto-mirror.test.mjs`.
+
+- **Ditto en el life tracker:** si un jugador tiene a Ditto, en su life tracker contra otros jugadores el avatar tiene que mostrar el Pokémon del rival que tiene enfrente.

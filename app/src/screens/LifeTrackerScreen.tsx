@@ -24,6 +24,14 @@ import {
   formatConcurrentMatchBlockMessage,
 } from '../lib/participantConcurrentMatch';
 import PlayerAvatar from '../components/PlayerAvatar';
+import {
+  DITTO_TRANSFORM_DELAY_MS,
+  dittoMirrorKey,
+  dittoSpritePlan,
+  resolveDittoMirrors,
+  type DittoMirrorSlot,
+  type DittoMirrorTarget,
+} from '../lib/dittoMirror';
 import type { MtgColor } from '../lib/database.types';
 import {
   buildSequentialEmojis,
@@ -65,9 +73,11 @@ type ParticipantRow = {
   is_shiny?: boolean;
   rotated_avatar_id: string | null;
   rotated_avatar:
-    | { storage_path: string; storage_path_shiny?: string | null }
-    | { storage_path: string; storage_path_shiny?: string | null }[]
+    | { storage_path: string; storage_path_shiny?: string | null; name?: string | null }
+    | { storage_path: string; storage_path_shiny?: string | null; name?: string | null }[]
     | null;
+  /** 2HG: Pokémon del miembro B (sólo para decidir si es Ditto). */
+  member_b_rotated_avatar?: { name?: string | null } | { name?: string | null }[] | null;
   users:
     | {
         username: string;
@@ -994,6 +1004,34 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [pairing, setPairing] = useState<PairingRow | null>(null);
   const [pa, setPa] = useState<ParticipantRow | null>(null);
   const [pb, setPb] = useState<ParticipantRow | null>(null);
+  /** Ditto: a qué participante/miembro copia el sprite cada Ditto (clave participantId|a|b). Vacío = nadie copia. */
+  const [dittoMirrors, setDittoMirrors] = useState<Map<string, DittoMirrorTarget>>(() => new Map());
+  // Cartel "¿Quién empieza?" abierto (misma condición que lo muestra, más abajo).
+  const starterPending =
+    turnTrackingEnabled &&
+    whoStartedParticipantId == null &&
+    !!pa &&
+    !!pb &&
+    match?.status === 'in_progress';
+  // Flag de sesión: en esta sesión de la pantalla se llegó a ver el cartel (lo resuelva este u otro dispositivo).
+  // Sólo entonces la partida "arranca ahora" y el Ditto se transforma con animación; si se abre una partida ya
+  // empezada (o sin turnos) no hay cartel y el sprite copiado aparece directo.
+  const [starterSeenThisSession, setStarterSeenThisSession] = useState(false);
+  const [transformDelayElapsed, setTransformDelayElapsed] = useState(false);
+  useEffect(() => {
+    if (starterPending) setStarterSeenThisSession(true);
+  }, [starterPending]);
+  useEffect(() => {
+    if (!starterSeenThisSession || starterPending) return undefined;
+    const id = setTimeout(() => setTransformDelayElapsed(true), DITTO_TRANSFORM_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [starterSeenThisSession, starterPending]);
+  const dittoPlan = dittoSpritePlan({ starterPending, starterSeenThisSession, transformDelayElapsed });
+  const mirrorFor = useCallback(
+    (participantId: string, member: 'a' | 'b') =>
+      dittoPlan.showMirror ? dittoMirrors.get(dittoMirrorKey(participantId, member)) : undefined,
+    [dittoMirrors, dittoPlan.showMirror]
+  );
   const [showShinyAnimA, setShowShinyAnimA] = useState(false);
   const [showShinyAnimB, setShowShinyAnimB] = useState(false);
   const [colorsA, setColorsA] = useState<MtgColor[]>([]);
@@ -1362,7 +1400,8 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           giant_name,
           is_shiny,
           rotated_avatar_id,
-          rotated_avatar:default_avatars!rotated_avatar_id(storage_path, storage_path_shiny),
+          rotated_avatar:default_avatars!rotated_avatar_id(storage_path, storage_path_shiny, name),
+          member_b_rotated_avatar:default_avatars!event_participants_member_b_rotated_avatar_id_fkey(name),
           users!event_participants_user_id_fkey (
             username,
             display_name,
@@ -1465,6 +1504,45 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const pMap = pMapPre;
     setPa(pMap.get(pairingRow.participant_a_id) ?? null);
     setPb(pMap.get(pairingRow.participant_b_id) ?? null);
+
+    // Ditto copia el sprite del rival (sólo acá, en el life tracker). Los avatares custom de los miembros B de 2HG
+    // no vienen en la consulta de participantes, así que se piden aparte.
+    {
+      const memberBUserIds = [rowA?.member_b_user_id, rowB?.member_b_user_id].filter(
+        (x): x is string => typeof x === 'string' && x !== ''
+      );
+      const memberBCustom = new Set<string>();
+      if (memberBUserIds.length > 0) {
+        const { data: mbUsers } = await supabase
+          .from('users')
+          .select('id, custom_avatar_path')
+          .in('id', memberBUserIds);
+        for (const u of (mbUsers ?? []) as { id: string; custom_avatar_path: string | null }[]) {
+          if (u.custom_avatar_path) memberBCustom.add(u.id);
+        }
+      }
+      const slotsOf = (row: ParticipantRow | undefined): DittoMirrorSlot[] => {
+        if (!row) return [];
+        const slots: DittoMirrorSlot[] = [
+          {
+            participantId: row.id,
+            member: 'a',
+            avatarName: relationOne(row.rotated_avatar)?.name ?? null,
+            hasCustomAvatar: !!relationOne(row.users)?.custom_avatar_path,
+          },
+        ];
+        if (row.member_b_user_id) {
+          slots.push({
+            participantId: row.id,
+            member: 'b',
+            avatarName: relationOne(row.member_b_rotated_avatar)?.name ?? null,
+            hasCustomAvatar: memberBCustom.has(row.member_b_user_id),
+          });
+        }
+        return slots;
+      };
+      setDittoMirrors(resolveDittoMirrors(matchId, slotsOf(rowA), slotsOf(rowB)));
+    }
 
     const colorMapA: Record<string, MtgColor[]> = {};
     const colorMapB: Record<string, MtgColor[]> = {};
@@ -2465,11 +2543,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                   <View style={styles.avatarInner}>
                     {isGiantEvent ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                        <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
-                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                        <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB mirrorOf={mirrorFor(p.id, 'b')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
                       </View>
                     ) : (
-                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
                     )}
                   </View>
                 </Animated.View>
@@ -2478,11 +2556,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                   <View style={styles.avatarInner}>
                     {isGiantEvent ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                        <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
-                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                        <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                        {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB mirrorOf={mirrorFor(p.id, 'b')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
                       </View>
                     ) : (
-                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
                     )}
                   </View>
                 </Animated.View>
@@ -2490,11 +2568,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
                 <View style={styles.avatarInner}>
                   {isGiantEvent ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                      <PlayerAvatar userId={p.user_id} participantId={p.id} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
-                      {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
+                      <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="left" showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                      {p.member_b_user_id ? <PlayerAvatar userId={p.member_b_user_id} participantId={p.id} isMemberB mirrorOf={mirrorFor(p.id, 'b')} animateMirror={dittoPlan.animate} size="large" withColorBorder borderWidth={4} giantSide="right" memberColors={isA ? memberBColorsA : memberBColorsB} style={{ marginLeft: -12 }} /> : null}
                     </View>
                   ) : (
-                    <PlayerAvatar userId={p.user_id} participantId={p.id} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
+                    <PlayerAvatar userId={p.user_id} participantId={p.id} mirrorOf={mirrorFor(p.id, 'a')} animateMirror={dittoPlan.animate} size="xlarge" withColorBorder borderWidth={5} showShinyAnimation={t === 'a' ? showShinyAnimA : showShinyAnimB} />
                   )}
                 </View>
               )}
@@ -2632,12 +2710,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     );
   };
 
-  const showStarterModal =
-    turnTrackingEnabled &&
-    whoStartedParticipantId == null &&
-    !!pa &&
-    !!pb &&
-    match?.status === 'in_progress';
+  const showStarterModal = starterPending;
 
   const ayFly = avatarPositionA.current;
   const byFly = avatarPositionB.current;
@@ -2781,11 +2854,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             >
               {isGiantEvent ? (
                 <View style={{ flexDirection: 'row' }}>
-                  <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
-                  {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} participantId={pa.id} isMemberB size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsA} style={{ marginLeft: -8 }} /> : null}
+                  <PlayerAvatar userId={pa.user_id} participantId={pa.id} mirrorOf={mirrorFor(pa.id, 'a')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} giantSide="left" />
+                  {pa.member_b_user_id ? <PlayerAvatar userId={pa.member_b_user_id} participantId={pa.id} isMemberB mirrorOf={mirrorFor(pa.id, 'b')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsA} style={{ marginLeft: -8 }} /> : null}
                 </View>
               ) : (
-                <PlayerAvatar userId={pa.user_id} participantId={pa.id} size="small" withColorBorder borderWidth={3} />
+                <PlayerAvatar userId={pa.user_id} participantId={pa.id} mirrorOf={mirrorFor(pa.id, 'a')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} />
               )}
               <Text style={styles.starterOptionName}>{nameA}</Text>
             </TouchableOpacity>
@@ -2797,11 +2870,11 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             >
               {isGiantEvent ? (
                 <View style={{ flexDirection: 'row' }}>
-                  <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} giantSide="left" />
-                  {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} participantId={pb.id} isMemberB size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsB} style={{ marginLeft: -8 }} /> : null}
+                  <PlayerAvatar userId={pb.user_id} participantId={pb.id} mirrorOf={mirrorFor(pb.id, 'a')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} giantSide="left" />
+                  {pb.member_b_user_id ? <PlayerAvatar userId={pb.member_b_user_id} participantId={pb.id} isMemberB mirrorOf={mirrorFor(pb.id, 'b')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} giantSide="right" memberColors={memberBColorsB} style={{ marginLeft: -8 }} /> : null}
                 </View>
               ) : (
-                <PlayerAvatar userId={pb.user_id} participantId={pb.id} size="small" withColorBorder borderWidth={3} />
+                <PlayerAvatar userId={pb.user_id} participantId={pb.id} mirrorOf={mirrorFor(pb.id, 'a')} animateMirror={dittoPlan.animate} size="small" withColorBorder borderWidth={3} />
               )}
               <Text style={styles.starterOptionName}>{nameB}</Text>
             </TouchableOpacity>
