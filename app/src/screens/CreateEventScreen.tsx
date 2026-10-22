@@ -127,6 +127,7 @@ export default function CreateEventScreen({ route, navigation }: Props) {
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(true);
   const [isOfficial, setIsOfficial] = useState(true);
   const [isTimedDraft, setIsTimedDraft] = useState(false);
+  const [randomSeating, setRandomSeating] = useState(false);
   const [scheduledFor, setScheduledFor] = useState(new Date(Date.now() + 60 * 60 * 1000));
   const [showIosPicker, setShowIosPicker] = useState(false);
   const [cubeId, setCubeId] = useState<string | null>(null);
@@ -246,6 +247,9 @@ export default function CreateEventScreen({ route, navigation }: Props) {
     insertRow.starting_life = startingLife;
     if (isTimedDraft) {
       insertRow.is_timed_draft = true;
+    }
+    if (randomSeating) {
+      insertRow.random_seating_enabled = true;
     }
     const { data, error } = await supabase.from('draft_events').insert(insertRow)
       .select('id')
@@ -542,6 +546,17 @@ export default function CreateEventScreen({ route, navigation }: Props) {
           />
         </View>
         <Switch value={isTimedDraft} onValueChange={setIsTimedDraft} />
+      </View>
+
+      <View style={styles.switchRow}>
+        <View style={styles.switchLabelRow}>
+          <Text style={styles.switchLabelInline}>Sortear lugares en la mesa</Text>
+          <InfoTooltip
+            title="Sortear lugares en la mesa"
+            body="Si está activado, el organizador sortea el lugar de cada inscripto en la mesa y el sentido en que giran los sobres. No se puede arrancar el draft sin ese sorteo."
+          />
+        </View>
+        <Switch value={randomSeating} onValueChange={setRandomSeating} />
       </View>
 
       <Text style={styles.label}>Vida inicial</Text>

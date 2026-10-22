@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
   Alert,
   Animated,
@@ -25,6 +25,9 @@ import {
   clearTimerSession,
 } from '../lib/draftTimerStore';
 import { generateEventPairings } from '../lib/generateEventPairings';
+import { timerVorticesSpinning, timerVorticesVisible, type PackDirection } from '../lib/eventSeating';
+import { fetchSeating } from '../lib/eventSeatingApi';
+import TimerVortices from '../components/TimerVortices';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -190,6 +193,9 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const [draftStartedAt, setDraftStartedAt] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [timerColor, setTimerColor] = useState('blue');
+  // Sorteo de lugares (sólo el sentido del primer sobre): se lee UNA vez al abrir; null = no mostrar nada.
+  const [seatingDirection, setSeatingDirection] = useState<PackDirection | null>(null);
+  const isFocused = useIsFocused();
 
   const pausedRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -275,6 +281,25 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
       }
     })();
   }, [eventId, navigation]);
+
+  // Sorteo de lugares: una sola lectura al abrir el cronómetro (no por tick ni al avanzar de sobre). Si el toggle está OFF,
+  // no hay sorteo vigente o la lectura falla, no se muestra nada y el cronómetro funciona igual que siempre.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase.from('draft_events').select('random_seating_enabled').eq('id', eventId).maybeSingle();
+        if (!(data as { random_seating_enabled?: boolean | null } | null)?.random_seating_enabled) return;
+        const s = await fetchSeating(eventId);
+        if (!cancelled && s && timerVorticesVisible({ phase: 'waiting', enabled: true, seating: s })) setSeatingDirection(s.direction);
+      } catch {
+        // sin sorteo legible: el cronómetro sigue como siempre
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
 
   const stopInterval = useCallback(() => {
     if (intervalRef.current) {
@@ -506,6 +531,13 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
         <TouchableOpacity onPress={handleBack} hitSlop={12}>
           <Text style={styles.backLink}>← Volver</Text>
         </TouchableOpacity>
+        {seatingDirection && timerVorticesVisible({ phase, enabled: true, seating: { is_current: true } }) ? (
+          <TimerVortices
+            firstDirection={seatingDirection}
+            packNumber={packIdx + 1}
+            spinning={timerVorticesSpinning({ phase, paused, focused: isFocused })}
+          />
+        ) : null}
       </View>
 
       <View style={styles.titleBlock}>

@@ -27,6 +27,8 @@ import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel } from '../lib/labels';
 import { formatEventMode } from '../lib/eventMode';
+import { isDraftStarted, seatingBlocksStart, seatingButton } from '../lib/eventSeating';
+import { fetchSeatingState } from '../lib/eventSeatingApi';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
 import { isConcludeAvailable } from '../lib/concludeAvailability';
 import { CUP_CONSUELO_NAME, KNOCKOUT_BRACKET_ORIGIN, cupPrimaName, isKnockoutCupOrigin } from '../lib/knockoutRounds';
@@ -57,6 +59,7 @@ type EventRow = {
   event_type: 'draft' | 'tournament' | 'pepidraft' | 'two_headed_giant';
   competition_format?: 'round_robin' | 'swiss' | 'zones_knockout' | 'knockout' | null;
   topcut_format?: 'bo1' | 'bo3' | null;
+  random_seating_enabled?: boolean | null;
   top_size?: number | null;
   match_format?: 'bo1' | 'bo2' | 'bo3' | null;
   current_swiss_round?: number | null;
@@ -211,6 +214,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  /** Sorteo de lugares publicado (vigente u obsoleto); null si no hay o el toggle está OFF. */
+  const [seatingState, setSeatingState] = useState<{ is_current: boolean } | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
   const [diaryAchievementsUnseen, setDiaryAchievementsUnseen] = useState(false);
   const [myMemberDeclared, setMyMemberDeclared] = useState(false);
@@ -246,7 +251,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, topcut_format, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, topcut_format, random_seating_enabled, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -264,6 +269,12 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
     const e = data as EventRow;
     setEvent(e);
+    // Sorteo de lugares: se refresca junto con el resto del evento (al enfocar la pantalla y con el pull-to-refresh).
+    if (e.random_seating_enabled) {
+      void fetchSeatingState(eventId).then(setSeatingState).catch(() => setSeatingState(null));
+    } else {
+      setSeatingState(null);
+    }
     setTiebreakBanner(null);
     setActiveTiebreakGroup(null);
     setTiebreakVsNav([]);
@@ -1251,8 +1262,10 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     normalizeCompetitionFormat(event?.competition_format) === 'knockout'
       ? knockoutPlayerCountProblem(participantCount)
       : null;
+  // Sortear lugares en la mesa: con el toggle ON no se puede arrancar sin un sorteo vigente (la base lo exige también).
+  const missingSeating = seatingBlocksStart({ enabled: !!event?.random_seating_enabled, seating: seatingState });
   const startDraftDisabled =
-    missingCube || missingVenue || missingParticipants || missingGiantRandomization || knockoutCountProblem != null;
+    missingCube || missingVenue || missingParticipants || missingGiantRandomization || knockoutCountProblem != null || missingSeating;
   const missingStartRequirements: string[] = [];
   if (missingCube) missingStartRequirements.push('seleccionar el cubo');
   if (missingVenue) missingStartRequirements.push('seleccionar la sede');
@@ -1263,6 +1276,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     missingStartRequirements.push('sortear los equipos primero');
   }
   if (knockoutCountProblem) missingStartRequirements.push(knockoutCountProblem);
+  if (missingSeating) missingStartRequirements.push('sortear los lugares en la mesa');
   const startDraftDisabledHint = missingStartRequirements.length
     ? `Falta ${missingStartRequirements.join(', ')}`
     : '';
@@ -1726,6 +1740,27 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
+      {!canManageEvent && event.status !== 'cancelled'
+        ? (() => {
+            // Sortear lugares en la mesa, para quien no gestiona: "Asignación de lugares en la mesa" una vez que existe un
+            // sorteo publicado (el botón no se oculta si quedó obsoleto: la pantalla avisa que se va a volver a sortear).
+            const sb = seatingButton({
+              enabled: !!event.random_seating_enabled,
+              canManage: false,
+              draftStarted: isDraftStarted(event),
+              seating: seatingState,
+            });
+            if (sb.kind === 'none') return null;
+            return (
+              <View style={styles.block}>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('EventSeating', { eventId: event.id })}>
+                  <Text style={styles.secondaryBtnTxt}>{sb.label}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()
+        : null}
+
       {canManageEvent && event.status !== 'cancelled' ? (
         <View style={styles.block}>
               <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
@@ -1753,6 +1788,24 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   <Text style={styles.secondaryBtnTxt}>Re-randomizar gigantes</Text>
                 </TouchableOpacity>
               ) : null}
+              {(() => {
+                // Sortear lugares en la mesa: botón según rol y estado (ver lib/eventSeating.ts).
+                const sb = seatingButton({
+                  enabled: !!event.random_seating_enabled,
+                  canManage: canManageEvent,
+                  draftStarted: isDraftStarted(event),
+                  seating: seatingState,
+                });
+                if (sb.kind === 'none') return null;
+                return (
+                  <TouchableOpacity
+                    style={styles.secondaryBtn}
+                    onPress={() => navigation.navigate('EventSeating', { eventId: event.id })}
+                  >
+                    <Text style={styles.secondaryBtnTxt}>{sb.label}</Text>
+                  </TouchableOpacity>
+                );
+              })()}
               {event.is_timed_draft ? (
                 <TouchableOpacity
                   style={styles.secondaryBtn}

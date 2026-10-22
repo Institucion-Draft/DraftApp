@@ -49,6 +49,7 @@ import ContextFreeColorPickScreen from '../screens/ContextFreeColorPickScreen';
 import ContextFreeLifeTrackerScreen from '../screens/ContextFreeLifeTrackerScreen';
 import ContextFreeMatchResultScreen from '../screens/ContextFreeMatchResultScreen';
 import DraftTimerConfigScreen from '../screens/DraftTimerConfigScreen';
+import EventSeatingScreen from '../screens/EventSeatingScreen';
 import DraftTimerAdvancedScreen from '../screens/DraftTimerAdvancedScreen';
 import DraftTimerSimScreen from '../screens/DraftTimerSimScreen';
 import DraftTimerPreviewScreen from '../screens/DraftTimerPreviewScreen';
@@ -268,6 +269,11 @@ export default function MainStackNavigator() {
         />
         <Stack.Screen name="ContextFreeMatchResult" component={ContextFreeMatchResultScreen} options={{ title: 'Resultado', headerBackTitle: 'Atrás' }} />
         {/* Cronómetro (Config/Advanced/Sim/Preview): siempre en su estilo claro, sin importar el modo global (ver theme/lightLock). */}
+        <Stack.Screen
+          name="EventSeating"
+          component={EventSeatingScreen}
+          options={{ title: 'Lugares en la mesa', headerBackTitle: 'Atrás' }}
+        />
         <Stack.Screen
           name="DraftTimerConfig"
           component={DraftTimerConfigScreen}
