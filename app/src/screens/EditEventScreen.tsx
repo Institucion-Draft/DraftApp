@@ -77,6 +77,7 @@ type FormBaseline = {
   notes: string;
   forceEditOverride: boolean;
   turnTrackingEnabled: boolean;
+  randomSeating: boolean;
   eliminatoriasBo3: boolean;
   swissRoundsManual: number;
   startingLife: number;
@@ -119,6 +120,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
+  const [randomSeating, setRandomSeating] = useState(false);
+  /** El draft ya arrancó: el sorteo de lugares no se puede activar ni desactivar (lo exige también la base). */
+  const [seatingLocked, setSeatingLocked] = useState(false);
   const [isOfficial, setIsOfficial] = useState(true);
   /** Suizo: ON = topcut_format bo3, OFF = bo1. */
   const [eliminatoriasBo3, setEliminatoriasBo3] = useState(true);
@@ -149,7 +153,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       const { data, error } = await supabase
         .from('draft_events')
         .select(
-          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, is_official, competition_format, top_size, match_format, topcut_format, swiss_rounds_manual, starting_life'
+          'id, workspace_id, name, event_type, status, scheduled_for, cube_id, venue_id, notes, turn_tracking_enabled, random_seating_enabled, draft_started_at, is_official, competition_format, top_size, match_format, topcut_format, swiss_rounds_manual, starting_life'
         )
         .eq('id', eventId)
         .maybeSingle();
@@ -186,6 +190,9 @@ export default function EditEventScreen({ route, navigation }: Props) {
       setForceEditOverride(false);
       const tt = !!row.turn_tracking_enabled;
       setTurnTrackingEnabled(tt);
+      const rs = !!(row as { random_seating_enabled?: boolean | null }).random_seating_enabled;
+      setRandomSeating(rs);
+      setSeatingLocked(!!(row as { draft_started_at?: string | null }).draft_started_at);
       const io = row.is_official !== false;
       setIsOfficial(io);
       const rawTf = (row.topcut_format as string | null | undefined) ?? 'bo3';
@@ -257,6 +264,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
         notes: row.notes ?? '',
         forceEditOverride: false,
         turnTrackingEnabled: tt,
+        randomSeating: rs,
         eliminatoriasBo3: elimBo3,
         swissRoundsManual: roundsManual,
         startingLife: sl,
@@ -288,6 +296,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       (notes.trim() || '') !== (baseline.notes.trim() || '') ||
       forceEditOverride !== baseline.forceEditOverride ||
       turnTrackingEnabled !== baseline.turnTrackingEnabled ||
+      randomSeating !== baseline.randomSeating ||
       eliminatoriasBo3 !== baseline.eliminatoriasBo3 ||
       swissRoundsManual !== baseline.swissRoundsManual ||
       startingLife !== baseline.startingLife
@@ -303,6 +312,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
     notes,
     forceEditOverride,
     turnTrackingEnabled,
+    randomSeating,
     eliminatoriasBo3,
     swissRoundsManual,
     startingLife,
@@ -363,6 +373,7 @@ export default function EditEventScreen({ route, navigation }: Props) {
       notes: notes.trim() || null,
       turn_tracking_enabled: turnTrackingEnabled,
     };
+    if (!seatingLocked) patch.random_seating_enabled = randomSeating;
     if (!restricted) {
       patch.event_type = eventType;
       patch.scheduled_for = scheduledFor.toISOString();
@@ -640,6 +651,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
       <View style={styles.turnTrackingRow}>
         <Text style={styles.turnTrackingLabel}>Sistema de turnos con animaciones</Text>
         <Switch value={turnTrackingEnabled} onValueChange={setTurnTrackingEnabled} />
+      </View>
+
+      <View style={styles.turnTrackingRow}>
+        <Text style={styles.turnTrackingLabel}>Sortear lugares en la mesa</Text>
+        <Switch value={randomSeating} onValueChange={setRandomSeating} disabled={seatingLocked} />
       </View>
 
       {!hasDirtyFields ? <Text style={styles.noChangesHint}>No hay cambios para guardar</Text> : null}

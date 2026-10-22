@@ -47,6 +47,7 @@ export type MainStackParamList = {
    */
   /** `refresh`: cualquier valor nuevo fuerza recargar todo el detalle (p. ej. al volver del sorteo de grupos). */
   EventDetail: { eventId: string; workspaceId?: string; refresh?: number };
+  EventSeating: { eventId: string };
   EventDiary: { eventId: string };
   ProDeC: { eventId: string };
   EditEvent: { eventId: string };
