@@ -288,7 +288,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
           ListEmptyComponent={
             !searching ? (
               <Text style={styles.emptyText}>No hay resultados.</Text>
-            ) : null
+            ) : undefined
           }
           keyboardShouldPersistTaps="handled"
         />
