@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ViewInstance } from 'react-native';
 import type { NativeStackScreenProps, NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -829,8 +830,8 @@ const computeSurroundPositions = (count: number, radius = 50) => {
 };
 
 function measureAvatarCenterInScroll(
-  wrap: View | null,
-  content: View | null
+  wrap: ViewInstance | null,
+  content: ViewInstance | null
 ): Promise<{ cx: number; cy: number }> {
   return new Promise((resolve) => {
     if (!wrap || !content) {
@@ -1111,9 +1112,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [specialType, setSpecialType] = useState<'ditto' | 'metronome' | null>(null);
   const [lifeDisplayedA, setLifeDisplayedA] = useState(20);
   const [lifeDisplayedB, setLifeDisplayedB] = useState(20);
-  const scrollContentLayoutRef = useRef<View>(null);
-  const avatarWrapMeasureRefA = useRef<View>(null);
-  const avatarWrapMeasureRefB = useRef<View>(null);
+  const scrollContentLayoutRef = useRef<ViewInstance>(null);
+  const avatarWrapMeasureRefA = useRef<ViewInstance>(null);
+  const avatarWrapMeasureRefB = useRef<ViewInstance>(null);
   const avatarPositionA = useRef(0);
   const avatarPositionB = useRef(0);
   const [tickerPlay, setTickerPlay] = useState<{

@@ -1868,10 +1868,10 @@ export default function PairingsListScreen({ route, navigation }: Props) {
             zonesCupTab ? (
               visibleTiebreakSections.length === 0 ? (
                 <Text style={styles.empty}>Mata-mata en preparación</Text>
-              ) : null
+              ) : undefined
             ) : officialMainListEmpty && tiebreakCardsTotal === 0 ? (
               <Text style={styles.empty}>Todavía no hay enfrentamientos.</Text>
-            ) : null
+            ) : undefined
           }
           ListHeaderComponent={
             visibleTiebreakSections.length > 0 ? (
@@ -2134,7 +2134,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   </Text>
                 ) : null}
               </View>
-            ) : null
+            ) : undefined
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => {
@@ -2181,7 +2181,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
           keyExtractor={(it) => it.pairingId}
           contentContainerStyle={revengeListEmpty ? styles.emptyWrap : styles.listWrap}
           ListEmptyComponent={
-            revengeListEmpty ? <Text style={styles.empty}>Todavía no hay venganzas.</Text> : null
+            revengeListEmpty ? <Text style={styles.empty}>Todavía no hay venganzas.</Text> : undefined
           }
           ListHeaderComponent={
             liveRevengeItems.length > 0 ? (
@@ -2248,7 +2248,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   );
                 })}
               </>
-            ) : null
+            ) : undefined
           }
           ListFooterComponent={
             standaloneRows.length > 0 || hasOtherSwissRevenge ? (
@@ -2414,7 +2414,7 @@ export default function PairingsListScreen({ route, navigation }: Props) {
                   </>
                 ) : null}
               </View>
-            ) : null
+            ) : undefined
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item: group }) => (
