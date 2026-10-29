@@ -8,6 +8,7 @@ import {
   ScrollView,
   Alert,
   Animated,
+  Switch,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
@@ -16,6 +17,15 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
+import {
+  DEFAULT_CUBE_WEIGHT_PARAMS,
+  cubeRouletteProbabilities,
+  formatPercent1,
+  pickWeighted,
+  sanitizeCubeWeightParams,
+  type CubeWeightParams,
+} from '../lib/cubeRouletteWeights';
+import { cubeGridColumns, cubeJumpPath } from '../lib/cubeRouletteGrid';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
@@ -43,6 +53,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const [manualCubePickerForUserId, setManualCubePickerForUserId] = useState<string | null>(null);
   const [selectedCubeId, setSelectedCubeId] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // Probabilidades pesadas (sólo ruleta de cubos). Estado local: no se persiste. La ruleta de jugadores nunca las usa.
+  const [weighted, setWeighted] = useState(true);
+  const [weightParams, setWeightParams] = useState<CubeWeightParams>(DEFAULT_CUBE_WEIGHT_PARAMS);
+  const [cubeHistory, setCubeHistory] = useState<string[]>([]);
+  const [gridWidth, setGridWidth] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
 
   useLayoutEffect(() => {
@@ -56,7 +71,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
 
   const load = useCallback(async () => {
     const [eventRes, meRes] = await Promise.all([
-      supabase.from('draft_events').select('workspace_id').eq('id', eventId).maybeSingle(),
+      supabase.from('draft_events').select('workspace_id, scheduled_for').eq('id', eventId).maybeSingle(),
       supabase.auth.getUser(),
     ]);
     if (eventRes.error || !eventRes.data) {
@@ -66,8 +81,9 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     const wsId = eventRes.data.workspace_id as string;
     setWorkspaceId(wsId);
     const currentUserId = meRes.data.user?.id ?? null;
+    const eventScheduledFor = (eventRes.data as { scheduled_for?: string | null }).scheduled_for ?? null;
 
-    const [roleRes, cubesRes, playersRes] = await Promise.all([
+    const [roleRes, cubesRes, playersRes, configRes, historyRes] = await Promise.all([
       currentUserId
         ? supabase
             .from('workspace_members')
@@ -82,6 +98,28 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         .select('user_id, users!event_participants_user_id_fkey (display_name, username)')
         .eq('event_id', eventId)
         .eq('role', 'player'),
+      supabase
+        .from('workspace_cube_roulette_config')
+        .select('m, k, tau_min, accumulation_mode')
+        .eq('workspace_id', wsId)
+        .maybeSingle(),
+      // Historial para el peso: eventos oficiales, no borrados ni cancelados, del workspace, que ya arrancaron el draft
+      // (draft_started_at o estado distinto de 'scheduled', como isDraftStarted) con cubo registrado, anteriores a éste.
+      // Cuenta el cubo registrado en el evento (cube_id), no lo que salió en la ruleta. Del más reciente al más antiguo.
+      (() => {
+        let q = supabase
+          .from('draft_events')
+          .select('cube_id')
+          .eq('workspace_id', wsId)
+          .neq('id', eventId)
+          .eq('is_official', true)
+          .is('deleted_at', null)
+          .neq('status', 'cancelled')
+          .not('cube_id', 'is', null)
+          .or('draft_started_at.not.is.null,status.neq.scheduled');
+        if (eventScheduledFor) q = q.lte('scheduled_for', eventScheduledFor);
+        return q.order('scheduled_for', { ascending: false }).order('created_at', { ascending: false }).limit(200);
+      })(),
     ]);
 
     if (roleRes.error) {
@@ -96,6 +134,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     }
     setCubes((cubesRes.data ?? []) as CubeRow[]);
     setPlayers((playersRes.data ?? []) as PlayerRow[]);
+    // Sin fila, o error al leer el historial/la config: se usan los defaults y/o un historial vacío (todo uniforme).
+    setWeightParams(sanitizeCubeWeightParams(configRes.error ? null : configRes.data));
+    setCubeHistory(
+      historyRes.error ? [] : ((historyRes.data ?? []) as { cube_id: string | null }[]).flatMap((r) => (r.cube_id ? [r.cube_id] : []))
+    );
     setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
   }, [eventId]);
 
@@ -116,6 +159,23 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       { key: 'everyone_smokes', label: 'Todos fuman', kind: 'everyone_smokes' as const },
     ],
     [cubes]
+  );
+
+  // Probabilidades de la ruleta de cubos (cubos + "Jugador elige" + "Todos fuman"). Se recalculan sólo si cambia el
+  // toggle, los cubos, el historial o los parámetros: volver a tirar tras "Todos fuman" usa las mismas.
+  const cubeProbs = useMemo(
+    () =>
+      cubeRouletteProbabilities(
+        cubes.map((c) => c.id),
+        cubeHistory,
+        weightParams,
+        weighted
+      ),
+    [cubes, cubeHistory, weightParams, weighted]
+  );
+  const cubeOptionProbs = useMemo(
+    () => cubeOptions.map((o) => (o.kind === 'cube' ? cubeProbs.cubes[o.key] ?? 0 : cubeProbs.fixed)),
+    [cubeOptions, cubeProbs]
   );
 
   const playerOptions = useMemo(
@@ -185,10 +245,21 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     setManualCubePickerForUserId(null);
     setSelectedCubeId(null);
 
-    const ticks = 14 + Math.floor(Math.random() * 12);
+    let ticks = 14 + Math.floor(Math.random() * 12);
+    let target = -1;
+    if (rouletteType === 'cubes') {
+      // El resultado se sortea primero (uniforme si el toggle está apagado, ponderado si no) y la animación aterriza ahí.
+      target = weighted
+        ? pickWeighted(cubeOptionProbs, Math.random())
+        : Math.floor(Math.random() * options.length);
+      ticks += (((target - ticks) % options.length) + options.length) % options.length;
+    }
+    // Ruleta de cubos: saltos pseudoaleatorios entre tarjetas que terminan en el resultado ya sorteado (sólo estético).
+    // Ruleta de jugadores: recorrido ordenado de siempre.
+    const path = rouletteType === 'cubes' ? cubeJumpPath(options.length, ticks, target, highlightIndex) : null;
     let idx = 0;
     for (let i = 0; i < ticks; i += 1) {
-      idx = (idx + 1) % options.length;
+      idx = path ? path[i] : (idx + 1) % options.length;
       setHighlightIndex(idx);
       animatePulse();
       await new Promise((r) => setTimeout(r, 45 + i * 8));
@@ -290,6 +361,17 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       <Text style={styles.title}>
         {rouletteType === 'cubes' ? 'Ruleta de cubos' : 'Ruleta de jugadores'}
       </Text>
+      {rouletteType === 'cubes' && !resultCubeName ? (
+        <View style={styles.weightRow}>
+          <Text style={styles.weightLabel}>Probabilidades pesadas</Text>
+          <Switch
+            value={weighted}
+            onValueChange={setWeighted}
+            disabled={spinning}
+            trackColor={{ false: colors.border, true: colors.accent }}
+          />
+        </View>
+      ) : null}
       {resultCubeName ? (
         <View style={styles.resultBlock}>
           <Text style={styles.result}>Cubo seleccionado: {resultCubeName}</Text>
@@ -305,7 +387,36 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         </View>
       ) : (
         <>
-          {options.map((o, idx) => (
+          {rouletteType === 'cubes' ? (
+            <View style={styles.grid} onLayout={(e) => setGridWidth(e.nativeEvent.layout.width)}>
+              {options.map((o, idx) => {
+                const cols = cubeGridColumns(options.length);
+                const dense = cols === 4;
+                const cardW = gridWidth > 0 ? (gridWidth - GRID_GAP * (cols - 1)) / cols : 0;
+                return (
+                  <Animated.View
+                    key={o.key}
+                    style={[
+                      styles.card,
+                      dense && styles.cardDense,
+                      o.kind !== 'cube' && styles.cardSpecial,
+                      { width: cardW },
+                      highlightIndex === idx && styles.optionActive,
+                      highlightIndex === idx ? { transform: [{ scale: pulse }] } : null,
+                    ]}
+                  >
+                    <Text style={[styles.cardTxt, dense && styles.cardTxtDense]} numberOfLines={2} ellipsizeMode="tail">
+                      {o.label}
+                    </Text>
+                    {weighted ? (
+                      <Text style={[styles.cardPct, dense && styles.cardPctDense]}>{formatPercent1(cubeOptionProbs[idx] ?? 0)}</Text>
+                    ) : null}
+                  </Animated.View>
+                );
+              })}
+            </View>
+          ) : (
+            options.map((o, idx) => (
             <Animated.View
               key={o.key}
               style={[
@@ -316,7 +427,8 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
             >
               <Text style={styles.optionTxt}>{o.label}</Text>
             </Animated.View>
-          ))}
+            ))
+          )}
 
           <TouchableOpacity
             style={[styles.spinBtn, spinning && styles.spinDisabled]}
@@ -359,6 +471,8 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   );
 }
 
+const GRID_GAP = 8;
+
 const createStyles = (c: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
@@ -366,7 +480,17 @@ const createStyles = (c: ThemeColors) =>
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background, padding: 24 },
     denied: { color: c.textSecondary, fontSize: 15, textAlign: 'center' },
     title: { fontSize: 22, fontWeight: '700', color: c.text, marginBottom: 14 },
-    option: { borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: c.card },
+    option: { borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: c.card, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    weightRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+    weightLabel: { color: c.text, fontWeight: '600', fontSize: 15 },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },
+    card: { height: 76, borderWidth: 1, borderColor: c.border, borderRadius: 12, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: c.card, alignItems: 'center', justifyContent: 'center' },
+    cardDense: { height: 66, borderRadius: 10 },
+    cardSpecial: { borderStyle: 'dashed', borderColor: c.textSecondary },
+    cardTxt: { color: c.text, fontWeight: '600', fontSize: 13, textAlign: 'center' },
+    cardTxtDense: { fontSize: 11 },
+    cardPct: { color: c.textSecondary, fontWeight: '600', fontSize: 12, marginTop: 2 },
+    cardPctDense: { fontSize: 10 },
     optionActive: { borderColor: c.accent, backgroundColor: c.status.info.subtle },
     optionTxt: { color: c.text, fontWeight: '600' },
     spinBtn: { backgroundColor: c.accent, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
