@@ -12,6 +12,19 @@ export type EventStatus =
   | 'cancelled'
   | 'concluded';
 
+/** Fila de public.users (parcial). */
+export type User = {
+  id: string;
+  username: string;
+  display_name: string;
+  custom_avatar_path: string | null;
+  default_avatar_id: string | null;
+  /** Cumpleaños (YYYY-MM-DD). Lo carga el equipo; el usuario no puede editarlo (trigger users_guard_birthday, 0145). */
+  birthday: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Workspace = {
   id: string;
   name: string;
