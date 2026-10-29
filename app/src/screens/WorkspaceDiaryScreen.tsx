@@ -20,6 +20,7 @@ import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
+import { nameWithCake } from '../lib/birthday';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -34,8 +35,8 @@ type DiaryRow = {
   content: string;
   created_at: string;
   users:
-    | { display_name: string; username: string }
-    | { display_name: string; username: string }[]
+    | { display_name: string; username: string; birthday: string | null }
+    | { display_name: string; username: string; birthday: string | null }[]
     | null;
 };
 
@@ -86,7 +87,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
         kind,
         content,
         created_at,
-        users!workspace_diary_entries_user_id_fkey (display_name, username)
+        users!workspace_diary_entries_user_id_fkey (display_name, username, birthday)
       `
       )
       .eq('workspace_id', workspaceId)
@@ -179,7 +180,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
           <View style={styles.cardHeaderText}>
             <View style={styles.cardTitleRow}>
               <Text style={styles.cardAuthor} numberOfLines={1}>
-                {author}
+                {nameWithCake(author, u?.birthday)}
               </Text>
               <Text style={styles.cardTypeIcon}>{typeIcon}</Text>
             </View>

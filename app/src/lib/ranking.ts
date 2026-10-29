@@ -45,6 +45,8 @@ export function prodecByUserFromRows(rows: PointsWithProDeCRow[]): Map<string, P
 export type RankingRow = {
   userId: string;
   name: string;
+  /** Cumpleaños (YYYY-MM-DD) para mostrar 🎂 junto al nombre el día; null si no está cargado. */
+  birthday: string | null;
   points: number;
   completedEvents: number;
   championships: number;
@@ -83,14 +85,28 @@ function sortKey(v: number | null): number {
   return v ?? -1;
 }
 
-export async function fetchUserNames(userIds: string[]): Promise<Record<string, string>> {
+/** Nombres y cumpleaños de los usuarios, en una sola consulta. */
+export async function fetchUserNameInfo(
+  userIds: string[]
+): Promise<{ names: Record<string, string>; birthdays: Record<string, string | null> }> {
   const names: Record<string, string> = {};
-  if (userIds.length === 0) return names;
-  const res = await supabase.from('users').select('id, display_name, username').in('id', userIds);
-  for (const u of (res.data ?? []) as { id: string; display_name: string | null; username: string | null }[]) {
+  const birthdays: Record<string, string | null> = {};
+  if (userIds.length === 0) return { names, birthdays };
+  const res = await supabase.from('users').select('id, display_name, username, birthday').in('id', userIds);
+  for (const u of (res.data ?? []) as {
+    id: string;
+    display_name: string | null;
+    username: string | null;
+    birthday: string | null;
+  }[]) {
     names[u.id] = u.display_name || u.username || 'Jugador';
+    birthdays[u.id] = u.birthday;
   }
-  return names;
+  return { names, birthdays };
+}
+
+export async function fetchUserNames(userIds: string[]): Promise<Record<string, string>> {
+  return (await fetchUserNameInfo(userIds)).names;
 }
 
 /** Una fila por jugador de `stats`, ordenadas: puntos, copas, WRE, WRP, WRV, nombre. */
@@ -99,7 +115,8 @@ export function buildRankingRows(
   pointsByUser: Map<string, number>,
   medalsByUser: Map<string, Medals>,
   namesByUser: Record<string, string>,
-  prodecByUser: Map<string, ProDeCTotals>
+  prodecByUser: Map<string, ProDeCTotals>,
+  birthdaysByUser: Record<string, string | null> = {}
 ): RankingRow[] {
   const rows: RankingRow[] = stats.map((s) => {
     const medals = medalsByUser.get(s.user_id);
@@ -107,6 +124,7 @@ export function buildRankingRows(
     return {
       userId: s.user_id,
       name: namesByUser[s.user_id] ?? 'Jugador',
+      birthday: birthdaysByUser[s.user_id] ?? null,
       points: pointsByUser.get(s.user_id) ?? 0,
       completedEvents: s.completed_events_as_player,
       championships: medals?.first ?? 0,

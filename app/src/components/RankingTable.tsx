@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import PlayerAvatar from './PlayerAvatar';
 import ProDeCManaC from './ProDeCManaC';
+import { nameWithCake } from '../lib/birthday';
 import { formatPointsPerEvent, type RankingRow } from '../lib/ranking';
 import { useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -75,7 +76,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
                 <View style={[styles.nameCol, styles.nameCell]}>
                   <PlayerAvatar userId={r.userId} size="tiny" withColorBorder={false} outsideEvent style={styles.avatar} />
                   <Text style={styles.nameTxt} numberOfLines={1}>
-                    {r.name}
+                    {nameWithCake(r.name, r.birthday)}
                   </Text>
                 </View>
                 <Text style={[styles.cell, styles.statCol, styles.pointsTxt]}>{r.points}</Text>

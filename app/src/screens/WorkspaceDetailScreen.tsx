@@ -25,6 +25,7 @@ import { hasUnseenAchievements, syncWorkspaceAchievements } from '../lib/achieve
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
 import { maybeShowGen3Notice } from '../lib/gen3Notice';
 import { formatEventMode } from '../lib/eventMode';
+import { nameWithCake } from '../lib/birthday';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -40,6 +41,7 @@ type WorkspaceRow = {
 type UserEmbed = {
   username: string;
   display_name: string;
+  birthday: string | null;
   custom_avatar_path: string | null;
   default_avatars: { storage_path: string } | { storage_path: string }[] | null;
 };
@@ -127,6 +129,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         users!workspace_members_user_id_fkey (
           username,
           display_name,
+          birthday,
           custom_avatar_path,
           default_avatars (storage_path)
         )
@@ -516,7 +519,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
               style={{ marginRight: 12 }}
             />
             <View style={styles.memberBody}>
-              <Text style={styles.memberName}>{label}</Text>
+              <Text style={styles.memberName}>{nameWithCake(label, u?.birthday)}</Text>
               <Text style={styles.memberRole}>
                 {m.role === 'organizer' ? 'Organizador' : 'Miembro'}
               </Text>

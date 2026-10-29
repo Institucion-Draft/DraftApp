@@ -23,6 +23,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import UnseenDot from '../components/UnseenDot';
 import { hasUnseenEventAchievements } from '../lib/achievements';
 import type { MtgColor } from '../lib/database.types';
+import { BIRTHDAY_EMOJI, isBirthdayToday, nameWithCake } from '../lib/birthday';
 import { MTG_COLOR_HEX } from '../components/ColorFlag';
 import ProDeCManaC from '../components/ProDeCManaC';
 import { getEventStatusLabel } from '../lib/labels';
@@ -110,6 +111,7 @@ type ParticipantView = {
         username: string;
         display_name: string;
         gender?: Gender | null;
+        birthday?: string | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }
@@ -117,6 +119,7 @@ type ParticipantView = {
         username: string;
         display_name: string;
         gender?: Gender | null;
+        birthday?: string | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }[]
@@ -209,6 +212,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const { eventId, workspaceId: routeWorkspaceId } = route.params;
   const [event, setEvent] = useState<EventRow | null>(null);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
+  const [memberBBirthdays, setMemberBBirthdays] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOrganizer, setIsOrganizer] = useState(false);
@@ -323,6 +327,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             username,
             display_name,
             gender,
+            birthday,
             custom_avatar_path,
             default_avatars (storage_path)
           )
@@ -359,6 +364,19 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     // a user has multiple default_avatars entries.
     const seen = new Set<string>();
     setParticipants(p.filter((ep) => (seen.has(ep.id) ? false : (seen.add(ep.id), true))));
+
+    // Gigante de Dos Cabezas: el miembro B no viene en el embed de la fila; su cumpleaños (🎂 en la lista) se pide aparte.
+    const memberBBirthdayIds = Array.from(new Set(p.map((ep) => ep.member_b_user_id).filter((id): id is string => !!id)));
+    if (memberBBirthdayIds.length > 0) {
+      const bRes = await supabase.from('users').select('id, birthday').in('id', memberBBirthdayIds);
+      setMemberBBirthdays(
+        bRes.error
+          ? {}
+          : Object.fromEntries(((bRes.data ?? []) as { id: string; birthday: string | null }[]).map((u) => [u.id, u.birthday]))
+      );
+    } else {
+      setMemberBBirthdays({});
+    }
 
     if (e.status === 'playing' && e.competition_format === 'round_robin' && e.top_size === 4) {
       const rrPairingsRes = await supabase
@@ -2027,7 +2045,11 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         {event.event_type === 'two_headed_giant' && !!event.giant_randomization_done
           ? participants.map((p) => {
               const u = relationOne(p.users);
-              const giantLabel = p.giant_name ?? (u?.display_name || u?.username || 'Gigante');
+              const giantName = p.giant_name ?? (u?.display_name || u?.username || 'Gigante');
+              const giantBirthday =
+                isBirthdayToday(u?.birthday) ||
+                (!!p.member_b_user_id && isBirthdayToday(memberBBirthdays[p.member_b_user_id]));
+              const giantLabel = giantBirthday ? `${giantName} ${BIRTHDAY_EMOJI}` : giantName;
               const rowHasPosta =
                 event.event_organizer_user_id === p.user_id ||
                 event.event_organizer_user_id === p.member_b_user_id;
@@ -2108,7 +2130,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   />
                   <View style={styles.participantBody}>
                     <View style={styles.participantNameRow}>
-                      <Text style={styles.participantName}>{uname}</Text>
+                      <Text style={styles.participantName}>{nameWithCake(uname, u?.birthday)}</Text>
                       {event.champion_user_id && p.user_id === event.champion_user_id ? (
                         <View style={styles.championBadge}>
                           <Text style={styles.championBadgeText}>
