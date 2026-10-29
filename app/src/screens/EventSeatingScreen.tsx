@@ -5,6 +5,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import SeatingTable, { type SeatOccupant } from '../components/SeatingTable';
+import { preloadAvatars } from '../components/PlayerAvatar';
 import {
   isDraftStarted,
   rouletteDelays,
@@ -29,6 +30,14 @@ import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'EventSeating'>;
+
+/** Espera máxima por la precarga de avatares antes de arrancar la ruleta. */
+const PRELOAD_TIMEOUT_MS = 2000;
+/** Final de la ruleta: fade out de todos, mesa vacía, y fade in escalonado por lugar. */
+const FADE_OUT_MS = 400;
+const EMPTY_HOLD_MS = 350;
+const FADE_IN_MS = 300;
+const FADE_IN_STAGGER_MS = 120;
 
 type EventInfo = {
   name: string;
@@ -71,13 +80,26 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
   const publishingRef = useRef(false);
   const toPublishRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Parpadeo de la ruleta: se guarda el loop para poder frenarlo y terminar con un fundido a opacidad 1.
+  const blinkLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  // Fade out / fade in del final de la ruleta, y la opacidad de cada lugar (índice = lugar - 1).
+  const revealAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const seatFadesRef = useRef<Animated.Value[]>([]);
+  // false una vez desmontada la pantalla: frena la secuencia de onDraw (preload y callbacks de animación).
+  const aliveRef = useRef(true);
+  // Espejo de `animating` para que load() (que no depende de él) sepa si hay una ruleta en curso.
+  const animatingRef = useRef(false);
+  // Generación de load(): sólo la última llamada puede escribir en el estado.
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     const { data: ev, error } = await supabase
       .from('draft_events')
       .select('name, workspace_id, draft_started_at, status, random_seating_enabled, event_organizer_user_id')
       .eq('id', eventId)
       .maybeSingle();
+    if (seq !== loadSeq.current) return;
     if (error || !ev) {
       Alert.alert('Error', 'No se pudo cargar el evento.');
       return;
@@ -86,6 +108,7 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     setEvent(info);
 
     const me = (await supabase.auth.getUser()).data.user?.id ?? null;
+    if (seq !== loadSeq.current) return;
     let manage = false;
     if (me) {
       if (info.event_organizer_user_id === me) manage = true;
@@ -97,6 +120,7 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
           .eq('user_id', me)
           .maybeSingle();
         manage = roleRes.data?.role === 'organizer';
+        if (seq !== loadSeq.current) return;
       }
     }
     setCanManage(manage);
@@ -107,15 +131,19 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
         fetchSeating(eventId),
         manage ? fetchPendingSeating(eventId) : Promise.resolve(null),
       ]);
+      if (seq !== loadSeq.current) return;
       setParticipants(rows);
       setCurrent(cur);
-      setPending(pend);
+      // Con una ruleta o una publicación en curso el pendiente lo maneja onDraw / publish: pisarlo dispararía un segundo publish().
+      if (!animatingRef.current && !publishingRef.current) setPending(pend);
       const userIds = [
         ...rows.flatMap((r) => [r.user_id, r.member_b_user_id ?? '']),
         ...(cur?.seats ?? []).map((s) => s.user_id),
         ...(pend?.seats ?? []).map((s) => s.user_id),
       ];
-      setNames(await fetchDisplayNames(userIds));
+      const nameMap = await fetchDisplayNames(userIds);
+      if (seq !== loadSeq.current) return;
+      setNames(nameMap);
     } catch (e) {
       if (__DEV__) console.warn('[seating] carga', e);
     }
@@ -155,6 +183,9 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     try {
       await publishSeating(eventId);
       toPublishRef.current = false;
+      // El registro vigente entra al estado en el mismo lote que se suelta el pendiente: ningún render intermedio con la mesa vacía o vieja.
+      const cur = await fetchSeating(eventId);
+      if (cur) setCurrent(cur);
       setPending(null);
       setDrawn(null);
       await load();
@@ -172,8 +203,12 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
 
   // Salir de la pantalla durante la animación también publica.
   useEffect(() => {
+    aliveRef.current = true;
     return () => {
+      aliveRef.current = false;
       timersRef.current.forEach(clearTimeout);
+      blinkLoopRef.current?.stop();
+      revealAnimRef.current?.stop();
       if (toPublishRef.current && !publishingRef.current) {
         toPublishRef.current = false;
         void publishSeating(eventId).catch(() => undefined);
@@ -203,12 +238,49 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
 
   const startBlink = () => {
     blink.setValue(1);
-    Animated.loop(
+    blinkLoopRef.current?.stop();
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(blink, { toValue: 0.3, duration: 130, useNativeDriver: true }),
         Animated.timing(blink, { toValue: 1, duration: 130, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    blinkLoopRef.current = loop;
+    loop.start();
+  };
+
+  // Final de la ruleta: el parpadeo se corta junto con el fade out de todos los lugares; queda la mesa vacía un instante
+  // (ya con las posiciones definitivas montadas, invisibles) y los definitivos entran por fade in, lugar por lugar.
+  // Recién terminado el fade in se suelta `animating` y se publica: el render del estado final es idéntico al que ya se ve.
+  const revealFinal = (steps: number, fades: Animated.Value[]) => {
+    blinkLoopRef.current?.stop();
+    blinkLoopRef.current = null;
+    const fadeOut = Animated.parallel([
+      Animated.timing(blink, { toValue: 1, duration: 120, useNativeDriver: true }),
+      ...fades.map((v) => Animated.timing(v, { toValue: 0, duration: FADE_OUT_MS, useNativeDriver: true })),
+    ]);
+    revealAnimRef.current = fadeOut;
+    fadeOut.start(({ finished }) => {
+      if (!finished || !aliveRef.current) return;
+      setRouletteStep(steps);
+      timersRef.current.push(
+        setTimeout(() => {
+          const fadeIn = Animated.stagger(
+            FADE_IN_STAGGER_MS,
+            fades.map((v) => Animated.timing(v, { toValue: 1, duration: FADE_IN_MS, useNativeDriver: true }))
+          );
+          revealAnimRef.current = fadeIn;
+          fadeIn.start(({ finished: done }) => {
+            if (!done || !aliveRef.current) return;
+            revealAnimRef.current = null;
+            animatingRef.current = false;
+            setAnimating(false);
+            setBusy(false);
+            void publish();
+          });
+        }, EMPTY_HOLD_MS)
+      );
+    });
   };
 
   const onDraw = async () => {
@@ -224,29 +296,33 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     }
     // A partir de acá el sorteo existe en el servidor como pendiente: pase lo que pase se publica.
     toPublishRef.current = true;
+    const fades = Array.from({ length: result.n }, () => new Animated.Value(1));
+    seatFadesRef.current = fades;
     setDrawn(result);
     setPending(result);
     if (result.warning) Alert.alert('Aviso', result.warning);
 
-    const delays = rouletteDelays(3000);
+    // Frena fuerte hacia el final y el último paso intermedio dura claramente más (suspenso antes del fade out).
+    const base = rouletteDelays(2800, 70, 1.22);
+    const delays = base.map((d, i) => (i === base.length - 1 ? Math.round(d * 1.8) : d));
     setRouletteSteps(delays.length);
     setRouletteStep(0);
+    animatingRef.current = true;
     setAnimating(true);
+    // Los avatares se precargan antes de arrancar: así cada paso resuelve nombre y avatar sincrónicamente desde el caché.
+    await preloadAvatars(
+      result.seats.map((s) => ({ participantId: s.participant_id, userId: s.user_id, member: s.member })),
+      PRELOAD_TIMEOUT_MS
+    );
+    if (!aliveRef.current) return;
     startBlink();
     let acc = 0;
     delays.forEach((d, i) => {
       acc += d;
-      timersRef.current.push(setTimeout(() => setRouletteStep(i + 1), acc));
+      // El último paso mostrado es el anterior al definitivo: de ahí se pasa al fade out, no a las posiciones finales.
+      if (i < delays.length - 1) timersRef.current.push(setTimeout(() => setRouletteStep(i + 1), acc));
     });
-    timersRef.current.push(
-      setTimeout(() => {
-        blink.stopAnimation();
-        blink.setValue(1);
-        setAnimating(false);
-        setBusy(false);
-        void publish();
-      }, acc + 250)
-    );
+    timersRef.current.push(setTimeout(() => revealFinal(delays.length, fades), acc));
   };
 
   useLayoutEffect(() => {
@@ -276,7 +352,8 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
   let direction: PackDirection | null = null;
   if (mode === 'animating' && drawn) {
     n = drawn.n;
-    direction = null;
+    // La dirección ya se ve durante la ruleta: así vórtices y flechas no aparecen de golpe al asentarse.
+    direction = drawn.direction;
     occupants = occupantsFrom(drawn.seats, (s) => rouletteSeat(s.seat, drawn.n, rouletteStep, rouletteSteps));
   } else if (mode === 'pending' && pending) {
     n = pending.n;
@@ -307,7 +384,16 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
             {n < 2 ? (
               <Text style={styles.muted}>Se necesitan al menos 2 inscriptos para sortear los lugares.</Text>
             ) : (
-              <SeatingTable eventId={eventId} n={n} occupants={occupants} direction={direction} blink={blink} active={isFocused} />
+              <SeatingTable
+                eventId={eventId}
+                n={n}
+                occupants={occupants}
+                direction={direction}
+                blink={blink}
+                seatFade={seatFadesRef.current}
+                lite={mode === 'animating' && rouletteStep < rouletteSteps}
+                active={isFocused}
+              />
             )}
           </>
         )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import PlayerAvatar from './PlayerAvatar';
+import PlayerAvatar, { RouletteAvatar } from './PlayerAvatar';
 import { mateDirection, packDirection, seatSlots, tableLayout, type PackDirection, type SeatSlot } from '../lib/eventSeating';
 import { circuitArrows, scatterEmojis, tableBodySize } from '../lib/seatingLayout';
 import { useTheme } from '../theme';
@@ -18,6 +18,10 @@ type Props = {
   direction: PackDirection | null;
   /** Opacidad de los avatares durante la ruleta. */
   blink?: Animated.Value;
+  /** Opacidad de cada lugar (índice = lugar - 1), avatar y nombre juntos: fade out / fade in del final de la ruleta. */
+  seatFade?: Animated.Value[];
+  /** Ruleta en curso: los avatares son livianos y salen sincrónicamente del caché, así cambian junto con el nombre. */
+  lite?: boolean;
   /** Los vórtices giran mientras sea true (la pantalla lo pone en false al perder el foco). */
   active?: boolean;
 };
@@ -112,6 +116,15 @@ function CircuitOverlay({ width, height, direction, color }: { width: number; he
   );
 }
 
+/** Aparece con un fundido corto al montarse (los vórtices y las flechas entran sin "pop" al empezar el sorteo). */
+function FadeIn({ children, style }: { children: React.ReactNode; style?: React.ComponentProps<typeof Animated.View>['style'] }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(opacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+  }, [opacity]);
+  return <Animated.View style={[style, { opacity }]}>{children}</Animated.View>;
+}
+
 const PAD_H = 40;
 const PAD_V = 36;
 
@@ -120,7 +133,7 @@ const PAD_V = 36;
  * sentido horario desde la cabecera de arriba. Sin scroll horizontal (el ancho es acotado); el alto crece con los
  * lugares de cada lado (lo absorbe el scroll vertical de la pantalla).
  */
-export default function SeatingTable({ eventId, n, occupants, direction, blink, active = true }: Props) {
+export default function SeatingTable({ eventId, n, occupants, direction, blink, seatFade, lite = false, active = true }: Props) {
   const { colors, mode } = useTheme();
   const pal = TABLE[mode === 'dark' ? 'dark' : 'light'];
   const { width: winW } = useWindowDimensions();
@@ -142,30 +155,42 @@ export default function SeatingTable({ eventId, n, occupants, direction, blink, 
   const renderSeat = (slot: SeatSlot | undefined) => {
     if (!slot) return null;
     const occ = occupants.get(slot.seat);
+    const fade = seatFade?.[slot.seat - 1];
     return (
       <View key={slot.seat} style={[styles.cell, { width: cellW }]}>
         <View style={[styles.seat, { width: sq, height: sq }]}>
-          {occ ? (
-            <Animated.View style={blink ? { opacity: blink } : undefined}>
-              <PlayerAvatar
-                userId={occ.userId}
-                participantId={occ.participantId}
-                isMemberB={occ.member === 'b'}
-                size="small"
-                diameter={sq - 14}
-                withColorBorder={false}
-              />
-            </Animated.View>
-          ) : null}
+          <Animated.View style={fade ? { opacity: fade } : undefined}>
+            {occ ? (
+              <Animated.View style={blink ? { opacity: blink } : undefined}>
+                {lite ? (
+                  <RouletteAvatar
+                    participantId={occ.participantId}
+                    isMemberB={occ.member === 'b'}
+                    diameter={sq - 14}
+                    letter={occ.name.trim().slice(0, 1).toUpperCase() || '?'}
+                  />
+                ) : (
+                  <PlayerAvatar
+                    userId={occ.userId}
+                    participantId={occ.participantId}
+                    isMemberB={occ.member === 'b'}
+                    size="small"
+                    diameter={sq - 14}
+                    withColorBorder={false}
+                  />
+                )}
+              </Animated.View>
+            ) : null}
+          </Animated.View>
           {/* Insignia con el número: SIEMPRE después del avatar (por encima), fuera del Animated.View que parpadea en la
               ruleta, en la esquina superior izquierda (la esquina de las estrellas shiny es la superior derecha). */}
           <View style={styles.badge} pointerEvents="none">
             <Text style={styles.badgeTxt}>{slot.seat}</Text>
           </View>
         </View>
-        <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+        <Animated.Text style={[styles.name, { color: colors.text }, fade ? { opacity: fade } : null]} numberOfLines={1}>
           {occ ? occ.name : ' '}
-        </Text>
+        </Animated.Text>
       </View>
     );
   };
@@ -187,18 +212,22 @@ export default function SeatingTable({ eventId, n, occupants, direction, blink, 
         setOuterSize((prev) => (Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1 ? prev : { w: width, h: height }));
       }}
     >
-      {first ? <CircuitOverlay width={outerSize.w} height={outerSize.h} direction={first} color={pal.packs} /> : null}
+      {first ? (
+        <FadeIn style={StyleSheet.absoluteFill}>
+          <CircuitOverlay width={outerSize.w} height={outerSize.h} direction={first} color={pal.packs} />
+        </FadeIn>
+      ) : null}
       <View style={styles.layout}>
         {layout.top ? <View style={styles.headerRow}>{renderSeat(slotOf('top'))}</View> : null}
         <View style={styles.middle}>
           {layout.perSide > 0 ? col('left') : null}
           <View style={[styles.body, { width: body.width, height: body.height, backgroundColor: pal.bg, borderColor: pal.border }]}>
             {first ? (
-              <View style={styles.vortexRow}>
+              <FadeIn style={styles.vortexRow}>
                 <Vortex emoji="🃏" color={pal.packs} direction={packDirection(first, 1)} size={vortexSize} active={active} />
                 <Vortex emoji="🧉" color={pal.mate} direction={mateDirection(first, 1)} size={vortexSize} active={active} />
                 <Vortex emoji="🚬" color={pal.mate} direction={mateDirection(first, 1)} size={vortexSize} active={active} />
-              </View>
+              </FadeIn>
             ) : (
               scatter.map((s, i) => (
                 <Text
