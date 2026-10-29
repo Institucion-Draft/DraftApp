@@ -753,6 +753,129 @@ export default function PlayerAvatar({
   );
 }
 
+export type PreloadAvatarSeat = { participantId: string; userId: string; member: 'a' | 'b' };
+
+type PreloadDefaultAvatar = { storage_path: string; storage_path_shiny?: string | null };
+type PreloadAvatarRow = {
+  is_shiny?: boolean;
+  member_b_is_shiny?: boolean | null;
+  default_avatars?: PreloadDefaultAvatar | PreloadDefaultAvatar[] | null;
+};
+
+/** Resuelve el sprite de un participante (sin colores ni espejo) y lo deja en `avatarImageCache`, con la imagen ya precargada. */
+async function preloadAvatar(seat: PreloadAvatarSeat): Promise<void> {
+  const isB = seat.member === 'b';
+  const key = avatarCacheKey(seat.participantId, isB, undefined, false);
+  if (key == null) return;
+  let entry = avatarImageCache.get(key);
+  if (!entry) {
+    const userPromise = supabase
+      .from('users')
+      .select('custom_avatar_path, default_avatars (storage_path)')
+      .eq('id', seat.userId)
+      .maybeSingle();
+    const partPromise = isB
+      ? supabase
+          .from('event_participants')
+          .select(
+            'member_b_rotated_avatar_id, member_b_is_shiny, default_avatars!event_participants_member_b_rotated_avatar_id_fkey (storage_path, storage_path_shiny)'
+          )
+          .eq('id', seat.participantId)
+          .maybeSingle()
+      : supabase
+          .from('event_participants')
+          .select(
+            'rotated_avatar_id, is_shiny, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)'
+          )
+          .eq('id', seat.participantId)
+          .maybeSingle();
+    const [uRes, pRes] = await Promise.all([userPromise, partPromise]);
+    // Con un error no se cachea nada: el avatar real lo vuelve a pedir.
+    if (uRes.error || pRes.error) return;
+    const u = uRes.data as unknown as { custom_avatar_path?: string | null; default_avatars?: { storage_path: string } | { storage_path: string }[] | null } | null;
+    const p = pRes.data as unknown as PreloadAvatarRow | null;
+    const shiny = isB ? !!p?.member_b_is_shiny : !!p?.is_shiny;
+    const da = relationOne(p?.default_avatars);
+    const rotatedPath = shiny && da?.storage_path_shiny ? da.storage_path_shiny : (da?.storage_path ?? null);
+    const userDefaultPath = relationOne(u?.default_avatars)?.storage_path ?? null;
+    let uri: string | null = null;
+    if (u?.custom_avatar_path) uri = avatarPublicUrl(u.custom_avatar_path);
+    else if (rotatedPath) uri = defaultAvatarPublicUrl(rotatedPath);
+    else if (userDefaultPath) uri = defaultAvatarPublicUrl(userDefaultPath);
+    entry = { imageUri: uri, isShiny: shiny };
+    avatarImageCache.set(key, entry);
+  }
+  if (entry.imageUri) {
+    try {
+      await Image.prefetch(entry.imageUri);
+    } catch {
+      // Si falla el prefetch la imagen carga igual al mostrarse.
+    }
+  }
+}
+
+/**
+ * Precarga los avatares de todos los que se sientan (datos + imagen) antes de la ruleta. Nunca rechaza y no espera más de
+ * `timeoutMs`: si algún avatar tarda, la ruleta arranca igual con lo que haya.
+ */
+export async function preloadAvatars(seats: PreloadAvatarSeat[], timeoutMs = 2000): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  await Promise.race([Promise.all(seats.map((s) => preloadAvatar(s).catch(() => undefined))), timeout]);
+  if (timer) clearTimeout(timer);
+}
+
+/**
+ * Avatar liviano para la ruleta: se dibuja de forma SÍNCRONA desde `avatarImageCache` (sin efectos ni consultas), así que
+ * cambia en el mismo render que el nombre. Misma apariencia que PlayerAvatar sin anillo de colores. Sin entrada en el
+ * caché muestra "?" (la ruleta precarga todo antes de arrancar).
+ */
+export function RouletteAvatar({
+  participantId,
+  isMemberB,
+  diameter,
+  letter,
+}: {
+  participantId: string;
+  isMemberB: boolean;
+  diameter: number;
+  /** Inicial que se muestra si el jugador no tiene imagen. */
+  letter: string;
+}) {
+  const { colors } = useTheme();
+  const key = avatarCacheKey(participantId, isMemberB, undefined, false);
+  const entry = key != null ? avatarImageCache.get(key) : undefined;
+  const rInner = diameter * CORNER_RATIO;
+  const shiny = !!entry?.isShiny;
+  const clip = { left: 0, top: 0, width: diameter, height: diameter, borderRadius: rInner, zIndex: 1 };
+  return (
+    <View style={{ width: diameter, height: diameter }}>
+      <View style={[styles.imageClip, clip]}>
+        {entry?.imageUri ? (
+          <View style={[styles.spriteFrame, { width: diameter, height: diameter, borderRadius: rInner }]}>
+            <Image
+              source={{ uri: entry.imageUri }}
+              fadeDuration={0}
+              style={
+                shiny
+                  ? { width: diameter, height: diameter, backgroundColor: '#f3f4f6', transform: [{ scale: 1.3 }] }
+                  : { width: diameter, height: diameter, borderRadius: rInner, backgroundColor: '#f3f4f6', transform: [{ scale: 1.3 }] }
+              }
+              resizeMode={shiny ? 'contain' : 'cover'}
+            />
+          </View>
+        ) : (
+          <View style={[styles.ph, { width: diameter, height: diameter, borderRadius: rInner, backgroundColor: colors.textMuted }]}>
+            <Text style={[styles.phText, { fontSize: Math.max(10, Math.round(diameter * 0.42)) }]}>{entry ? letter : '?'}</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: {
     overflow: 'visible',
