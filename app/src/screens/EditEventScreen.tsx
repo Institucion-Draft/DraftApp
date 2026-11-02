@@ -69,7 +69,6 @@ function getMatchFormatLabel(mf: string | null): string {
 
 type FormBaseline = {
   name: string;
-  eventType: EventType;
   status: EventStatus;
   scheduledForMs: number;
   cubeId: string | null;
@@ -83,11 +82,6 @@ type FormBaseline = {
   startingLife: number;
 };
 
-const EVENT_TYPES: { value: EventType; label: string }[] = [
-  { value: 'draft', label: getEventTypeLabel('draft') },
-  { value: 'tournament', label: getEventTypeLabel('tournament') },
-  { value: 'pepidraft', label: getEventTypeLabel('pepidraft') },
-];
 const STATUS_OPTIONS: EventStatus[] = ['scheduled', 'drafting', 'playing', 'completed', 'cancelled'];
 
 function pick(title: string, opts: { label: string; onPress: () => void }[]) {
@@ -256,7 +250,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
       setBaseline({
         name: row.name,
-        eventType: row.event_type as EventType,
         status: st,
         scheduledForMs: new Date(row.scheduled_for).getTime(),
         cubeId: row.cube_id,
@@ -282,13 +275,12 @@ export default function EditEventScreen({ route, navigation }: Props) {
 
   const cubeLabel = useMemo(() => cubes.find((c) => c.id === cubeId)?.name ?? 'Sin definir', [cubeId, cubes]);
   const venueLabel = useMemo(() => venues.find((v) => v.id === venueId)?.name ?? 'Sin definir', [venueId, venues]);
-  const typeLabel = EVENT_TYPES.find((t) => t.value === eventType)?.label ?? eventType;
+  const typeLabel = getEventTypeLabel(eventType);
 
   const hasDirtyFields = useMemo(() => {
     if (!baseline) return false;
     return (
       name.trim() !== baseline.name.trim() ||
-      eventType !== baseline.eventType ||
       status !== baseline.status ||
       scheduledFor.getTime() !== baseline.scheduledForMs ||
       cubeId !== baseline.cubeId ||
@@ -304,7 +296,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
   }, [
     baseline,
     name,
-    eventType,
     status,
     scheduledFor,
     cubeId,
@@ -375,7 +366,6 @@ export default function EditEventScreen({ route, navigation }: Props) {
     };
     if (!seatingLocked) patch.random_seating_enabled = randomSeating;
     if (!restricted) {
-      patch.event_type = eventType;
       patch.scheduled_for = scheduledFor.toISOString();
       patch.cube_id = cubeId;
       patch.venue_id = venueId;
@@ -541,19 +531,11 @@ export default function EditEventScreen({ route, navigation }: Props) {
         </View>
       ) : null}
 
-      <Text style={[styles.label, restricted && styles.labelMuted]}>Tipo de evento</Text>
-      <TouchableOpacity
-        style={[styles.pickerBtn, restricted && styles.pickerBtnDisabled]}
-        disabled={restricted}
-        onPress={() =>
-          pick(
-            'Tipo de evento',
-            EVENT_TYPES.map((t) => ({ label: t.label, onPress: () => setEventType(t.value) }))
-          )
-        }
-      >
-        <Text style={[styles.pickerTxt, restricted && styles.pickerTxtMuted]}>{typeLabel}</Text>
-      </TouchableOpacity>
+      <Text style={styles.label}>Tipo de evento</Text>
+      <View style={[styles.pickerBtn, styles.pickerBtnDisabled]}>
+        <Text style={[styles.pickerTxt, styles.pickerTxtMuted]}>{typeLabel}</Text>
+      </View>
+      <Text style={styles.readOnlyHint}>Definido al crear el evento; no se puede cambiar.</Text>
 
       <Text style={[styles.label, (restricted || statusPickerLocked) && styles.labelMuted]}>Estado</Text>
       <TouchableOpacity
