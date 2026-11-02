@@ -31,6 +31,17 @@ El elegir y persistir quién empieza cada partida ya está implementado (`matche
 
 ## 🟠 Naranja
 
+### Mata-mata: elegir bo1/bo3 por separado para semifinales y final
+
+Hoy, en eventos con fase mata-mata, el organizador elige un único formato (bo1 o bo3) que vale para semifinales y final a la vez, y puede cambiarlo hasta que arranque cualquier partido de mata-mata. Desdoblar ese toggle en dos:
+
+- **Semifinales:** bo1 o bo3, editable hasta que empiece cualquier semifinal.
+- **Final y 3er/4to puesto:** bo1 o bo3, editable hasta que empiece la final o el 3er/4to (lo que arranque primero).
+
+Cada toggle se bloquea de forma independiente: por ejemplo, con las semis ya en juego se puede seguir cambiando el formato de la final.
+
+**A definir al implementarlo:** si el 3er/4to comparte formato con la final (como se describió) o merece un tercer toggle; cómo se guarda (probablemente dos columnas en vez de una, con migración y backfill del valor actual); y cómo lo leen el bracket, el cálculo de resultados y la UI de carga de partidas.
+
 ### Personalización avanzada de Temporadas (opciones de organizador)
 
 Las temporadas hoy son 100% automáticas por estación (hora de Buenos Aires). Posibles opciones futuras, todas en "opciones avanzadas" del organizador:
@@ -90,6 +101,23 @@ El Ranking Global ya cubre "stats acumulados de todos los eventos del workspace"
 - Cada cubo: nombre, link a CubeCobra, descripción, número de cartas
 - Cada usuario tiene 2 votos: uno de 2 puntos, otro de 1 punto
 - Cierre automático según calendario (día anterior al evento)
+
+### Shiny más probable en tu cumpleaños
+
+- Si jugás en tu cumpleaños, la chance de shiny sube a 50 %.
+- Si jugás en los 3 días anteriores o en los 3 días posteriores a tu cumpleaños, sube a 20 %.
+- Sólo es una idea anotada: se aplica en otra sesión.
+
+**A definir**: de dónde sale la fecha de cumpleaños (hoy no se guarda), qué cuenta como "jugar" (fecha del evento o de la partida) y cómo se combina con la chance de shiny actual.
+
+### Ruleta pesada de cubos
+
+- Cada cubo deja de tener la misma probabilidad: se pondera según hace cuánto no sale y cuántas veces salió, mirando el historial.
+- Hace falta una función que altere las probabilidades: sube la de un cubo que hace mucho no sale y baja la de uno que salió varias veces.
+- El cubo que salió la vez pasada tiene una probabilidad baja de volver a salir, pero nunca 0.
+- Sólo es una idea anotada: se aplica en otra sesión.
+
+**A definir**: la forma de la función de peso (cuánto pesa cada factor), el piso mínimo de probabilidad, de dónde se lee el historial y dónde se sortea (cliente o servidor, por la ruleta sincronizada de "Realtime para todos").
 
 ### Realtime para todos
 

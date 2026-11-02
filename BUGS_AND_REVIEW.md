@@ -13,7 +13,14 @@ Casos pendientes de revisión que no son ideas nuevas (para eso está [IDEAS.md]
 
 ## 🟠 Naranja
 
-(vacío)
+### Al volver atrás se pierde la posición de scroll de la pantalla anterior
+
+Al entrar al perfil de un jugador desde la pantalla de un evento y volver atrás, la pantalla del evento se recarga y queda scrolleada hasta arriba. Debería volver exactamente a la altura en la que estaba antes de tocar el perfil.
+
+**Pendiente:**
+
+1. Corregir el caso del evento (volver desde perfil restaura el scroll).
+2. Auditar todas las pantallas con listas o scroll largo (evento, listas de pairings, búsqueda, perfiles, etc.) y verificar que al volver atrás la altura no cambie respecto de la que tenían al entrar. Probable causa común: recarga de datos al recuperar el foco que reemplaza el contenido por un estado de carga (se desmonta el scroll) en vez de refrescar en segundo plano; revisar los `useFocusEffect` y los spinners de pantalla completa.
 
 ## 🔴 Rojo
 
