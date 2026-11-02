@@ -60,8 +60,6 @@ const STARTING_LIFE_OPTIONS = [20, 25, 30] as const;
 
 const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'draft', label: getEventTypeLabel('draft') },
-  { value: 'tournament', label: getEventTypeLabel('tournament') },
-  { value: 'pepidraft', label: getEventTypeLabel('pepidraft') },
   { value: 'two_headed_giant', label: getEventTypeLabel('two_headed_giant') },
 ];
 
