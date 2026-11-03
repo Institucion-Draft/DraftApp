@@ -333,6 +333,8 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
   const [eventStartingLife, setEventStartingLife] = useState(20);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [matchTurnsByMatchId, setMatchTurnsByMatchId] = useState<Record<string, MatchTurnTimeRow[]>>({});
+  /** Partidas no finalizadas que ya tienen cambios de vida registrados (habilitan el acceso al gráfico). */
+  const [liveMatchIdsWithLife, setLiveMatchIdsWithLife] = useState<Set<string>>(new Set());
   const [nowTs, setNowTs] = useState(() => Date.now());
   const firstRef = useRef(true);
 
@@ -353,6 +355,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       setCurrentSwissRound(null);
       setTurnTrackingEnabled(false);
       setMatchTurnsByMatchId({});
+      setLiveMatchIdsWithLife(new Set());
       setActiveTiebreakGroup(null);
       setLegacyTwoWayTiebreak(false);
       setBracketMatchRow(null);
@@ -510,6 +513,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     }
 
     const completedMatchIdsForTurns = matchRows.filter((m) => m.status === 'completed').map((m) => m.id);
+
+    const openMatchIds = matchRows.filter((m) => m.status !== 'completed').map((m) => m.id);
+    if (openMatchIds.length > 0) {
+      const leRes = await supabase.from('life_events').select('match_id').in('match_id', openMatchIds);
+      setLiveMatchIdsWithLife(new Set(((leRes.data ?? []) as { match_id: string }[]).map((r) => r.match_id)));
+    } else {
+      setLiveMatchIdsWithLife(new Set());
+    }
 
     let turnsByMatch: Record<string, MatchTurnTimeRow[]> = {};
     if (turnTrackOn && completedMatchIdsForTurns.length > 0) {
@@ -1433,7 +1444,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             </View>
           ) : null}
         </View>
-        {turnTrackingEnabled && m.status === 'completed' ? (
+        {m.status === 'completed' || liveMatchIdsWithLife.has(m.id) ? (
           <TouchableOpacity
             style={styles.matchChartBtn}
             onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
@@ -1517,7 +1528,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             </View>
           ) : null}
         </View>
-        {turnTrackingEnabled && m.status === 'completed' ? (
+        {m.status === 'completed' || liveMatchIdsWithLife.has(m.id) ? (
           <TouchableOpacity
             style={styles.matchChartBtn}
             onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
@@ -1895,7 +1906,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                       <Text style={styles.matchTime}>Cierre pendiente.</Text>
                     ) : null}
                   </View>
-                  {turnTrackingEnabled && m.status === 'completed' ? (
+                  {m.status === 'completed' || liveMatchIdsWithLife.has(m.id) ? (
                     <TouchableOpacity
                       style={styles.matchChartBtn}
                       onPress={() => navigation.navigate('LifeChart', { matchId: m.id })}
