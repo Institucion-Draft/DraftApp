@@ -99,7 +99,6 @@ export default function MatchResultScreen({ route, navigation }: Props) {
   const [superCupWinnerName, setSuperCupWinnerName] = useState<string | null>(null);
   const [revengeCupWinnerName, setRevengeCupWinnerName] = useState<string | null>(null);
   const [isGiantEvent, setIsGiantEvent] = useState(false);
-  const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [competitionFormat, setCompetitionFormat] = useState<CompetitionFormat>('round_robin');
   /** round_robin_bo1_top4: el oficial es a una sola partida. */
   const [officialBo1, setOfficialBo1] = useState(false);
@@ -213,7 +212,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
         : Promise.resolve({ data: null, error: null } as const),
       supabase
         .from('draft_events')
-        .select('turn_tracking_enabled, topcut_format, competition_format, top_size, match_format, current_swiss_round, event_type')
+        .select('topcut_format, competition_format, top_size, match_format, current_swiss_round, event_type')
         .eq('id', p.event_id)
         .maybeSingle(),
       supabase
@@ -269,7 +268,6 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     setRevengeWinsB(countRevengeWins(revengeRows, p.participant_b_id));
     setCompletedPairingMatchCount(completedCountRes.count ?? 0);
     const eventFlags = eventFlagsRes.data as {
-      turn_tracking_enabled?: boolean | null;
       topcut_format?: string | null;
       competition_format?: string | null;
       top_size?: number | null;
@@ -277,7 +275,6 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       current_swiss_round?: number | string | null;
       event_type?: string | null;
     } | null;
-    setTurnTrackingEnabled(!!eventFlags?.turn_tracking_enabled);
     setIsGiantEvent(eventFlags?.event_type === 'two_headed_giant');
     setMatchFormat(eventFlags?.match_format ?? null);
     const fmt = normalizeCompetitionFormat(eventFlags?.competition_format);
@@ -627,14 +624,12 @@ export default function MatchResultScreen({ route, navigation }: Props) {
       ) : null}
 
       <View style={styles.actions}>
-        {turnTrackingEnabled ? (
-          <TouchableOpacity
-            style={styles.secondaryBtn}
-            onPress={() => navigation.navigate('LifeChart', { matchId })}
-          >
-            <Text style={styles.secondaryTxt}>Evolución de vida</Text>
-          </TouchableOpacity>
-        ) : null}
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={() => navigation.navigate('LifeChart', { matchId })}
+        >
+          <Text style={styles.secondaryTxt}>Evolución de vida</Text>
+        </TouchableOpacity>
         {showRematchBtn ? (
           <TouchableOpacity style={styles.primaryBtn} onPress={() => void createRematch()}>
             <Text style={styles.primaryTxt}>{rematchLabel}</Text>
