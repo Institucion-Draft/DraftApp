@@ -30,7 +30,7 @@ import { cubeGridColumns, cubeJumpPath } from '../lib/cubeRouletteGrid';
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
 
-type CubeRow = { id: string; name: string };
+type CubeRow = { id: string; name: string; created_at: string | null };
 type PlayerRow = { user_id: string; users: { display_name: string; username: string } | null | { display_name: string; username: string }[] };
 
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
@@ -57,6 +57,8 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const [weighted, setWeighted] = useState(true);
   const [weightParams, setWeightParams] = useState<CubeWeightParams>(DEFAULT_CUBE_WEIGHT_PARAMS);
   const [cubeHistory, setCubeHistory] = useState<string[]>([]);
+  // Fecha (ms) de cada evento de cubeHistory, mismo orden; para el bonus de cubos que nunca salieron.
+  const [cubeHistoryTimes, setCubeHistoryTimes] = useState<(number | null)[]>([]);
   const [gridWidth, setGridWidth] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
 
@@ -92,7 +94,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
             .eq('user_id', currentUserId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
-      supabase.from('cubes').select('id, name').eq('workspace_id', wsId).is('deleted_at', null).order('name', { ascending: true }),
+      supabase.from('cubes').select('id, name, created_at').eq('workspace_id', wsId).is('deleted_at', null).order('name', { ascending: true }),
       supabase
         .from('event_participants')
         .select('user_id, users!event_participants_user_id_fkey (display_name, username)')
@@ -100,7 +102,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         .eq('role', 'player'),
       supabase
         .from('workspace_cube_roulette_config')
-        .select('m, k, tau_min, accumulation_mode')
+        .select('m, k, tau_min, accumulation_mode, beta, d_cap')
         .eq('workspace_id', wsId)
         .maybeSingle(),
       // Historial para el peso: eventos oficiales, no borrados ni cancelados, del workspace, que ya arrancaron el draft
@@ -109,7 +111,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       (() => {
         let q = supabase
           .from('draft_events')
-          .select('cube_id')
+          .select('cube_id, scheduled_for, created_at')
           .eq('workspace_id', wsId)
           .neq('id', eventId)
           .eq('is_official', true)
@@ -136,8 +138,17 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     setPlayers((playersRes.data ?? []) as PlayerRow[]);
     // Sin fila, o error al leer el historial/la config: se usan los defaults y/o un historial vacío (todo uniforme).
     setWeightParams(sanitizeCubeWeightParams(configRes.error ? null : configRes.data));
-    setCubeHistory(
-      historyRes.error ? [] : ((historyRes.data ?? []) as { cube_id: string | null }[]).flatMap((r) => (r.cube_id ? [r.cube_id] : []))
+    const historyRows = historyRes.error
+      ? []
+      : ((historyRes.data ?? []) as { cube_id: string | null; scheduled_for: string | null; created_at: string | null }[]).filter(
+          (r) => !!r.cube_id
+        );
+    setCubeHistory(historyRows.map((r) => r.cube_id as string));
+    setCubeHistoryTimes(
+      historyRows.map((r) => {
+        const t = Date.parse(r.scheduled_for ?? r.created_at ?? '');
+        return Number.isFinite(t) ? t : null;
+      })
     );
     setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
   }, [eventId]);
@@ -169,9 +180,18 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         cubes.map((c) => c.id),
         cubeHistory,
         weightParams,
-        weighted
+        weighted,
+        {
+          eventTimes: cubeHistoryTimes,
+          cubeCreatedAt: Object.fromEntries(
+            cubes.map((c) => {
+              const t = c.created_at ? Date.parse(c.created_at) : NaN;
+              return [c.id, Number.isFinite(t) ? t : null];
+            })
+          ),
+        }
       ),
-    [cubes, cubeHistory, weightParams, weighted]
+    [cubes, cubeHistory, cubeHistoryTimes, weightParams, weighted]
   );
   const cubeOptionProbs = useMemo(
     () => cubeOptions.map((o) => (o.kind === 'cube' ? cubeProbs.cubes[o.key] ?? 0 : cubeProbs.fixed)),

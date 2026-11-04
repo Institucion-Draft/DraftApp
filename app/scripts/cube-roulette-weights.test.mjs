@@ -1,7 +1,7 @@
 // Tests de las probabilidades pesadas de la ruleta de cubos (app/src/lib/cubeRouletteWeights.ts).
 // node app/scripts/cube-roulette-weights.test.mjs
 import {
-  DEFAULT_CUBE_WEIGHT_PARAMS as D,
+  DEFAULT_CUBE_WEIGHT_PARAMS as DEF,
   cubeExitWeight,
   cubeRouletteProbabilities as probs,
   formatPercent1,
@@ -9,6 +9,8 @@ import {
   sanitizeCubeWeightParams,
 } from '../src/lib/cubeRouletteWeights.ts';
 
+// Los tests de penalización reciente corren con beta = 0 (sin bonus); el bonus se prueba aparte.
+const D = { ...DEF, beta: 0 };
 let fails = 0;
 const ok = (c, m) => { if (!c) fails += 1; console.log((c ? 'OK   ' : 'FAIL ') + m); };
 const near = (a, b, tol, m) => ok(Math.abs(a - b) <= tol, `${m}: ${a.toFixed(4)} ~ ${b}`);
@@ -25,14 +27,14 @@ const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
   near(r.weights.C, 0.86, 0.005, 'peso C');
   near(r.weights.D, 0.96, 0.005, 'peso D');
   ok(r.weights.E === 1, 'peso E (nunca salió) = 1');
-  near(pct('A'), 1.0, 0.1, 'P(A) %');
-  near(pct('B'), 12.5, 0.1, 'P(B) %');
-  near(pct('C'), 17.7, 0.1, 'P(C) %');
-  near(pct('D'), 19.7, 0.1, 'P(D) %');
-  near(pct('E'), 20.5, 0.1, 'P(E) %');
-  near(r.fixed * 100, 14.2857, 0.001, 'Todos fuman / Jugador elige: 1/(N+2) cada uno');
+  near(pct('A'), 1.197, 0.1, 'P(A) %');
+  near(pct('B'), 14.620, 0.1, 'P(B) %');
+  near(pct('C'), 20.578, 0.1, 'P(C) %');
+  near(pct('D'), 22.996, 0.1, 'P(D) %');
+  near(pct('E'), 23.942, 0.1, 'P(E) %');
+  near(r.fixed * 100, 8.3333, 0.001, 'Todos fuman / Jugador elige: 1/(2(N+1)) cada uno');
   near(sum(r.cubes) + 2 * r.fixed, 1, 1e-12, 'las probabilidades suman 1');
-  ok(formatPercent1(r.cubes.B) === '12.5%' && formatPercent1(r.fixed) === '14.3%', 'formato de % con 1 decimal');
+  ok(formatPercent1(r.cubes.B) === '14.6%' && formatPercent1(r.fixed) === '8.3%', 'formato de % con 1 decimal');
 }
 
 // Varias salidas del mismo cubo: d=1 y d=3. N=5 -> tau = 0.8333.
@@ -45,11 +47,11 @@ const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
   near(probs(ids, ['B', 'A', 'A'], { ...D, mode: 'last' }).weights.A, cubeExitWeight(2, 0.05, 5 / 6), 1e-9, "modo 'last' toma la salida más reciente");
 }
 
-// Toggle desactivado: uniforme 1/(N+2), con o sin historial.
+// Toggle desactivado: cubos 1/(N+1), especiales 1/(2(N+1)).
 {
   const ids = ['A', 'B', 'C', 'D', 'E'];
   const r = probs(ids, ['A', 'B', 'C'], D, false);
-  ok(ids.every((id) => Math.abs(r.cubes[id] - 1 / 7) < 1e-12) && Math.abs(r.fixed - 1 / 7) < 1e-12, 'toggle off: todo 1/(N+2)');
+  ok(ids.every((id) => Math.abs(r.cubes[id] - 1 / 6) < 1e-12) && Math.abs(r.fixed - 1 / 12) < 1e-12, 'toggle off: cubos 1/(N+1), especiales 1/(2(N+1))');
 }
 
 // N=25 con una salida a d=5: tau = 25/6 -> peso ~0.51.
@@ -81,13 +83,13 @@ const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
 
 // Parámetros inválidos -> defaults (campo por campo).
 {
-  ok(JSON.stringify(sanitizeCubeWeightParams(null)) === JSON.stringify(D), 'sin fila: defaults');
-  ok(JSON.stringify(sanitizeCubeWeightParams({ m: -0.1, k: 0, tau_min: -1, accumulation_mode: 'x' })) === JSON.stringify(D), 'todo inválido: defaults');
-  ok(JSON.stringify(sanitizeCubeWeightParams({ m: 1.5, k: NaN, tau_min: 0, accumulation_mode: null })) === JSON.stringify(D), 'fuera de rango / NaN / null: defaults');
+  ok(JSON.stringify(sanitizeCubeWeightParams(null)) === JSON.stringify(DEF), 'sin fila: defaults');
+  ok(JSON.stringify(sanitizeCubeWeightParams({ m: -0.1, k: 0, tau_min: -1, accumulation_mode: 'x' })) === JSON.stringify(DEF), 'todo inválido: defaults');
+  ok(JSON.stringify(sanitizeCubeWeightParams({ m: 1.5, k: NaN, tau_min: 0, accumulation_mode: null })) === JSON.stringify(DEF), 'fuera de rango / NaN / null: defaults');
   const p = sanitizeCubeWeightParams({ m: '0.2', k: 4, tau_min: 1, accumulation_mode: 'last' });
   ok(p.m === 0.2 && p.k === 4 && p.tauMin === 1 && p.mode === 'last', 'valores válidos (numeric llega como string) se respetan');
   const mixed = sanitizeCubeWeightParams({ m: 0.1, k: -3, tau_min: 2, accumulation_mode: 'bad' });
-  ok(mixed.m === 0.1 && mixed.k === D.k && mixed.tauMin === 2 && mixed.mode === 'prod', 'inválido sólo cae al default en su campo');
+  ok(mixed.m === 0.1 && mixed.k === DEF.k && mixed.tauMin === 2 && mixed.mode === 'prod', 'inválido sólo cae al default en su campo');
   // probs() con parámetros rotos no explota ni devuelve NaN.
   const r = probs(['A', 'B'], ['A'], { m: NaN, k: 0, tauMin: -1, mode: 'zzz' });
   ok(Object.values(r.cubes).every(Number.isFinite), 'probs() con parámetros inválidos usa defaults');
