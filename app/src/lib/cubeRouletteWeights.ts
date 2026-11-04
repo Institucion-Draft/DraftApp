@@ -5,8 +5,10 @@
  * distancia (d = 1: salió en el evento anterior) pesa w(d) = 1 - (1 - m) / (1 + ((d - 1) / tau)^2), con
  * tau = max(tau_min, N / k) y N = cantidad de cubos de la ruleta. Un cubo con varias salidas acumula el producto de
  * sus w (modo 'prod') o sólo el de la más reciente (modo 'last'); uno que nunca salió pesa 1.
- * "Todos fuman" y "Jugador elige" quedan fijos en 1/(N+2) cada uno; los cubos se reparten el resto:
- * P_i = N/(N+2) * w_i / sum(w_j).
+ * Peso final w_i = penalización reciente × bonus, con bonus = 1 + beta * min(d, D) (d = eventos desde su última salida,
+ * o desde su creación si nunca salió).
+ * "Todos fuman" y "Jugador elige" quedan fijos en 1/(2(N+1)) cada uno; los cubos se reparten el resto:
+ * P_i = N/(N+1) * w_i / sum(w_j).
  */
 
 export type CubeWeightMode = 'prod' | 'last';
@@ -18,9 +20,19 @@ export type CubeWeightParams = {
   k: number;
   tauMin: number;
   mode: CubeWeightMode;
+  /** Bonus por antigüedad: bonus = 1 + beta * min(d, dCap). beta >= 0. */
+  beta: number;
+  /** Tope de d en el bonus. dCap > 0. */
+  dCap: number;
 };
 
-export const DEFAULT_CUBE_WEIGHT_PARAMS: CubeWeightParams = { m: 0.05, k: 6, tauMin: 0.75, mode: 'prod' };
+export const DEFAULT_CUBE_WEIGHT_PARAMS: CubeWeightParams = { m: 0.05, k: 6, tauMin: 0.75, mode: 'prod', beta: 0.02, dCap: 25 };
+
+/** Contexto para el bonus: fecha (ms) de cada evento de `history` (mismo orden) y de creación de cada cubo. */
+export type CubeBonusContext = {
+  eventTimes: readonly (number | null)[];
+  cubeCreatedAt: Readonly<Record<string, number | null | undefined>>;
+};
 
 /** Un valor inválido (null, NaN, fuera de rango) cae al default de ese campo. Acepta la fila cruda de la base. */
 export function sanitizeCubeWeightParams(raw: {
@@ -30,6 +42,9 @@ export function sanitizeCubeWeightParams(raw: {
   tauMin?: unknown;
   mode?: unknown;
   accumulation_mode?: unknown;
+  beta?: unknown;
+  d_cap?: unknown;
+  dCap?: unknown;
 } | null | undefined): CubeWeightParams {
   const d = DEFAULT_CUBE_WEIGHT_PARAMS;
   const num = (v: unknown): number | null => {
@@ -41,11 +56,15 @@ export function sanitizeCubeWeightParams(raw: {
   const k = num(raw?.k);
   const tauMin = num(raw?.tau_min ?? raw?.tauMin);
   const mode = raw?.accumulation_mode ?? raw?.mode;
+  const beta = num(raw?.beta);
+  const dCap = num(raw?.d_cap ?? raw?.dCap);
   return {
     m: m != null && m >= 0 && m <= 1 ? m : d.m,
     k: k != null && k > 0 ? k : d.k,
     tauMin: tauMin != null && tauMin > 0 ? tauMin : d.tauMin,
     mode: mode === 'prod' || mode === 'last' ? mode : d.mode,
+    beta: beta != null && beta >= 0 ? beta : d.beta,
+    dCap: dCap != null && dCap > 0 ? dCap : d.dCap,
   };
 }
 
@@ -60,7 +79,7 @@ export type CubeRouletteProbabilities = {
   weights: Record<string, number>;
   /** Probabilidad de cada cubo (0..1). */
   cubes: Record<string, number>;
-  /** "Todos fuman" y "Jugador elige": 1/(N+2) cada uno. */
+  /** "Todos fuman" y "Jugador elige": 1/(2(N+1)) cada uno (mitad del basal de un cubo). */
   fixed: number;
 };
 
@@ -69,16 +88,18 @@ export type CubeRouletteProbabilities = {
  * @param history     cubo registrado de cada evento contado ANTERIOR, del más reciente al más antiguo
  *                    (history[0] es el evento anterior, d = 1); null = ese evento no tiene cubo contable.
  *                    Cubos que ya no están en la ruleta se ignoran, pero ocupan su lugar en el conteo de eventos.
- * @param weighted    false -> uniforme 1/(N+2), sin historial
+ * @param weighted    false -> cubos con peso igual (1/(N+1) cada uno), sin historial
+ * @param bonusCtx    fechas para el bonus de antigüedad; sin él, un cubo que nunca salió cuenta todo el historial
  */
 export function cubeRouletteProbabilities(
   cubeIds: readonly string[],
   history: readonly (string | null)[],
   params: CubeWeightParams = DEFAULT_CUBE_WEIGHT_PARAMS,
-  weighted = true
+  weighted = true,
+  bonusCtx?: CubeBonusContext
 ): CubeRouletteProbabilities {
   const n = cubeIds.length;
-  const fixed = 1 / (n + 2);
+  const fixed = 1 / (2 * (n + 1));
   const weights: Record<string, number> = {};
   const cubes: Record<string, number> = {};
   if (n === 0) return { weights, cubes, fixed };
@@ -100,11 +121,31 @@ export function cubeRouletteProbabilities(
         weights[cubeId] *= w;
       }
     });
+
+    // Bonus = 1 + beta * min(d, dCap). d = distancia a la última salida del cubo, igual que la penalización
+    // reciente (salió en el evento anterior -> d = 1, es decir índice en history + 1); si nunca salió, eventos contados con fecha posterior a la creación del cubo.
+    const firstExit = new Map<string, number>();
+    history.forEach((cubeId, i) => {
+      if (cubeId != null && cubeId in weights && !firstExit.has(cubeId)) firstExit.set(cubeId, i + 1);
+    });
+    for (const id of cubeIds) {
+      let d = firstExit.get(id);
+      if (d === undefined) {
+        const created = bonusCtx?.cubeCreatedAt[id];
+        if (created == null || !bonusCtx) {
+          d = history.length;
+        } else {
+          d = 0;
+          for (const t of bonusCtx.eventTimes) if (t != null && t > created) d += 1;
+        }
+      }
+      weights[id] *= 1 + p.beta * Math.min(d, p.dCap);
+    }
   }
 
   let sum = 0;
   for (const id of cubeIds) sum += weights[id];
-  for (const id of cubeIds) cubes[id] = ((n / (n + 2)) * weights[id]) / sum;
+  for (const id of cubeIds) cubes[id] = ((n / (n + 1)) * weights[id]) / sum;
   return { weights, cubes, fixed };
 }
 
