@@ -8,7 +8,13 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, gender: Gender, birthDate: string) => Promise<{ error: string | null }>;
+  /** needsEmailConfirmation: la cuenta se creó pero no hay sesión (el proyecto exige confirmar el email). */
+  signUp: (
+    email: string,
+    password: string,
+    gender: Gender,
+    birthDate: string
+  ) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
 };
 
@@ -46,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, gender: Gender, birthDate: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -56,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     });
-    return { error: error?.message ?? null };
+    return { error: error?.message ?? null, needsEmailConfirmation: !error && !data?.session };
   };
 
   const signOut = async () => {
