@@ -3,7 +3,17 @@ import { Animated, Easing, StyleSheet, Text, View, useWindowDimensions } from 'r
 import Svg, { Path } from 'react-native-svg';
 import PlayerAvatar, { RouletteAvatar } from './PlayerAvatar';
 import { mateDirection, packDirection, seatSlots, tableLayout, type PackDirection, type SeatSlot } from '../lib/eventSeating';
-import { circuitArrows, scatterEmojis, tableBodySize } from '../lib/seatingLayout';
+import {
+  circuitArrows,
+  mateOrbitStops,
+  mateCebadorSeat,
+  mateReceivers,
+  mateSchedule,
+  scatterEmojis,
+  tableBodySize,
+  type MateMove,
+  type MateStop,
+} from '../lib/seatingLayout';
 import { useTheme } from '../theme';
 
 export type SeatOccupant = { userId: string; participantId: string; member: 'a' | 'b'; name: string };
@@ -24,6 +34,17 @@ type Props = {
   lite?: boolean;
   /** Los vórtices giran mientras sea true (la pantalla lo pone en false al perder el foco). */
   active?: boolean;
+  /**
+   * false durante el sorteo: no se dibujan el marcador de orden de giro (🃏🧉🚬 con sus vórtices) ni el vórtice exterior
+   * (flechas del circuito). Al pasar a true entran con el fundido corto de FadeIn. Por defecto true.
+   */
+  revealMarkers?: boolean;
+  /**
+   * Arranque del "mate de ronda" del sorteo: la pantalla lo pone (con un `id` nuevo por sorteo) cuando empieza el primer
+   * flash, con la duración total en ms hasta que entran las posiciones finales; null el resto del tiempo. El mate se mueve
+   * por tiempo, no por flashes.
+   */
+  mateRun?: { id: number; totalMs: number } | null;
 };
 
 /** Una vuelta completa de cada vórtice. */
@@ -125,6 +146,45 @@ function FadeIn({ children, style }: { children: React.ReactNode; style?: React.
   return <Animated.View style={[style, { opacity }]}>{children}</Animated.View>;
 }
 
+/**
+ * El 🧉 desperdigado durante el sorteo ("mate de ronda"): parte de la parada del cebador (stops[0]) y, cuando arranca
+ * `run`, corre un cronograma por tiempo: cada deslizamiento (corto, `slideMs`) empieza en su `at` y no se solapa con el
+ * anterior. Se frena al terminar el sorteo, al desmontarse o si arranca otro sorteo. Posiciones en px dentro de la mesa.
+ */
+function OrbitingMate({ stops, run, rotate }: { stops: MateStop[]; run: { moves: MateMove[]; slideMs: number } | null; rotate: number }) {
+  const pos = useRef(new Animated.ValueXY(stops[0] ?? { x: 0, y: 0 })).current;
+  useEffect(() => {
+    if (!run) return undefined;
+    let cursor = 0;
+    const slides: Animated.CompositeAnimation[] = [];
+    for (const m of run.moves) {
+      const target = stops[m.seat + 1];
+      if (!target) continue;
+      slides.push(
+        Animated.timing(pos, {
+          toValue: target,
+          duration: run.slideMs,
+          delay: Math.max(0, Math.round(m.at - cursor)),
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        })
+      );
+      cursor = m.at + run.slideMs;
+    }
+    if (slides.length === 0) return undefined;
+    const seq = Animated.sequence(slides);
+    seq.start();
+    return () => seq.stop();
+  }, [run, stops, pos]);
+  return (
+    <Animated.Text
+      style={[styles.scatter, { left: 0, top: 0, transform: [{ translateX: pos.x }, { translateY: pos.y }, { rotate: `${rotate}deg` }] }]}
+    >
+      🧉
+    </Animated.Text>
+  );
+}
+
 const PAD_H = 40;
 const PAD_V = 36;
 
@@ -133,7 +193,7 @@ const PAD_V = 36;
  * sentido horario desde la cabecera de arriba. Sin scroll horizontal (el ancho es acotado); el alto crece con los
  * lugares de cada lado (lo absorbe el scroll vertical de la pantalla).
  */
-export default function SeatingTable({ eventId, n, occupants, direction, blink, seatFade, lite = false, active = true }: Props) {
+export default function SeatingTable({ eventId, n, occupants, direction, blink, seatFade, lite = false, active = true, revealMarkers = true, mateRun = null }: Props) {
   const { colors, mode } = useTheme();
   const pal = TABLE[mode === 'dark' ? 'dark' : 'light'];
   const { width: winW } = useWindowDimensions();
@@ -149,6 +209,37 @@ export default function SeatingTable({ eventId, n, occupants, direction, blink, 
   const sideColsW = layout.perSide > 0 ? 2 * cellW + 4 : 0;
   const body = tableBodySize(n, usable - 2 * PAD_H - sideColsW, cellH);
   const scatter = React.useMemo(() => scatterEmojis(eventId), [eventId]);
+  // Sorteo en curso (hay sentido de giro pero los marcadores finales todavía no entran): las medialunas y las cartas
+  // quedan quietas donde están y el 🧉 desperdigado recorre la mesa, una parada cerca de cada jugador.
+  const drawing = !!direction && !revealMarkers;
+  const mateScatter = scatter.find((s) => s.emoji === '🧉');
+  const innerW = body.width - 4; // interior de la mesa (borde de 2 px): las posiciones % del scatter se miden contra él
+  const innerH = body.height - 4;
+  // Paradas del 🧉: [0] su lugar de partida (la parada del cebador, también antes del sorteo, así no se desliza al empezar) y
+  // [1..n] la parada de cada lugar (cerca de ese lugar, sin pisar otros emojis). Con ellas se arma el "mate de ronda"
+  // (ver mateSchedule).
+  const mateStops = React.useMemo<MateStop[]>(() => {
+    if (!mateScatter) return [];
+    const obstacles = scatter.filter((s) => s !== mateScatter).map((s) => ({ x: s.left * innerW, y: s.top * innerH }));
+    const orbit = mateOrbitStops({ n, width: innerW, height: innerH, cellH, sq, obstacles });
+    const home = orbit[mateCebadorSeat(eventId, n)] ?? { x: mateScatter.left * innerW, y: mateScatter.top * innerH };
+    return [home, ...orbit];
+  }, [scatter, mateScatter, eventId, n, innerW, innerH, cellH, sq]);
+  // Primer receptor: al azar, distinto en cada sorteo y estable mientras éste dura (se vuelve a sortear fuera del sorteo).
+  const [firstPick, setFirstPick] = useState(() => Math.random());
+  useEffect(() => {
+    if (!drawing) setFirstPick(Math.random());
+  }, [drawing]);
+  // Cronograma del mate: se arma cuando la pantalla arranca el sorteo (mateRun) y no depende de los flashes.
+  const mateRunId = mateRun?.id ?? null;
+  const mateRunMs = mateRun?.totalMs ?? 0;
+  const mateTimeline = React.useMemo(() => {
+    if (mateRunId == null) return null;
+    const cebador = mateCebadorSeat(eventId, n);
+    const receivers = mateReceivers({ n, direction: mateDirection(direction ?? 'cw', 1), cebador, firstPick });
+    const sch = mateSchedule({ totalMs: mateRunMs, receivers, cebador });
+    return { moves: sch.moves, slideMs: sch.slideMs };
+  }, [mateRunId, mateRunMs, n, eventId, direction, firstPick]);
 
   const slotOf = (zone: SeatSlot['zone'], row = 0) => slots.find((s) => s.zone === zone && s.row === row);
 
@@ -212,7 +303,7 @@ export default function SeatingTable({ eventId, n, occupants, direction, blink, 
         setOuterSize((prev) => (Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1 ? prev : { w: width, h: height }));
       }}
     >
-      {first ? (
+      {first && revealMarkers ? (
         <FadeIn style={StyleSheet.absoluteFill}>
           <CircuitOverlay width={outerSize.w} height={outerSize.h} direction={first} color={pal.packs} />
         </FadeIn>
@@ -222,21 +313,35 @@ export default function SeatingTable({ eventId, n, occupants, direction, blink, 
         <View style={styles.middle}>
           {layout.perSide > 0 ? col('left') : null}
           <View style={[styles.body, { width: body.width, height: body.height, backgroundColor: pal.bg, borderColor: pal.border }]}>
-            {first ? (
+            {first && revealMarkers ? (
               <FadeIn style={styles.vortexRow}>
                 <Vortex emoji="🃏" color={pal.packs} direction={packDirection(first, 1)} size={vortexSize} active={active} />
                 <Vortex emoji="🧉" color={pal.mate} direction={mateDirection(first, 1)} size={vortexSize} active={active} />
                 <Vortex emoji="🚬" color={pal.mate} direction={mateDirection(first, 1)} size={vortexSize} active={active} />
               </FadeIn>
             ) : (
-              scatter.map((s, i) => (
-                <Text
-                  key={i}
-                  style={[styles.scatter, { left: `${s.left * 100}%`, top: `${s.top * 100}%`, transform: [{ rotate: `${s.rotate}deg` }] }]}
-                >
-                  {s.emoji}
-                </Text>
-              ))
+              <>
+                {scatter.map((s, i) =>
+                  drawing && s === mateScatter ? null : (
+                    <Text
+                      key={i}
+                      style={[
+                        styles.scatter,
+                        // El 🧉 fuera del sorteo ya está en la parada del cebador (en px); el resto, en su celda (%).
+                        s === mateScatter && mateStops.length > 0
+                          ? { left: mateStops[0].x, top: mateStops[0].y }
+                          : { left: `${s.left * 100}%`, top: `${s.top * 100}%` },
+                        { transform: [{ rotate: `${s.rotate}deg` }] },
+                      ]}
+                    >
+                      {s.emoji}
+                    </Text>
+                  )
+                )}
+                {drawing && mateScatter && mateStops.length > 0 ? (
+                  <OrbitingMate stops={mateStops} run={mateTimeline} rotate={mateScatter.rotate} />
+                ) : null}
+              </>
             )}
           </View>
           {layout.perSide > 0 ? col('right') : null}
