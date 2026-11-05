@@ -17,7 +17,13 @@ function LoginRoute({ navigation }: NativeStackScreenProps<AuthStackParamList, '
 }
 
 function SignUpRoute({ navigation }: NativeStackScreenProps<AuthStackParamList, 'SignUp'>) {
-  return <SignUpScreen onNavigateToLogin={() => navigation.navigate('Login')} />;
+  return (
+    <SignUpScreen
+      onNavigateToLogin={() => navigation.navigate('Login')}
+      // Tras crear la cuenta se vuelve al login y se saca SignUp del historial (reset), así no queda el formulario atrás.
+      onSignUpComplete={() => navigation.reset({ index: 0, routes: [{ name: 'Login' }] })}
+    />
+  );
 }
 
 export default function AuthStackNavigator() {

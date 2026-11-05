@@ -20,9 +20,11 @@ import type { ThemeColors } from '../theme';
 
 type Props = {
   onNavigateToLogin: () => void;
+  /** Cuenta creada: vuelve al login y saca esta pantalla del historial (el formulario se descarta con ella). */
+  onSignUpComplete: () => void;
 };
 
-export default function SignUpScreen({ onNavigateToLogin }: Props) {
+export default function SignUpScreen({ onNavigateToLogin, onSignUpComplete }: Props) {
   const { mode, colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const { signUp } = useAuth();
@@ -73,7 +75,7 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
     }
 
     setLoading(true);
-    const { error } = await signUp(
+    const { error, needsEmailConfirmation } = await signUp(
       email.trim(),
       password,
       gender,
@@ -83,12 +85,24 @@ export default function SignUpScreen({ onNavigateToLogin }: Props) {
 
     if (error) {
       Alert.alert('Error de registro', error);
-    } else {
-      Alert.alert(
-        'Cuenta creada',
-        'Ya podés usar la app. Tu avatar default fue asignado al azar.'
-      );
+      return;
     }
+
+    // Se cierra el selector de fecha (Modal en iOS) y se vuelve al login; el aviso sale recién después, con la pantalla de
+    // registro y su Modal ya fuera: un Alert.alert (también un Modal) no se puede presentar encima de otro en iOS.
+    setShowBirthPicker(false);
+    if (needsEmailConfirmation) onSignUpComplete();
+    // Con sesión creada de inmediato, el navegador raíz pasa solo a la app; no hay que volver al login.
+    setTimeout(() => {
+      if (needsEmailConfirmation) {
+        Alert.alert(
+          'Cuenta creada',
+          'Te enviamos un email de confirmación. Abrilo para poder iniciar sesión.'
+        );
+      } else {
+        Alert.alert('Cuenta creada', 'Ya podés usar la app.');
+      }
+    }, 350);
   };
 
   return (
