@@ -57,6 +57,10 @@ export default function MyProfileScreen({ navigation, route }: Props) {
   const [editValue, setEditValue] = useState('');
   const [inlineError, setInlineError] = useState('');
   const [saving, setSaving] = useState(false);
+  // Paso de confirmación dentro del mismo Modal: iOS no deja presentar un segundo Modal (el de Alert.alert) encima.
+  const [confirming, setConfirming] = useState(false);
+  // Aviso "Listo" pendiente: se muestra recién cuando el Modal de edición terminó de cerrarse.
+  const doneAlertPendingRef = useRef(false);
 
   const load = useCallback(async () => {
     const me = await supabase.auth.getUser();
@@ -140,6 +144,7 @@ export default function MyProfileScreen({ navigation, route }: Props) {
     }
     setEditValue(displayName);
     setInlineError('');
+    setConfirming(false);
     setModalVisible(true);
   };
 
@@ -147,6 +152,13 @@ export default function MyProfileScreen({ navigation, route }: Props) {
     if (saving) return;
     setModalVisible(false);
     setInlineError('');
+    setConfirming(false);
+  };
+
+  const showDoneAlert = () => {
+    if (!doneAlertPendingRef.current) return;
+    doneAlertPendingRef.current = false;
+    Alert.alert('Listo', 'Tu nombre se actualizó correctamente.');
   };
 
   const checkDuplicate = async (trimmed: string): Promise<boolean> => {
@@ -181,18 +193,19 @@ export default function MyProfileScreen({ navigation, route }: Props) {
       const msg = error.message?.toLowerCase() ?? '';
       const dup =
         error.code === '23505' || msg.includes('unique') || msg.includes('duplicate');
-      if (dup) {
-        setInlineError('Ese nombre ya está en uso');
-        return;
-      }
-      Alert.alert('Error', error.message ?? 'No se pudo guardar el nombre.');
+      // Vuelve a la edición y muestra el error en línea: un Alert.alert acá se abriría sobre el Modal (ver arriba).
+      setConfirming(false);
+      setInlineError(dup ? 'Ese nombre ya está en uso' : error.message ?? 'No se pudo guardar el nombre.');
       return;
     }
     setDisplayName(trimmed);
     setDisplayNameChangedAt(nowIso);
     setModalVisible(false);
     setInlineError('');
-    Alert.alert('Listo', 'Tu nombre se actualizó correctamente.');
+    setConfirming(false);
+    // El aviso se muestra cuando el Modal termina de cerrarse: onDismiss en iOS; en Android no existe, así que un retardo.
+    doneAlertPendingRef.current = true;
+    if (Platform.OS !== 'ios') setTimeout(showDoneAlert, 300);
   };
 
   const onSavePress = () => {
@@ -213,17 +226,11 @@ export default function MyProfileScreen({ navigation, route }: Props) {
         setInlineError('Ese nombre ya está en uso');
         return;
       }
-      const eligibleAgain = formatDateDDMMYYYY(new Date(Date.now() + COOLDOWN_MS));
-      Alert.alert(
-        'Confirmar cambio',
-        `Una vez que cambies tu nombre, no podrás volver a cambiarlo hasta el ${eligibleAgain}. ¿Continuar?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Confirmar', onPress: () => void performUpdate(trimmed) },
-        ]
-      );
+      setConfirming(true);
     })();
   };
+
+  const eligibleAgain = formatDateDDMMYYYY(new Date(Date.now() + COOLDOWN_MS));
 
   if (loading) {
     return (
@@ -268,41 +275,56 @@ export default function MyProfileScreen({ navigation, route }: Props) {
         ) : null}
       </ScrollView>
 
-      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={closeModal}>
+      <Modal visible={modalVisible} animationType="slide" transparent onRequestClose={closeModal} onDismiss={showDoneAlert}>
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Editar nombre</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editValue}
-              onChangeText={(t) => {
-                setEditValue(t);
-                if (inlineError) setInlineError('');
-              }}
-              placeholder="Tu nombre visible"
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="words"
-              autoCorrect
-              editable={!saving}
-              maxLength={80}
-            />
-            {inlineError ? <Text style={styles.inlineError}>{inlineError}</Text> : null}
+            {confirming ? (
+              <>
+                <Text style={styles.modalTitle}>Confirmar cambio</Text>
+                <Text style={styles.modalMessage}>
+                  {`Una vez que cambies tu nombre, no podrás volver a cambiarlo hasta el ${eligibleAgain}. ¿Continuar?`}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Editar nombre</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editValue}
+                  onChangeText={(t) => {
+                    setEditValue(t);
+                    if (inlineError) setInlineError('');
+                  }}
+                  placeholder="Tu nombre visible"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="words"
+                  autoCorrect
+                  editable={!saving}
+                  maxLength={80}
+                />
+                {inlineError ? <Text style={styles.inlineError}>{inlineError}</Text> : null}
+              </>
+            )}
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={closeModal} disabled={saving}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={confirming ? () => setConfirming(false) : closeModal}
+                disabled={saving}
+              >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalConfirm, saving && styles.modalConfirmDisabled]}
-                onPress={onSavePress}
+                onPress={confirming ? () => void performUpdate(editValue.trim()) : onSavePress}
                 disabled={saving}
               >
                 {saving ? (
                   <ActivityIndicator color={colors.onAccent} />
                 ) : (
-                  <Text style={styles.modalConfirmText}>Guardar</Text>
+                  <Text style={styles.modalConfirmText}>{confirming ? 'Confirmar' : 'Guardar'}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -344,6 +366,7 @@ const createStyles = (c: ThemeColors) =>
       padding: 20,
     },
     modalTitle: { fontSize: 18, fontWeight: '700', color: c.text, marginBottom: 14 },
+    modalMessage: { fontSize: 15, color: c.textBody, lineHeight: 21 },
     modalInput: {
       borderWidth: 1,
       borderColor: c.borderStrong,
