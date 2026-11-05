@@ -22,6 +22,24 @@ Al entrar al perfil de un jugador desde la pantalla de un evento y volver atrás
 1. Corregir el caso del evento (volver desde perfil restaura el scroll).
 2. Auditar todas las pantallas con listas o scroll largo (evento, listas de pairings, búsqueda, perfiles, etc.) y verificar que al volver atrás la altura no cambie respecto de la que tenían al entrar. Probable causa común: recarga de datos al recuperar el foco que reemplaza el contenido por un estado de carga (se desmonta el scroll) en vez de refrescar en segundo plano; revisar los `useFocusEffect` y los spinners de pantalla completa.
 
+### Suizo termina el evento sin top 4 cuando las rondas agotan todos los cruces posibles
+
+Pasa cuando rondas = jugadores − 1 (o más, en general cuando los cruces de la suiza agotan todos los cruces posibles).
+
+**Síntoma:** con 4 jugadores y 3 rondas, al resolverse el último cruce `compute_event_champion` (`0129_copa_fase0_preparacion.sql`) ve "todo resuelto", saca al líder de la tabla de liga y marca `status = 'completed'`. El cliente no arma el top 4 porque `EventDetailScreen.tsx:428` exige `status === 'playing'`. Pasa siempre que rondas = n − 1 (n par), p. ej. 4 jugadores con 3 rondas o 6 con 5.
+
+**Regla de producto deseada:** Suizo + top 4 siempre termina en un top 4 que se arma según el orden de la tabla; el campeón sale del bracket de top 4, no de la tabla de liga. Con 3 rondas entre 4 jugadores se juegan las 3 rondas y después el top 4 por orden de tabla (equivale a todos contra todos + top 4 con el orden de los cruces predefinido; no es lo ideal, pero queda estandarizado).
+
+**A implementar:**
+
+1. `compute_event_champion` debe retornar temprano también para `competition_format = 'swiss'`, junto al retorno temprano de Round Robin con top 4 (línea ~152 de `0129`), para que el campeón salga solo del top 4.
+2. Validación al iniciar el draft: no permitir arrancar un evento Suizo + top 4 con menos de 4 inscriptos activos.
+3. Validación al iniciar: no permitir arrancar si el número de rondas es mayor que el número de cruces únicos posibles entre los jugadores inscriptos (la igualdad sí se permite).
+
+Las validaciones van en el cliente y también en el servidor (la función que inicia el draft o un trigger), con mensajes claros para el organizador.
+
+**Estado:** pendiente, sin implementar.
+
 ## 🔴 Rojo
 
 ### Sistema "Me voy" - revisión pendiente de casos y reglas
