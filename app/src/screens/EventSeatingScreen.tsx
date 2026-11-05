@@ -74,6 +74,9 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
   const [rouletteStep, setRouletteStep] = useState(0);
   const [rouletteSteps, setRouletteSteps] = useState(0);
   const [drawn, setDrawn] = useState<DrawResult | null>(null);
+  // Arranque del mate de ronda de la mesa: se mueve por tiempo (no por flashes); `id` nuevo por sorteo, null fuera del sorteo.
+  const [mateRun, setMateRun] = useState<{ id: number; totalMs: number } | null>(null);
+  const mateRunSeq = useRef(0);
   const blink = useRef(new Animated.Value(1)).current;
   const firstRef = useRef(true);
   // Publicación: nunca dos a la vez, y si el organizador sale a mitad de la animación se publica igual.
@@ -262,6 +265,7 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     revealAnimRef.current = fadeOut;
     fadeOut.start(({ finished }) => {
       if (!finished || !aliveRef.current) return;
+      setMateRun(null);
       setRouletteStep(steps);
       timersRef.current.push(
         setTimeout(() => {
@@ -296,6 +300,7 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     }
     // A partir de acá el sorteo existe en el servidor como pendiente: pase lo que pase se publica.
     toPublishRef.current = true;
+    setMateRun(null);
     const fades = Array.from({ length: result.n }, () => new Animated.Value(1));
     seatFadesRef.current = fades;
     setDrawn(result);
@@ -303,7 +308,8 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
     if (result.warning) Alert.alert('Aviso', result.warning);
 
     // Frena fuerte hacia el final y el último paso intermedio dura claramente más (suspenso antes del fade out).
-    const base = rouletteDelays(2800, 70, 1.22);
+    // 3150 ms con este ritmo dan 12 pasos (con 2800 daban 11): alcanzan para que el mate pase por 3 receptores.
+    const base = rouletteDelays(3150, 70, 1.22);
     const delays = base.map((d, i) => (i === base.length - 1 ? Math.round(d * 1.8) : d));
     setRouletteSteps(delays.length);
     setRouletteStep(0);
@@ -323,6 +329,9 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
       if (i < delays.length - 1) timersRef.current.push(setTimeout(() => setRouletteStep(i + 1), acc));
     });
     timersRef.current.push(setTimeout(() => revealFinal(delays.length, fades), acc));
+    // El mate corre desde el primer flash hasta que entran las posiciones finales (el último paso + el fade out).
+    mateRunSeq.current += 1;
+    setMateRun({ id: mateRunSeq.current, totalMs: acc + FADE_OUT_MS });
   };
 
   useLayoutEffect(() => {
@@ -393,6 +402,10 @@ export default function EventSeatingScreen({ route, navigation }: Props) {
                 seatFade={seatFadesRef.current}
                 lite={mode === 'animating' && rouletteStep < rouletteSteps}
                 active={isFocused}
+                // Durante la ruleta el marcador de orden y el vórtice exterior no se dibujan: entran cuando las posiciones
+                // finales quedan fijas (revealFinal -> setRouletteStep(steps)).
+                revealMarkers={mode !== 'animating' || rouletteStep >= rouletteSteps}
+                mateRun={mateRun}
               />
             )}
           </>

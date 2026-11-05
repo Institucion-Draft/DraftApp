@@ -4,7 +4,7 @@
  *  - tableBodySize: ancho y alto de la mesa según la cantidad de lugares.
  *  - circuitArrows: flechas curvas que envuelven la mesa en forma de óvalo.
  */
-import { tableLayout, type PackDirection } from './eventSeating';
+import { seatSlots, tableLayout, type PackDirection } from './eventSeating';
 
 // ── Semilla determinística ───────────────────────────────────────────────────────────────────────────────────────
 function hash32(input: string): number {
@@ -87,6 +87,149 @@ export function scatterEmojis(eventId: string): ScatterEmoji[] {
       rotate: Math.round((rng() - 0.5) * 40),
     };
   });
+}
+
+// ── Órbita del 🧉 durante el sorteo ───────────────────────────────────────────────────────────────────────────────
+/** Caja aproximada de un emoji desperdigado (fontSize 22, lineHeight 26), en px. */
+export const SCATTER_BOX = { w: 28, h: 26 };
+/** Esquina superior izquierda de un emoji dentro del interior de la mesa, en px. */
+export type MateStop = { x: number; y: number };
+
+/**
+ * Una parada del 🧉 por cada lugar (índice = lugar - 1): lo más cerca posible del jugador de ese lugar, pegado al borde
+ * de la mesa de su lado. Si la posición ideal pisa a otro emoji de `obstacles` (distancia mínima por cajas), se busca la
+ * más cercana que no lo haga (se prefiere deslizarse por el borde antes que meterse hacia el centro). Los jugadores
+ * están fuera de la mesa, así que sólo se evita a los demás emojis. `width`/`height` son el interior de la mesa.
+ */
+export function mateOrbitStops(opts: {
+  n: number;
+  width: number;
+  height: number;
+  /** Alto de un lugar con su nombre y alto del cuadrado del lugar (como en SeatingTable). */
+  cellH: number;
+  sq: number;
+  obstacles: MateStop[];
+}): MateStop[] {
+  const { n, width, height, cellH, sq, obstacles } = opts;
+  const L = tableLayout(n);
+  const { w: bw, h: bh } = SCATTER_BOX;
+  const margin = 4;
+  const gap = L.perSide > 0 ? Math.max(0, (height - L.perSide * cellH) / (L.perSide + 1)) : 0;
+  const sideCenterY = (row: number) => gap * (row + 1) + cellH * row + sq / 2;
+  const maxX = Math.max(0, width - bw);
+  const maxY = Math.max(0, height - bh);
+  const clampX = (x: number) => Math.min(maxX, Math.max(0, x));
+  const clampY = (y: number) => Math.min(maxY, Math.max(0, y));
+  const hits = (x: number, y: number) => obstacles.some((o) => Math.abs(o.x - x) < bw + 2 && Math.abs(o.y - y) < bh + 2);
+
+  return seatSlots(n).map((slot) => {
+    let x = clampX((width - bw) / 2);
+    let y = clampY(margin);
+    // Eje tangencial (a lo largo del borde) y hacia adentro, como vectores unitarios.
+    let tang = { x: 1, y: 0 };
+    let inward = { x: 0, y: 1 };
+    if (slot.zone === 'bottom') {
+      y = clampY(height - bh - margin);
+      inward = { x: 0, y: -1 };
+    } else if (slot.zone === 'right') {
+      x = clampX(width - bw - margin);
+      y = clampY(sideCenterY(slot.row) - bh / 2);
+      tang = { x: 0, y: 1 };
+      inward = { x: -1, y: 0 };
+    } else if (slot.zone === 'left') {
+      x = clampX(margin);
+      y = clampY(sideCenterY(slot.row) - bh / 2);
+      tang = { x: 0, y: 1 };
+      inward = { x: 1, y: 0 };
+    }
+    if (!hits(x, y)) return { x, y };
+    let best: MateStop | null = null;
+    let bestScore = Infinity;
+    for (let a = -120; a <= 120; a += 6) {
+      for (let b = 0; b <= 60; b += 6) {
+        const cx = clampX(x + tang.x * a + inward.x * b);
+        const cy = clampY(y + tang.y * a + inward.y * b);
+        if (hits(cx, cy)) continue;
+        const score = Math.abs(a) + 1.5 * b;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x: cx, y: cy };
+        }
+      }
+    }
+    return best ?? { x, y };
+  });
+}
+
+/**
+ * Lugar (índice = lugar - 1) del cebador: fijo durante todo el sorteo y determinístico por id de evento (como las
+ * medialunas y las cartas desperdigadas).
+ */
+export function mateCebadorSeat(eventId: string, n: number): number {
+  const total = Math.max(1, Math.trunc(n));
+  return hash32(`mate:${eventId}`) % total;
+}
+
+/** Ciclos de cebar + tomar en que se divide el sorteo: el mate pasa por esta cantidad de receptores. */
+export const MATE_CYCLES = 5;
+/** Parte del ciclo que dura "cebar" (el resto es "tomar"): proporción 2:3. */
+export const MATE_BREW_SHARE = 0.4;
+/** Parte de "cebar" que dura cada deslizamiento: así la vuelta al cebador y la ida al receptor entran sin solaparse. */
+export const MATE_SLIDE_SHARE = 0.45;
+
+/**
+ * Receptores del "mate de ronda", uno por ciclo. El primero es cualquier lugar menos el cebador (`firstPick` en [0,1): el
+ * azar lo pone quien llama, una vez por sorteo); los siguientes siguen la ronda uno a uno en `direction` (puede repetir
+ * lugares en mesas chicas, y a veces le toca al propio cebador). Los lugares son índices = lugar - 1.
+ */
+export function mateReceivers(opts: { n: number; direction: PackDirection; cebador: number; firstPick: number }): number[] {
+  const n = Math.max(1, Math.trunc(opts.n));
+  if (n === 1) return Array.from({ length: MATE_CYCLES }, () => 0);
+  const cebador = Math.min(n - 1, Math.max(0, Math.trunc(opts.cebador)));
+  const candidates = Array.from({ length: n }, (_, i) => i).filter((i) => i !== cebador);
+  const pick = Math.min(candidates.length - 1, Math.max(0, Math.floor(opts.firstPick * candidates.length)));
+  let receiver = candidates[pick];
+  const stepDir = opts.direction === 'cw' ? 1 : -1;
+  const out: number[] = [];
+  for (let k = 0; k < MATE_CYCLES; k += 1) {
+    out.push(receiver);
+    receiver = (receiver + stepDir + n) % n;
+  }
+  return out;
+}
+
+export type MateMove = {
+  /** ms desde el arranque del sorteo en que empieza el deslizamiento. */
+  at: number;
+  /** Lugar (índice = lugar - 1) hacia el que se desliza. */
+  seat: number;
+};
+
+/**
+ * Cronograma del mate por TIEMPO (no por flashes): `totalMs` se divide en MATE_CYCLES ciclos iguales; en cada uno, "cebar"
+ * (40%) es donde el mate vuelve al cebador desde el receptor anterior (al empezar el ciclo) y viaja al receptor nuevo
+ * (justo al final de cebar), y "tomar" (60%) es el rato que queda cerca del receptor. Si el receptor es el propio cebador no
+ * hay ida (y no hay vuelta en el ciclo siguiente). Todos los deslizamientos duran `slideMs` y no se solapan.
+ */
+export function mateSchedule(opts: { totalMs: number; receivers: number[]; cebador: number }): {
+  moves: MateMove[];
+  cycleMs: number;
+  brewMs: number;
+  takeMs: number;
+  slideMs: number;
+} {
+  const cycleMs = Math.max(0, opts.totalMs) / MATE_CYCLES;
+  const brewMs = cycleMs * MATE_BREW_SHARE;
+  const takeMs = cycleMs - brewMs;
+  const slideMs = Math.floor(brewMs * MATE_SLIDE_SHARE);
+  const moves: MateMove[] = [];
+  opts.receivers.forEach((receiver, k) => {
+    const base = k * cycleMs;
+    const prev = k === 0 ? opts.cebador : opts.receivers[k - 1];
+    if (prev !== opts.cebador) moves.push({ at: base, seat: opts.cebador });
+    if (receiver !== opts.cebador) moves.push({ at: base + brewMs - slideMs, seat: receiver });
+  });
+  return { moves, cycleMs, brewMs, takeMs, slideMs };
 }
 
 // ── Tamaño de la mesa ────────────────────────────────────────────────────────────────────────────────────────────
