@@ -14,6 +14,7 @@ import { fetchEventPodiums, type EventPodiumResult } from '../lib/eventPodium';
 import { cupReachedInstance, cupReachedText, type CupGroupInput, type CupSlotInput } from '../lib/cupReachedInstance';
 import { CUP_CONSUELO_NAME, cupPrimaName } from '../lib/knockoutRounds';
 import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { pickColorCombos, type ColorCombo, type ComboViewRow } from '../lib/colorCombos';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -28,6 +29,8 @@ const MANA_IMAGES: Partial<Record<MtgColor, ReturnType<typeof require>>> = {
 
 const MANA_SIZE_LG = 32;
 const MANA_SIZE_SM = 20;
+// Íconos de las combinaciones: más chicos y juntos para que entren 3 por fila (hasta 5 colores cada una) en pantallas angostas.
+const MANA_SIZE_XS = 14;
 
 function ManaSymbol({ color, size = MANA_SIZE_LG }: { color: string; size?: number }) {
   const src = MANA_IMAGES[color as MtgColor];
@@ -52,8 +55,9 @@ type ColorStat = {
   color: string;
   times_played: number;
   percentage: number;
-  pairings_played: number;
-  bo3_winrate: number | null;
+  /** Partidas individuales oficiales jugadas con el color y % ganado (un decimal); la vista excluye venganzas, 2HG y sandbox. */
+  games_played: number;
+  game_winrate: number | null;
 };
 
 type EventEntry = {
@@ -65,6 +69,8 @@ type EventEntry = {
   colors: MtgColor[];
   /** Copa sola / Grupos + Copa: instancia alcanzada ("Campeón Copa Quito"...); null en los demás formatos. */
   reached: string | null;
+  /** Draft ya terminado pero con los enfrentamientos en curso (status 'playing'): todavía no hay posición final ("Inc"). */
+  inProgress: boolean;
 };
 
 type H2HEntry = {
@@ -174,6 +180,58 @@ async function loadCupReachedTexts(
   return out;
 }
 
+/**
+ * Combinaciones de colores del jugador en el workspace: una sola lectura de v_player_color_combo_stats (la vista ya deja
+ * afuera venganzas, Gigantes de Dos Cabezas y eventos de prueba, e incluye top cut y desempates). Si falla, vacío.
+ * El orden y la elección de las 3 mejores están en lib/colorCombos.ts.
+ */
+type ComboResult = { mostUsed: ColorCombo[]; bestWinrate: ColorCombo[] };
+const NO_COMBOS: ComboResult = { mostUsed: [], bestWinrate: [] };
+
+async function loadColorCombos(userId: string, workspaceId: string): Promise<ComboResult> {
+  try {
+    const res = await supabase
+      .from('v_player_color_combo_stats')
+      .select('combo, decks_count, games_played, games_won')
+      .eq('user_id', userId)
+      .eq('workspace_id', workspaceId);
+    if (res.error) return NO_COMBOS;
+    return pickColorCombos((res.data ?? []) as ComboViewRow[]);
+  } catch {
+    return NO_COMBOS;
+  }
+}
+
+/** Fila de hasta 3 combinaciones, una al lado de la otra; los huecos se rellenan para que el ancho de cada una no cambie. */
+function ComboRow({ items, mode }: { items: ColorCombo[]; mode: 'used' | 'winrate' }) {
+  const styles = useThemedStyles(createStyles);
+  return (
+    <View style={styles.comboRow}>
+      {[0, 1, 2].map((i) => {
+        const c = items[i];
+        if (!c) return <View key={i} style={styles.comboItem} />;
+        return (
+          <View key={c.key} style={styles.comboItem}>
+            <View style={styles.comboIcons}>
+              {c.colors.map((col, j) => (
+                <ManaSymbol key={`${col}-${j}`} color={col} size={MANA_SIZE_XS} />
+              ))}
+            </View>
+            {mode === 'used' ? (
+              <Text style={styles.comboValue}>{c.decks} {c.decks === 1 ? 'vez' : 'veces'}</Text>
+            ) : (
+              <>
+                <Text style={[styles.comboValue, styles.comboWr]}>{c.winrate}%</Text>
+                <Text style={styles.comboSub}>{c.played} part.</Text>
+              </>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 // ── Componente ────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -190,12 +248,13 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
   const [history, setHistory] = useState<EventEntry[]>([]);
   const [h2h, setH2H] = useState<H2HEntry[]>([]);
   const [streaks, setStreaks] = useState<Streaks | null>(null);
+  const [combos, setCombos] = useState<ComboResult>(NO_COMBOS);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      const [statsRes, colorsRes, historyRes, h2hRes, streaksRes] = await Promise.all([
+      const [statsRes, colorsRes, historyRes, h2hRes, streaksRes, combosRes] = await Promise.all([
         supabase
           .from('v_player_workspace_stats')
           .select('pairings_won, pairings_lost, total_matches_won, total_matches_lost')
@@ -204,18 +263,21 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           .maybeSingle(),
         supabase
           .from('v_player_color_stats')
-          .select('color, times_played, percentage, pairings_played, bo3_winrate')
+          .select('color, times_played, percentage, games_played, game_winrate')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .order('times_played', { ascending: false }),
         supabase
           .from('v_participant_event_placement')
-          .select('event_id, participant_id, event_name, placement, total_players')
+          .select('event_id, participant_id, event_name, placement, total_players, event_status')
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
-          .eq('event_status', 'completed')
+          // 'playing' = el draft ya terminó (draft_ended_at) y se está en los enfrentamientos, sin posición final; 'completed' y
+          // 'concluded' (dado por concluido) = terminados, con posiciones finales. Quedan afuera 'scheduled' (no empezó),
+          // 'drafting' (todavía drafteando), 'cancelled' y, en la vista, los borrados.
+          .in('event_status', ['playing', 'completed', 'concluded'])
           .order('scheduled_for', { ascending: false })
-          .limit(10),
+          .limit(3),
         supabase
           .from('v_head_to_head_stats')
           .select('opponent_user_id, total_pairings, pairings_won, pairings_lost, draft_matches_won, draft_matches_lost, revenge_matches_won, revenge_matches_lost, total_matches_won, total_matches_lost')
@@ -228,6 +290,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           .eq('user_id', userId)
           .eq('workspace_id', workspaceId)
           .maybeSingle(),
+        loadColorCombos(userId, workspaceId),
       ]);
 
       if (cancelled) return;
@@ -235,7 +298,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
       // Colores por evento (para historial)
       const rawHistory = (historyRes.data ?? []) as Array<{
         event_id: string; participant_id: string; event_name: string;
-        placement: number; total_players: number;
+        placement: number; total_players: number; event_status: string;
       }>;
       const participantIds = rawHistory.map(e => e.participant_id);
       const eventIds = Array.from(new Set(rawHistory.map(e => e.event_id)));
@@ -297,10 +360,12 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
           placement: podiumStep?.rank ?? e.placement,
           colors: colorsByPart[e.participant_id] ?? [],
           reached: cupReachedByEvent.get(e.event_id) ?? null,
+          inProgress: e.event_status === 'playing',
         };
       }));
       setH2H(rawH2H.map(h => ({ ...h, opponent_name: opponentNames[h.opponent_user_id] ?? 'Jugador' })));
       setStreaks((streaksRes.data as Streaks | null) ?? null);
+      setCombos(combosRes);
       setLoading(false);
     }
 
@@ -325,8 +390,8 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
 
   // Colores ordenados por WR% para la sección Win Rate
   const colorsByWr = [...colorStats]
-    .filter(c => c.pairings_played > 0 && c.bo3_winrate !== null)
-    .sort((a, b) => (b.bo3_winrate ?? 0) - (a.bo3_winrate ?? 0));
+    .filter(c => c.games_played > 0 && c.game_winrate !== null)
+    .sort((a, b) => (b.game_winrate ?? 0) - (a.game_winrate ?? 0));
 
   return (
     <>
@@ -336,7 +401,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
         {totalPairings > 0 || totalMatches > 0 ? (
           <>
             <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Partidas Bo3</Text>
+              <Text style={styles.statLabel}>Enfrentamientos</Text>
               <Text style={styles.statValue}>
                 {aggStats!.pairings_won}G – {aggStats!.pairings_lost}P
                 {pairingWinPct !== null ? `  (${pairingWinPct}%)` : ''}
@@ -380,16 +445,31 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
               <View key={c.color} style={styles.colorItem}>
                 <ManaSymbol color={c.color} size={MANA_SIZE_LG} />
                 <Text style={styles.colorLabel}>{c.color}</Text>
-                <Text style={styles.colorWr}>{c.bo3_winrate}%</Text>
+                <Text style={styles.colorWr}>{c.game_winrate}%</Text>
+                <Text style={styles.colorPct}>{c.games_played} part.</Text>
               </View>
             ))}
           </View>
         </View>
       )}
 
-      {/* ── Historial de drafts ────────────────────────────────────────── */}
+      {/* ── Combinaciones de colores ───────────────────────────────────── */}
+      {combos.mostUsed.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Combinación de colores más usada</Text>
+          <ComboRow items={combos.mostUsed} mode="used" />
+        </View>
+      )}
+      {combos.bestWinrate.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Combinación de colores con más winrate</Text>
+          <ComboRow items={combos.bestWinrate} mode="winrate" />
+        </View>
+      )}
+
+      {/* ── Últimos 3 draft ────────────────────────────────────────────── */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Historial de drafts</Text>
+        <Text style={styles.sectionTitle}>Últimos 3 draft</Text>
         {history.length > 0 ? (
           history.map(e => (
             <View key={e.event_id} style={styles.historyRow}>
@@ -403,7 +483,7 @@ export default function CrossEventStats({ userId, workspaceId }: Props) {
                   </View>
                 )}
               </View>
-              <Text style={styles.historyPlacement}>{e.reached ?? `${e.placement}° de ${e.total_players}`}</Text>
+              <Text style={styles.historyPlacement}>{e.inProgress ? 'Inc' : e.reached ?? `${e.placement}° de ${e.total_players}`}</Text>
             </View>
           ))
         ) : (
@@ -523,6 +603,14 @@ const createStyles = (c: ThemeColors) =>
     colorLabel: { fontSize: 12, fontWeight: '700', color: c.textBody },
     colorPct: { fontSize: 11, color: c.textSecondary },
     colorWr:  { fontSize: 11, fontWeight: '700', color: c.accent },
+
+    // Combinaciones de colores (3 por fila)
+    comboRow: { flexDirection: 'row', gap: 8 },
+    comboItem: { flex: 1, minWidth: 0, alignItems: 'center', gap: 4 },
+    comboIcons: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 1 },
+    comboValue: { fontSize: 12, fontWeight: '600', color: c.text, textAlign: 'center' },
+    comboWr: { color: c.accent, fontWeight: '700' },
+    comboSub: { fontSize: 11, color: c.textSecondary, textAlign: 'center' },
 
     // Historial drafts
     historyRow: {
