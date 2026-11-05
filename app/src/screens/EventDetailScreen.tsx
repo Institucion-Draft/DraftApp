@@ -249,6 +249,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [delegateCandidates, setDelegateCandidates] = useState<DelegateCandidate[]>([]);
   const [loadingDelegateCandidates, setLoadingDelegateCandidates] = useState(false);
   const [transferringPosta, setTransferringPosta] = useState(false);
+  // Confirmación y error dentro del mismo Modal: iOS no deja presentar un segundo Modal (el de Alert.alert) encima.
+  const [delegateConfirm, setDelegateConfirm] = useState<DelegateCandidate | null>(null);
+  const [delegateError, setDelegateError] = useState('');
 
   const load = useCallback(async () => {
     setProdeCVoteCount(null);
@@ -1147,6 +1150,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const openDelegateModal = async () => {
     if (!event || !myUserId) return;
     setLoadingDelegateCandidates(true);
+    setDelegateConfirm(null);
+    setDelegateError('');
     setDelegateModalVisible(true);
 
     // role='player' ya viene filtrado por el select de `participants` (Fase 8: excluye
@@ -1212,7 +1217,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     });
     setTransferringPosta(false);
     if (error) {
-      Alert.alert('No se pudo delegar', error.message ?? 'No se pudo transferir la posta.');
+      // Vuelve a la lista y muestra el error en línea: un Alert.alert acá se abriría sobre el Modal.
+      setDelegateConfirm(null);
+      setDelegateError(`No se pudo delegar: ${error.message ?? 'No se pudo transferir la posta.'}`);
       return;
     }
     setDelegateModalVisible(false);
@@ -1220,10 +1227,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   };
 
   const confirmDelegate = (candidate: DelegateCandidate) => {
-    Alert.alert('Delegar facultades', `¿Ceder facultades a ${candidate.name}?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Ceder', onPress: () => void doTransferPosta(candidate) },
-    ]);
+    setDelegateError('');
+    setDelegateConfirm(candidate);
   };
 
   const finishDraftAndGeneratePairings = async () => {
@@ -2287,7 +2292,30 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <View style={styles.delegateBackdrop}>
           <View style={styles.delegateSheet}>
             <Text style={styles.delegateTitle}>Delegar facultades</Text>
+            {delegateConfirm ? (
+              <>
+                <Text style={styles.delegateConfirmMsg}>{`¿Ceder facultades a ${delegateConfirm.name}?`}</Text>
+                <View style={styles.delegateConfirmActions}>
+                  <TouchableOpacity
+                    style={styles.delegateCancelBtn}
+                    disabled={transferringPosta}
+                    onPress={() => setDelegateConfirm(null)}
+                  >
+                    <Text style={styles.delegateCancelTxt}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.delegateConfirmBtn, transferringPosta && styles.delegateConfirmBtnDisabled]}
+                    disabled={transferringPosta}
+                    onPress={() => void doTransferPosta(delegateConfirm)}
+                  >
+                    <Text style={styles.delegateConfirmBtnTxt}>Ceder</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
             <Text style={styles.delegateSubtitle}>Elegí a quién le cedés las facultades de organizador de este evento.</Text>
+            {delegateError ? <Text style={styles.delegateError}>{delegateError}</Text> : null}
             {loadingDelegateCandidates ? (
               <ActivityIndicator size="small" color={colors.accent} style={styles.delegateLoading} />
             ) : delegateCandidates.length === 0 ? (
@@ -2323,6 +2351,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             >
               <Text style={styles.delegateCancelTxt}>Cancelar</Text>
             </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -2633,4 +2663,16 @@ const createStyles = (c: ThemeColors) =>
     postaBadgeText: { color: c.organizer.onSolid, fontSize: 9, fontWeight: '700', lineHeight: 11 },
     delegateCancelBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 6 },
     delegateCancelTxt: { color: c.textSecondary, fontSize: 14, fontWeight: '600' },
+    delegateError: { color: c.status.error.solid, fontSize: 14, fontWeight: '600', marginBottom: 10 },
+    delegateConfirmMsg: { fontSize: 15, color: c.textBody, marginTop: 4, marginBottom: 14 },
+    delegateConfirmActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12 },
+    delegateConfirmBtn: {
+      backgroundColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+    },
+    delegateConfirmBtnDisabled: { opacity: 0.6 },
+    delegateConfirmBtnTxt: { color: c.onAccent, fontSize: 15, fontWeight: '600' },
   });
