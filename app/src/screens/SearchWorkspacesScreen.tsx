@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -62,6 +62,10 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
   );
   const [joinMessage, setJoinMessage] = useState('');
   const [joinSubmitting, setJoinSubmitting] = useState(false);
+  // Errores en línea dentro del Modal y avisos después de que cierre: iOS no deja presentar un segundo Modal
+  // (el de Alert.alert) encima del de la solicitud.
+  const [joinError, setJoinError] = useState('');
+  const pendingAlertRef = useRef<{ title: string; message: string } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
@@ -151,6 +155,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
   const openJoinModal = (w: SearchWorkspaceRow) => {
     setJoinWorkspace(w);
     setJoinMessage('');
+    setJoinError('');
     setJoinModalVisible(true);
   };
 
@@ -158,18 +163,30 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
     setJoinModalVisible(false);
     setJoinWorkspace(null);
     setJoinMessage('');
+    setJoinError('');
+  };
+
+  const flushPendingAlert = () => {
+    const pending = pendingAlertRef.current;
+    if (!pending) return;
+    pendingAlertRef.current = null;
+    Alert.alert(pending.title, pending.message);
+  };
+
+  // Muestra el aviso cuando el Modal termina de cerrarse: onDismiss en iOS; en Android no existe, así que un retardo.
+  const alertAfterModalClose = (title: string, message: string) => {
+    pendingAlertRef.current = { title, message };
+    if (Platform.OS !== 'ios') setTimeout(flushPendingAlert, 300);
   };
 
   const confirmJoin = async () => {
     if (!user?.id || !joinWorkspace) return;
     if (joinMessage.length > JOIN_MSG_MAX) {
-      Alert.alert(
-        'Mensaje muy largo',
-        `El mensaje no puede superar ${JOIN_MSG_MAX} caracteres.`
-      );
+      setJoinError(`El mensaje no puede superar ${JOIN_MSG_MAX} caracteres.`);
       return;
     }
 
+    setJoinError('');
     setJoinSubmitting(true);
     const { error } = await supabase.from('workspace_join_requests').insert({
       workspace_id: joinWorkspace.id,
@@ -186,20 +203,20 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
         msg.includes('duplicate') ||
         msg.includes('unique');
       if (dup) {
-        Alert.alert(
+        closeJoinModal();
+        alertAfterModalClose(
           'Solicitud existente',
           'Ya tenés una solicitud pendiente para este grupo.'
         );
-        closeJoinModal();
         void runSearch();
         return;
       }
-      Alert.alert('Error', error.message ?? 'No se pudo enviar la solicitud.');
+      setJoinError(error.message ?? 'No se pudo enviar la solicitud.');
       return;
     }
 
     closeJoinModal();
-    Alert.alert('Listo', 'Tu solicitud fue enviada.');
+    alertAfterModalClose('Listo', 'Tu solicitud fue enviada.');
     void runSearch();
   };
 
@@ -299,6 +316,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
         animationType="slide"
         transparent
         onRequestClose={closeJoinModal}
+        onDismiss={flushPendingAlert}
       >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
@@ -325,6 +343,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
             <Text style={styles.modalCounter}>
               {joinMessage.length}/{JOIN_MSG_MAX}
             </Text>
+            {joinError ? <Text style={styles.joinError}>{joinError}</Text> : null}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.modalCancel}
@@ -359,6 +378,7 @@ export default function SearchWorkspacesScreen({ navigation }: Props) {
 
 const createStyles = (c: ThemeColors) =>
   StyleSheet.create({
+    joinError: { marginTop: 6, color: c.status.error.solid, fontSize: 14, fontWeight: '600' },
     container: {
       flex: 1,
       backgroundColor: c.background,

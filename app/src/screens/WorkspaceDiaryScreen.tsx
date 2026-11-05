@@ -72,6 +72,8 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
   const [formContent, setFormContent] = useState('');
   const [formKind, setFormKind] = useState<DiaryKind>('bug');
   const [formSaving, setFormSaving] = useState(false);
+  // Validaciones y errores en línea dentro del Modal: iOS no deja presentar un segundo Modal (el de Alert.alert) encima.
+  const [formError, setFormError] = useState('');
 
   const load = useCallback(async () => {
     const meRes = await supabase.auth.getUser();
@@ -127,29 +129,32 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
   const openCreate = () => {
     setFormContent('');
     setFormKind('bug');
+    setFormError('');
     setFormOpen(true);
   };
 
   const closeForm = () => {
     setFormOpen(false);
     setFormSaving(false);
+    setFormError('');
   };
 
   const submitForm = async () => {
     const trimmed = formContent.trim();
     if (!trimmed.length) {
-      Alert.alert('Vacío', 'Escribí algo antes de publicar.');
+      setFormError('Escribí algo antes de publicar.');
       return;
     }
     if (trimmed.length > 2000) {
-      Alert.alert('Demasiado largo', 'El texto puede tener hasta 2000 caracteres.');
+      setFormError('El texto puede tener hasta 2000 caracteres.');
       return;
     }
     if (!myUserId) {
-      Alert.alert('Sesión', 'Tenés que iniciar sesión para continuar.');
+      setFormError('Tenés que iniciar sesión para continuar.');
       return;
     }
 
+    setFormError('');
     setFormSaving(true);
     try {
       const { error } = await supabase.from('workspace_diary_entries').insert({
@@ -163,7 +168,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
       await load();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'No se pudo guardar.';
-      Alert.alert('Error', msg);
+      setFormError(msg);
       setFormSaving(false);
     }
   };
@@ -256,6 +261,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
                 textAlignVertical="top"
               />
               <Text style={styles.counter}>{formContent.length}/2000</Text>
+              {formError ? <Text style={styles.formError}>{formError}</Text> : null}
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.modalCancel} onPress={closeForm} disabled={formSaving}>
                   <Text style={styles.modalCancelTxt}>Cancelar</Text>
@@ -278,6 +284,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
 
 const createStyles = (c: ThemeColors) =>
   StyleSheet.create({
+    formError: { marginTop: 6, color: c.status.error.solid, fontSize: 14, fontWeight: '600' },
     screen: { flex: 1, backgroundColor: c.backgroundAlt },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: c.background },
     addBtn: {
