@@ -1007,9 +1007,9 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [pb, setPb] = useState<ParticipantRow | null>(null);
   /** Ditto: a qué participante/miembro copia el sprite cada Ditto (clave participantId|a|b). Vacío = nadie copia. */
   const [dittoMirrors, setDittoMirrors] = useState<Map<string, DittoMirrorTarget>>(() => new Map());
-  // Cartel "¿Quién empieza?" abierto (misma condición que lo muestra, más abajo).
+  // Cartel "¿Quién empieza?" abierto (misma condición que lo muestra, más abajo). Se pregunta siempre,
+  // con o sin seguimiento de turnos, para que quede registrado quién empezó.
   const starterPending =
-    turnTrackingEnabled &&
     whoStartedParticipantId == null &&
     !!pa &&
     !!pb &&
@@ -1301,7 +1301,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       setShowShinyAnimB(false);
       return;
     }
-    if (turnTrackingEnabled && whoStartedParticipantId == null) {
+    if (whoStartedParticipantId == null) {
       setShowShinyAnimA(false);
       setShowShinyAnimB(false);
       return;
@@ -1332,7 +1332,6 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     matchId,
     pa,
     pb,
-    turnTrackingEnabled,
     whoStartedParticipantId,
   ]);
 
@@ -2048,27 +2047,60 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       if (savingStarter) return;
       if (!match) return;
       setSavingStarter(true);
-      const { error } = await supabase
-        .from('matches')
-        .update({ who_started_participant_id: participantId })
-        .eq('id', match.id);
+      // El tiempo de la partida arranca al elegir quién empieza: la primera vez (nadie había empezado
+      // todavía) se mueve started_at en el mismo update. Si ya había quién empieza, no se toca.
+      const isFirstStarterPick = whoStartedParticipantId == null;
+      let error: { message?: string } | null;
+      let chosenId = participantId;
+      if (isFirstStarterPick) {
+        // Primera elección: sólo si nadie eligió todavía (condición en la base). 0 filas = otro dispositivo
+        // ya eligió: no se pisa nada y se adopta lo que eligió.
+        const res = await supabase
+          .from('matches')
+          .update({ who_started_participant_id: participantId, started_at: new Date().toISOString() })
+          .eq('id', match.id)
+          .is('who_started_participant_id', null)
+          .select('id');
+        error = res.error;
+        if (!error && (res.data?.length ?? 0) === 0) {
+          const reread = await supabase
+            .from('matches')
+            .select('who_started_participant_id')
+            .eq('id', match.id)
+            .maybeSingle();
+          const otherChoice =
+            (reread.data as { who_started_participant_id?: string | null } | null)?.who_started_participant_id ?? null;
+          if (reread.error || otherChoice == null) {
+            // No se pudo confirmar quién eligió: el modal queda abierto, sin error.
+            setSavingStarter(false);
+            return;
+          }
+          chosenId = otherChoice;
+        }
+      } else {
+        const res = await supabase
+          .from('matches')
+          .update({ who_started_participant_id: participantId })
+          .eq('id', match.id);
+        error = res.error;
+      }
       setSavingStarter(false);
       if (error) {
         Alert.alert('Error', error.message ?? 'No se pudo guardar quién empieza.');
         return;
       }
-      setWhoStartedParticipantId(participantId);
-      setMatch((prev) => (prev ? { ...prev, who_started_participant_id: participantId } : prev));
+      setWhoStartedParticipantId(chosenId);
+      setMatch((prev) => (prev ? { ...prev, who_started_participant_id: chosenId } : prev));
       if (turnTrackingEnabled) {
         const a = clampLife(pendingARef.current ?? stableARef.current);
         const b = clampLife(pendingBRef.current ?? stableBRef.current);
-        setCurrentTurnParticipantId(participantId);
+        setCurrentTurnParticipantId(chosenId);
         setTurnStartLifeA(a);
         setTurnStartLifeB(b);
         setTurnStartedAt(new Date().toISOString());
       }
     },
-    [match, savingStarter, turnTrackingEnabled]
+    [match, savingStarter, turnTrackingEnabled, whoStartedParticipantId]
   );
 
   const passTurn = useCallback(async () => {
