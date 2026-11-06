@@ -1384,7 +1384,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
     const durationLabel = formatCompletedMatchDuration(m.started_at, m.ended_at);
     const showLive = m.status === 'in_progress' && inProgressLives && inProgressMatch?.id === m.id;
     const starterName =
-      m.status === 'completed' &&
       m.who_started_participant_id &&
       (m.who_started_participant_id === pairing.participant_a_id ||
         m.who_started_participant_id === pairing.participant_b_id)
@@ -1409,7 +1408,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
               #{displayNum} · {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
             </Text>
-            {starterName ? <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text> : null}
           </View>
           {showLive ? (
             <Text style={styles.matchLiveScore}>
@@ -1421,6 +1419,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <View>
               <Text style={styles.matchWinner}>
                 Ganó {m.winner_participant_id === pairing.participant_a_id ? aName : bName}
+                {starterName ? <Text style={styles.matchStarter}> · 1º {starterName}</Text> : null}
               </Text>
               {durationLabel ? (
                 <Text style={styles.matchDuration}>
@@ -1432,6 +1431,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           ) : null}
           {m.status === 'completed' && !m.winner_participant_id ? (
             <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+          ) : null}
+          {starterName && !(m.status === 'completed' && m.winner_participant_id) ? (
+            <Text style={styles.matchStarterOnly}>1º {starterName}</Text>
           ) : null}
           {m.status === 'completed' ? (
             <View style={styles.matchTimeRow}>
@@ -1469,7 +1471,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
       : `#${displayNum}${roundSuffix}`;
     // Identidad del cruce mata-mata: del bracket match (mata*), no del pairing.
     const starterName =
-      m.status === 'completed' &&
       m.who_started_participant_id &&
       (m.who_started_participant_id === mataAId || m.who_started_participant_id === mataBId)
         ? m.who_started_participant_id === mataAId
@@ -1493,7 +1494,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <Text style={[styles.meta, m.status === 'in_progress' && styles.matchLiveTxt]}>
               {rowLabel} · {m.status === 'in_progress' ? '● EN VIVO' : 'Completado'}
             </Text>
-            {starterName ? <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text> : null}
           </View>
           {showLive ? (
             <Text style={styles.matchLiveScore}>
@@ -1505,6 +1505,7 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
             <View>
               <Text style={styles.matchWinner}>
                 Ganó {m.winner_participant_id === mataAId ? mataAName : mataBName}
+                {starterName ? <Text style={styles.matchStarter}> · 1º {starterName}</Text> : null}
               </Text>
               {durationLabel ? (
                 <Text style={styles.matchDuration}>
@@ -1516,6 +1517,9 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
           ) : null}
           {m.status === 'completed' && !m.winner_participant_id ? (
             <Text style={styles.matchWinner}>Partida completada sin ganador oficial.</Text>
+          ) : null}
+          {starterName && !(m.status === 'completed' && m.winner_participant_id) ? (
+            <Text style={styles.matchStarterOnly}>1º {starterName}</Text>
           ) : null}
           {m.status === 'completed' ? (
             <View style={styles.matchTimeRow}>
@@ -1841,7 +1845,6 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                     ? bName
                     : null;
               const starterName =
-                m.status === 'completed' &&
                 m.who_started_participant_id &&
                 (m.who_started_participant_id === pairing.participant_a_id ||
                   m.who_started_participant_id === pairing.participant_b_id)
@@ -1869,11 +1872,14 @@ export default function PairingDetailScreen({ route, navigation }: Props) {
                           : `Venganza N°${revengeNum} · ${
                               m.status === 'in_progress' ? '● EN VIVO' : 'Completado'
                             }`}
+                        {starterName && m.status === 'completed' && winnerName ? (
+                          <Text style={styles.matchStarter}> · 1º {starterName}</Text>
+                        ) : null}
                       </Text>
-                      {starterName ? (
-                        <Text style={styles.matchStartedBy}>Empezó: {starterName}</Text>
-                      ) : null}
                     </View>
+                    {starterName && !(m.status === 'completed' && winnerName) ? (
+                      <Text style={styles.matchStarterOnly}>1º {starterName}</Text>
+                    ) : null}
                     {showLive ? (
                       <Text style={styles.matchLiveScore}>
                         {dispLeftName} {dispLiveL} vs {dispLiveR} {dispRightName}
@@ -2023,7 +2029,9 @@ const createStyles = (c: ThemeColors) =>
       flexWrap: 'wrap',
       alignItems: 'center',
     },
-    matchStartedBy: { fontSize: 12, color: c.textSecondary, marginLeft: 6 },
+    // "1º <jugador>" (jugó primero): sin negrita y en el color secundario, menos jerarquía que "Ganó".
+    matchStarter: { fontWeight: 'normal', color: c.textSecondary },
+    matchStarterOnly: { color: c.textSecondary, fontSize: 13, marginTop: 2 },
     matchChartBtn: {
       justifyContent: 'center',
       alignSelf: 'flex-start',
