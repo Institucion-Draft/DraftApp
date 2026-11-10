@@ -45,6 +45,7 @@ import { resolveGenderedText, type Gender } from '../lib/genderText';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import {
   computePodium,
+  buildGameWinrateMap,
   computeFinalStandingsWithTiebreakSplit,
   rankRoundRobinBo1Standings,
   type PodiumState,
@@ -53,6 +54,7 @@ import {
   type BracketMatchPodiumInput,
   type RoundRobinStandingInput,
   type RoundRobinPairingResult,
+  type GameWinrateMatchInput,
 } from '../lib/podium';
 import {
   buildPairingRemain,
@@ -1604,7 +1606,15 @@ export default function StandingsScreen({ route, navigation }: Props) {
       // por la disputa, ver EventDetailScreen/roundRobinFirstPlaceTiebreak.ts), lo que además
       // cambiaba la calidad de rivales de los que quedan activos. rankRoundRobinBo1Standings no
       // filtra por left_event_at — misma cascada de desempate, orden total, sin exclusiones.
-      const standings = rankRoundRobinBo1Standings(standingInputs, pairingResultsForRanking);
+      // Paso 3 del desempate (ciclos): winrate de partidas SIN walkovers. En BO2 no aplica.
+      const gameWinrateMap = isBo2
+        ? undefined
+        : buildGameWinrateMap(
+            rowsBuilt.map((r) => r.participantId),
+            pairings as { id: string; participant_a_id: string; participant_b_id: string }[],
+            matches as GameWinrateMatchInput[]
+          );
+      const standings = rankRoundRobinBo1Standings(standingInputs, pairingResultsForRanking, gameWinrateMap);
       const rowsById = new Map(rowsBuilt.map((r) => [r.participantId, r]));
       rowsBuilt.length = 0;
       rowsBuilt.push(...standings.map((pid) => rowsById.get(pid)).filter((r): r is RowView => r != null));

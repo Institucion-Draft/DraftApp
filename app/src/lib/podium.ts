@@ -765,6 +765,49 @@ export type RoundRobinPairingResult = {
   pointsB?: number;
 };
 
+export type GameWinrateMatchInput = {
+  pairing_id: string;
+  winner_participant_id: string | null;
+  status: string;
+  match_type: string;
+  is_walkover?: boolean | null;
+};
+
+/**
+ * Winrate de partidas individuales por participante para el desempate de ciclos (paso 3 de
+ * `resolveTieGroup`). Cuenta solo partidas oficiales (draft/final) completadas con ganador y SIN
+ * walkover (`is_walkover` true se excluye: no cuenta como partida ganada ni perdida, igual que en
+ * las estadísticas, 0153). Los enfrentamientos ganados por walkover siguen sumando puntos de tabla
+ * y calidad de rivales: eso no pasa por acá. Sin partidas reales el winrate es 0.
+ */
+export function buildGameWinrateMap(
+  participantIds: string[],
+  pairings: { id: string; participant_a_id: string; participant_b_id: string }[],
+  matches: GameWinrateMatchInput[]
+): Map<string, number> {
+  const sidesByPairing = new Map<string, [string, string]>();
+  for (const pr of pairings) sidesByPairing.set(String(pr.id), [String(pr.participant_a_id), String(pr.participant_b_id)]);
+  const played = new Map<string, number>();
+  const won = new Map<string, number>();
+  for (const m of matches) {
+    if (m.is_walkover) continue;
+    if (m.status !== 'completed') continue;
+    if (m.match_type !== 'draft' && m.match_type !== 'final') continue;
+    if (m.winner_participant_id == null || String(m.winner_participant_id).length === 0) continue;
+    const sides = sidesByPairing.get(String(m.pairing_id));
+    if (!sides) continue;
+    for (const pid of sides) played.set(pid, (played.get(pid) ?? 0) + 1);
+    const w = String(m.winner_participant_id);
+    won.set(w, (won.get(w) ?? 0) + 1);
+  }
+  const out = new Map<string, number>();
+  for (const pid of participantIds) {
+    const n = played.get(pid) ?? 0;
+    out.set(pid, n > 0 ? (won.get(pid) ?? 0) / n : 0);
+  }
+  return out;
+}
+
 /** Hash determinista y estable de un string (djb2-like). Solo para desempate de último recurso. */
 function stableHash(s: string): number {
   let h = 0;
@@ -1131,7 +1174,8 @@ export function computeFourthPlaceTiebreakBracket(
  */
 export function resolveFourthPlaceDisputeOrder(
   bracketMatches: BracketMatchPodiumInput[],
-  pairings: RoundRobinPairingResult[]
+  pairings: RoundRobinPairingResult[],
+  gameWinrateMap?: Map<string, number>
 ): string[] | null {
   const finalRow = bracketMatches.find((m) => m.bracket_phase === 'final');
   if (!finalRow || !finalRow.winner_participant_id) return null;
@@ -1165,7 +1209,7 @@ export function resolveFourthPlaceDisputeOrder(
           (totalPointsMap.get(pr.participantBId) ?? 0) + pointsAwardedTo(pr, pr.participantBId)
         );
       }
-      order.push(...resolveTieGroup(losers, pairings, totalPointsMap).order);
+      order.push(...resolveTieGroup(losers, pairings, totalPointsMap, gameWinrateMap).order);
     } else {
       order.push(...losers);
     }
