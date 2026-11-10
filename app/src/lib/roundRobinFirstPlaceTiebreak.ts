@@ -26,6 +26,7 @@ import {
   type RoundRobinStandingInput,
   type RoundRobinPairingResult,
 } from './podium';
+import { fetchRoundRobinGameWinrateMap } from './roundRobinGameWinrate';
 
 export type FirstPlaceTiebreakOutcome =
   | { kind: 'no_dispute' }
@@ -90,11 +91,19 @@ export async function computeAndCreateFirstPlaceTiebreakGroup(
     };
   });
 
+  // Winrate de partidas (sin walkovers) para desempatar ciclos; undefined en BO2.
+  const gameWinrateMap = await fetchRoundRobinGameWinrateMap(
+    eventId,
+    participants.map((part) => part.id),
+    isBo2
+  );
+
   // cutoffPosition=0: la frontera es el 1er puesto (índice 0-based), no el 4to.
   const { standings, cutoffTieGroup } = computeFinalStandingsWithTiebreakSplit(
     standingInputs,
     pairingResults,
-    0
+    0,
+    gameWinrateMap
   );
 
   if (standings.length === 0) {
@@ -133,7 +142,7 @@ export async function computeAndCreateFirstPlaceTiebreakGroup(
   }
 
   const tied = cutoffTieGroup.length > 4 ? cutoffTieGroup.slice(0, 4) : cutoffTieGroup;
-  const { matches } = computeFourthPlaceTiebreakBracket(tied, pairingResults);
+  const { matches } = computeFourthPlaceTiebreakBracket(tied, pairingResults, gameWinrateMap);
   if (matches.length === 0) {
     return { kind: 'no_dispute' };
   }

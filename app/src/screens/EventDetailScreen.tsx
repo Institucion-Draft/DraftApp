@@ -1934,7 +1934,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                   style={styles.secondaryBtn}
                   onPress={() => navigation.navigate('CubeRoulette', { eventId: event.id })}
                 >
-                  <Text style={styles.secondaryBtnTxt}>Ruleta</Text>
+                  <Text style={styles.secondaryBtnTxt}>Ruleta de cubos</Text>
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity

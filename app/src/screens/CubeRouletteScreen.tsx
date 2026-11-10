@@ -33,6 +33,8 @@ type RouletteType = 'cubes' | 'players';
 type CubeRow = { id: string; name: string; created_at: string | null };
 type PlayerRow = { user_id: string; users: { display_name: string; username: string } | null | { display_name: string; username: string }[] };
 
+type LastSpin = { roulette_type: RouletteType; result_type: string; selected_player_user_id: string | null };
+
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
@@ -61,6 +63,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const [cubeHistoryTimes, setCubeHistoryTimes] = useState<(number | null)[]>([]);
   const [gridWidth, setGridWidth] = useState(0);
   const pulse = useRef(new Animated.Value(1)).current;
+  const restoredRef = useRef(false);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -85,7 +88,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     const currentUserId = meRes.data.user?.id ?? null;
     const eventScheduledFor = (eventRes.data as { scheduled_for?: string | null }).scheduled_for ?? null;
 
-    const [roleRes, cubesRes, playersRes, configRes, historyRes] = await Promise.all([
+    const [roleRes, cubesRes, playersRes, configRes, historyRes, lastSpinRes] = await Promise.all([
       currentUserId
         ? supabase
             .from('workspace_members')
@@ -122,6 +125,15 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         if (eventScheduledFor) q = q.lte('scheduled_for', eventScheduledFor);
         return q.order('scheduled_for', { ascending: false }).order('created_at', { ascending: false }).limit(200);
       })(),
+      // Última tirada de este evento: el estado "jugador elige pendiente" vive en el servidor (cube_roulette_spins),
+      // así sobrevive a salir de la pantalla (que desmonta el estado local) y se ve en cualquier dispositivo.
+      supabase
+        .from('cube_roulette_spins')
+        .select('roulette_type, result_type, selected_player_user_id')
+        .eq('event_id', eventId)
+        .order('spun_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     if (roleRes.error) {
@@ -151,6 +163,23 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       })
     );
     setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
+
+    // Restaura la ruleta pendiente sólo en la primera carga de este montaje: los refetch posteriores (foco, nuevos
+    // inscriptos) sólo refrescan las listas y nunca tocan el estado de la ruleta.
+    if (!restoredRef.current) {
+      restoredRef.current = true;
+      const last = lastSpinRes.error ? null : (lastSpinRes.data as LastSpin | null);
+      if (last && last.roulette_type === 'cubes' && last.result_type === 'player_chooses') {
+        setRouletteType('players');
+      } else if (last && last.roulette_type === 'players') {
+        if (last.result_type === 'player_selected' && last.selected_player_user_id) {
+          setRouletteType('players');
+          setManualCubePickerForUserId(last.selected_player_user_id);
+        } else if (last.result_type === 'everyone_smokes') {
+          setRouletteType('players');
+        }
+      }
+    }
   }, [eventId]);
 
   useFocusEffect(

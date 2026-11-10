@@ -68,6 +68,7 @@ import {
   type RoundRobinStandingInput,
   type RoundRobinPairingResult,
 } from './podium';
+import { fetchRoundRobinGameWinrateMap } from './roundRobinGameWinrate';
 
 /** ¿Existe alguna fila group_type='bracket' (cualquier status) para este evento? Si sí, el top4
  *  real ya se determinó una vez — ningún desempate de 4to puesto debe volver a evaluarse. */
@@ -126,7 +127,8 @@ async function fetchHistoricalDisputedIds(eventId: string): Promise<Set<string>>
 async function findReplacementOrder(
   eventId: string,
   tieGroup: string[],
-  pairingResults: RoundRobinPairingResult[]
+  pairingResults: RoundRobinPairingResult[],
+  gameWinrateMap?: Map<string, number>
 ): Promise<string[]> {
   const groupsRes = await supabase
     .from('event_tiebreak_groups')
@@ -155,7 +157,8 @@ async function findReplacementOrder(
 
     const realOrder = resolveFourthPlaceDisputeOrder(
       bmRes.data as BracketMatchPodiumInput[],
-      pairingResults
+      pairingResults,
+      gameWinrateMap
     );
     if (!realOrder) continue;
 
@@ -229,10 +232,19 @@ export async function computeAndCreateTop4Bracket(
     };
   });
 
+  // Winrate de partidas (sin walkovers) para desempatar ciclos; undefined en BO2.
+  const gameWinrateMap = await fetchRoundRobinGameWinrateMap(
+    eventId,
+    participants.map((part) => part.id),
+    isBo2
+  );
+
   // cutoffPosition default (3, 0-based = 4to puesto).
   const { standings, fourthPlaceTieGroup: rawTieGroup } = computeFinalStandingsWithTiebreakSplit(
     standingInputs,
-    pairingResults
+    pairingResults,
+    undefined,
+    gameWinrateMap
   );
 
   // Fase 5: completar el grupo empatado hasta minDisputeSize (si vino con menos, por una salida
@@ -285,7 +297,7 @@ export async function computeAndCreateTop4Bracket(
   // mismos empatados (bug Fase 4 × Fase 5, confirmado).
   const top3 = standings.filter((pid) => !combinedSet.has(pid)).slice(0, 3);
   if (await hasEverHadRealBracket(eventId)) {
-    const replacementOrder = await findReplacementOrder(eventId, combinedGroup, pairingResults);
+    const replacementOrder = await findReplacementOrder(eventId, combinedGroup, pairingResults, gameWinrateMap);
     const top4 = [...top3, ...replacementOrder].slice(0, 4);
     if (top4.length < 4) {
       return { kind: 'no_dispute' };
@@ -302,7 +314,8 @@ export async function computeAndCreateTop4Bracket(
 
   const { fourthPlaceParticipantId, matches } = computeFourthPlaceTiebreakBracket(
     combinedGroup,
-    pairingResults
+    pairingResults,
+    gameWinrateMap
   );
 
   if (matches.length === 0 && fourthPlaceParticipantId != null) {
