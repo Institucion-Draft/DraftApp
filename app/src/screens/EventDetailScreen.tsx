@@ -33,7 +33,8 @@ import { fetchSeatingState } from '../lib/eventSeatingApi';
 import { knockoutPlayerCountProblem, normalizeCompetitionFormat } from '../lib/eventMode';
 import { isConcludeAvailable } from '../lib/concludeAvailability';
 import { CUP_CONSUELO_NAME, KNOCKOUT_BRACKET_ORIGIN, cupPrimaName, isKnockoutCupOrigin } from '../lib/knockoutRounds';
-import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { genderedWord, resolveGenderedText, type Gender } from '../lib/genderText';
+import { useMyGender } from '../contexts/AuthContext';
 import {
   getTwoWayTieFirstPlaceParticipantIds,
   pairingIsBetweenParticipants,
@@ -218,6 +219,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  const myGender = useMyGender();
   /** Sorteo de lugares publicado (vigente u obsoleto); null si no hay o el toggle está OFF. */
   const [seatingState, setSeatingState] = useState<{ is_current: boolean } | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
@@ -1980,7 +1982,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           ) : null}
           {myParticipantId ? (
             <View style={styles.inlineRow}>
-              <Text style={styles.registeredTxt}>Estás inscripto</Text>
+              <Text style={styles.registeredTxt}>Estás {genderedWord(myGender, 'registered')}</Text>
               <TouchableOpacity onPress={cancelMyRegistration} style={styles.smallDangerBtn}>
                 <Text style={styles.smallDangerTxt}>Cancelar inscripción</Text>
               </TouchableOpacity>
@@ -1994,7 +1996,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
           {!myParticipantId ? (
             <Text style={styles.muted}>Las inscripciones cerraron al iniciar el draft.</Text>
           ) : (
-            <Text style={styles.muted}>Estás inscripto en este evento.</Text>
+            <Text style={styles.muted}>Estás {genderedWord(myGender, 'registered')} en este evento.</Text>
           )}
         </View>
       ) : null}

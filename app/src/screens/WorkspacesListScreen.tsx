@@ -15,6 +15,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { genderedWord } from '../lib/genderText';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { avatarPublicUrl } from '../lib/avatarUrl';
 import PlayerAvatar from '../components/PlayerAvatar';
@@ -42,7 +43,7 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 export default function WorkspacesListScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const { user, signOut } = useAuth();
+  const { user, signOut, gender: myGender } = useAuth();
   const [items, setItems] = useState<WorkspaceListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -218,7 +219,7 @@ export default function WorkspacesListScreen({ navigation }: Props) {
             ) : null}
             <View style={[styles.rolePill, role === 'organizer' && styles.rolePillOrganizer]}>
               <Text style={[styles.rolePillText, role === 'organizer' && styles.rolePillTextOrganizer]}>
-                {role === 'organizer' ? 'Organizador' : 'Miembro'}
+                {role === 'organizer' ? genderedWord(myGender, 'organizer', { capitalize: true }) : 'Miembro'}
               </Text>
             </View>
           </View>

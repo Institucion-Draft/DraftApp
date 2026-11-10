@@ -19,7 +19,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import type { MtgColor } from '../lib/database.types';
-import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { genderedWord, type Gender } from '../lib/genderText';
 import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
@@ -1075,7 +1075,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
   const isSelf =
     !!myUserId &&
     (myUserId === userId || (isGiantEvent && myUserId === memberBUserId));
-  const leftWord = resolveGenderedText(profileGender, 'ido', 'ida');
+  const leftWord = genderedWord(profileGender, 'left');
   const markAsLeftLabel = `Marcar como ${leftWord}`;
 
   const markAsLeft = async (isSelfAction: boolean) => {
@@ -1109,9 +1109,9 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
       }
       if (inProgressRes.data) {
         Alert.alert(
-          'No se puede marcar como ido',
+          `No se puede marcar como ${leftWord}`,
           isSelfAction
-            ? 'No podés marcarte como ido: tenés una partida en curso. Terminala primero.'
+            ? `No podés marcarte como ${leftWord}: tenés una partida en curso. Terminala primero.`
             : `No se puede marcar a ${actorName} como ${leftWord}: tiene una partida en curso. Termínenla primero.`
         );
         return;
@@ -1136,7 +1136,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
             .update({ left_event_at: new Date().toISOString(), left_event_by: myUserId })
             .eq('id', participantId);
           if (error) {
-            Alert.alert('Error', error.message ?? 'No se pudo marcar como ido.');
+            Alert.alert('Error', error.message ?? `No se pudo marcar como ${leftWord}.`);
             return;
           }
           // Copa (sólo llaves): un único RPC de servidor resuelve todo el walkover de las llaves.
@@ -2275,7 +2275,7 @@ export default function PlayerProfileInEventScreen({ route, navigation }: Props)
         <View style={styles.heroChipsColumn}>
           {isWorkspaceOrganizer ? (
             <View style={styles.orgChip}>
-              <Text style={styles.orgChipTxt}>Organizador</Text>
+              <Text style={styles.orgChipTxt}>{genderedWord(profileGender, 'organizer', { capitalize: true })}</Text>
             </View>
           ) : null}
           {isSelf && !isGiantEvent ? (

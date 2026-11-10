@@ -16,6 +16,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { genderedWord, type Gender } from '../lib/genderText';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import { avatarPublicUrl } from '../lib/avatarUrl';
@@ -41,6 +42,7 @@ type WorkspaceRow = {
 type UserEmbed = {
   username: string;
   display_name: string;
+  gender?: Gender | null;
   birthday: string | null;
   custom_avatar_path: string | null;
   default_avatars: { storage_path: string } | { storage_path: string }[] | null;
@@ -129,6 +131,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
         users!workspace_members_user_id_fkey (
           username,
           display_name,
+          gender,
           birthday,
           custom_avatar_path,
           default_avatars (storage_path)
@@ -521,7 +524,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
             <View style={styles.memberBody}>
               <Text style={styles.memberName}>{nameWithCake(label, u?.birthday)}</Text>
               <Text style={styles.memberRole}>
-                {m.role === 'organizer' ? 'Organizador' : 'Miembro'}
+                {m.role === 'organizer' ? genderedWord(u?.gender, 'organizer', { capitalize: true }) : 'Miembro'}
               </Text>
             </View>
           </>

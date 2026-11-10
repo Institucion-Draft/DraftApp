@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { supabase } from '../lib/supabase';
+import { leftWordForPair, type Gender } from '../lib/genderText';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import { KNOCKOUT_SECOND_CHANCE_ORIGIN, isKnockoutCupOrigin, type BracketPhase } from '../lib/knockoutRounds';
 import { resolveRematchType } from '../lib/matchTypeRules';
@@ -52,12 +53,14 @@ type ParticipantRow = {
     | {
         username: string;
         display_name: string;
+        gender?: Gender | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }
     | {
         username: string;
         display_name: string;
+        gender?: Gender | null;
         custom_avatar_path: string | null;
         default_avatars: { storage_path: string } | { storage_path: string }[] | null;
       }[]
@@ -67,6 +70,12 @@ type ParticipantRow = {
 function relationOne<T>(x: T | T[] | null | undefined): T | null {
   if (x == null) return null;
   return Array.isArray(x) ? (x[0] ?? null) : x;
+}
+
+/** Lado de un cruce para `leftWordForPair`: si se fue y su género (equipos de Gigante: masculino). */
+function sideLeft(p: ParticipantRow | null | undefined): { left: boolean; gender: Gender | null } {
+  const u = relationOne(p?.users ?? null);
+  return { left: Boolean(p?.left_event_at), gender: p?.giant_name ? null : (u?.gender ?? null) };
 }
 
 /** Alineado con `public.topcut_wins_needed` (migración 0039). */
@@ -155,6 +164,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
           users!event_participants_user_id_fkey (
             username,
             display_name,
+            gender,
             custom_avatar_path,
             default_avatars (storage_path)
           )
@@ -528,7 +538,7 @@ export default function MatchResultScreen({ route, navigation }: Props) {
     if (rematchBlockedByLeftEvent) {
       Alert.alert(
         'No se puede iniciar',
-        'Uno de los dos jugadores se marcó como ido del evento — no se pueden iniciar más partidas oficiales ni de desempate en este enfrentamiento.'
+        `Uno de los dos jugadores se marcó como ${leftWordForPair(sideLeft(pa), sideLeft(pb))} del evento — no se pueden iniciar más partidas oficiales ni de desempate en este enfrentamiento.`
       );
       return;
     }
