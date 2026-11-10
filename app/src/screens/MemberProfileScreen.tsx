@@ -2,6 +2,7 @@ import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { genderedWord, type Gender } from '../lib/genderText';
 import { supabase } from '../lib/supabase';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -19,10 +20,11 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [isOrganizer, setIsOrganizer] = useState(false);
+  const [gender, setGender] = useState<Gender | null>(null);
 
   const load = useCallback(async () => {
     const [userRes, roleRes] = await Promise.all([
-      supabase.from('users').select('display_name, username').eq('id', userId).maybeSingle(),
+      supabase.from('users').select('display_name, username, gender').eq('id', userId).maybeSingle(),
       supabase
         .from('workspace_members')
         .select('role')
@@ -37,7 +39,8 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
       setLoading(false);
       return;
     }
-    const row = userRes.data as { display_name?: string; username?: string } | null;
+    const row = userRes.data as { display_name?: string; username?: string; gender?: Gender | null } | null;
+    setGender(row?.gender ?? null);
     setDisplayName(row?.display_name || row?.username || 'Sin nombre');
     setIsOrganizer(roleRes.data?.role === 'organizer');
     if (roleRes.error && __DEV__) {
@@ -92,7 +95,7 @@ export default function MemberProfileScreen({ navigation, route }: Props) {
       <Text style={styles.name}>{displayName}</Text>
       {isOrganizer ? (
         <View style={styles.badge}>
-          <Text style={styles.badgeTxt}>Organizador</Text>
+          <Text style={styles.badgeTxt}>{genderedWord(gender, 'organizer', { capitalize: true })}</Text>
         </View>
       ) : null}
 

@@ -7,6 +7,8 @@ type AuthContextType = {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  /** Género del usuario logueado (una sola consulta por sesión). null mientras carga o sin sesión. */
+  gender: Gender | null;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   /** needsEmailConfirmation: la cuenta se creó pero no hay sesión (el proyecto exige confirmar el email). */
   signUp: (
@@ -24,6 +26,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gender, setGender] = useState<Gender | null>(null);
+  const userId = user?.id ?? null;
+
+  // Género propio: se pide una vez por usuario (para textos como "Estás inscripto/a"), no por pantalla.
+  useEffect(() => {
+    if (!userId) {
+      setGender(null);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from('users')
+      .select('gender')
+      .eq('id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setGender(((data as { gender?: Gender | null } | null)?.gender ?? null) as Gender | null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -71,11 +95,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user, loading, signIn, signUp, signOut }}
+      value={{ session, user, loading, gender, signIn, signUp, signOut }}
     >
       {children}
     </AuthContext.Provider>
   );
+}
+
+/** Género del espectador (el usuario logueado). */
+export function useMyGender(): Gender | null {
+  return useAuth().gender;
 }
 
 export function useAuth() {

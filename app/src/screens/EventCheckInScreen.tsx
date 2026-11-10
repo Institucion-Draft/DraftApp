@@ -11,6 +11,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { genderedWord } from '../lib/genderText';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import type { MtgColor } from '../lib/database.types';
@@ -65,7 +66,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
       headerLeft: hierarchicalHeaderBack(navigation, returnTo, backParams),
     });
   }, [navigation, eventId, returnTo, pairingId, backProfileParticipantId, profileReturnFrom]);
-  const { user } = useAuth();
+  const { user, gender: myGender } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [participantId, setParticipantId] = useState<string | null>(null);
@@ -215,7 +216,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     const pid = participantId;
     if (!pid) {
       setSaving(false);
-      Alert.alert('Error', 'No estás inscripto en este evento.');
+      Alert.alert('Error', `No estás ${genderedWord(myGender, 'registered')} en este evento.`);
       return;
     }
 
@@ -279,7 +280,7 @@ export default function EventCheckInScreen({ route, navigation }: Props) {
     const pid = participantId;
     if (!pid) {
       setSaving(false);
-      Alert.alert('Error', 'No estás inscripto en este evento.');
+      Alert.alert('Error', `No estás ${genderedWord(myGender, 'registered')} en este evento.`);
       return;
     }
 

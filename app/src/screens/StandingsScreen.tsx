@@ -41,7 +41,7 @@ import {
   type KnockoutSlotRow,
 } from '../lib/knockoutBracketModel';
 import ColorFlag from '../components/ColorFlag';
-import { resolveGenderedText, type Gender } from '../lib/genderText';
+import { genderedWord, resolveGenderedText, type Gender } from '../lib/genderText';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
 import {
   computePodium,
@@ -1852,6 +1852,8 @@ export default function StandingsScreen({ route, navigation }: Props) {
         eventChampionUserId != null &&
         String(pl.userId) === String(eventChampionUserId);
       const showChampionShinyAnim = isEventChampion && eventChampionIsShiny;
+      // Género del jugador de este puesto (rows ya lo trae); sin fila (p. ej. cruces de Copa) queda masculino.
+      const plGender = rows.find((r) => r.participantId === pl.participantId)?.gender ?? null;
 
       return (
         <TouchableOpacity
@@ -1867,7 +1869,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
           }
         >
           {isEventChampion ? (
-            <Text style={styles.podiumCrownMark} accessibilityLabel="Campeón del evento">
+            <Text style={styles.podiumCrownMark} accessibilityLabel={`${genderedWord(plGender, 'champion', { capitalize: true })} del evento`}>
               👑
             </Text>
           ) : null}
@@ -1924,7 +1926,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
             />
           )}
           {(pl.onStool === true || stoolId === pl.participantId) ? (
-            <Text style={styles.podiumStoolMark} accessibilityLabel="Primero sobre el banquito">
+            <Text style={styles.podiumStoolMark} accessibilityLabel={`${plGender === 'female' ? 'Primera' : 'Primero'} sobre el banquito`}>
               🪑
             </Text>
           ) : null}
