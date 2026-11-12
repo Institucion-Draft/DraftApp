@@ -99,7 +99,7 @@ select analytics_private.refresh_analytics();
 2. Correr el refresco a mano.
 3. **Volver a publicar el sitio.**
 
-Lo ya publicado antes queda en cachés y snapshots externos y no se puede retirar desde la base. Tras cualquier refresco, **los números de jugador (y de cubo) pueden cambiar**.
+Lo ya publicado antes queda en cachés y snapshots externos y no se puede retirar desde la base. Tras cualquier refresco, **los números de jugador pueden cambiar**. **Las letras de cubo (A, B, C…) son estables** desde la migración 0156: cada cubo conserva su letra y solo se corren si un cubo anterior deja de publicarse (borrado, sin uso o con el creador excluido; si vuelve, recupera su lugar).
 
 **Si el sitio no se actualiza**, revisar en este orden:
 1. El workflow en el repo `DraftApp-analytics` (última corrida y su error).
@@ -120,3 +120,37 @@ select * from analytics_control.registro_limpieza order by concepto;   -- qué s
 ```
 
 Y como `postgres` (no lo lee el rol), el detalle exacto: `select * from analytics_private.control_conciliacion;`.
+
+## h) Letras de cubo estables (migración 0156)
+
+El orden permanente vive en `analytics_private.cube_orden` (privada, con RLS, sin acceso para el rol ni para `anon`/`authenticated`). Un cubo se registra la primera vez que se publica; los que entran juntos se mezclan al azar entre sí y quedan después de los ya registrados. Las filas nunca se borran.
+
+Aplicación en producción (a mano, SQL Editor; pasos completos en la cabecera de `0156_cubos_letras_estables.sql`): fuera de la ventana del cron (08:30 UTC), anotar el mapa (Consulta A), correr el archivo, comprobar la siembra (Consulta B), refrescar a mano, repetir la Consulta A y correr la Consulta C.
+
+```sql
+-- A) mapa de cubos (solo administrador; muestra nombres reales): antes y después deben coincidir
+select cp.pos, analytics_private.letras(cp.pos) as letra, c.name
+from analytics_private.cube_pos cp
+join analytics_private.cube_alias ca on ca.alias_n = cp.alias_n
+join public.cubes c on c.id = ca.cube_id
+order by cp.pos;
+
+-- B) la siembra conservó el mapa (0 filas)
+select cp.pos, o.orden
+from analytics_private.cube_pos cp
+join analytics_private.cube_alias ca on ca.alias_n = cp.alias_n
+left join analytics_private.cube_orden o on o.cube_id = ca.cube_id
+where o.orden is distinct from cp.pos;
+```
+
+```sql
+-- C) dos refrescos seguidos dejan el mismo mapa (correr todo junto; esperado 0 y 0)
+begin;
+create temp table _m1 on commit drop as select alias_n, pos from analytics_private.cube_pos;
+select analytics_private.refresh_analytics();
+select (select count(*) from (select alias_n, pos from _m1 except select alias_n, pos from analytics_private.cube_pos) a) as faltan_o_cambiaron,
+       (select count(*) from (select alias_n, pos from analytics_private.cube_pos except select alias_n, pos from _m1) b) as aparecieron_o_cambiaron;
+commit;
+```
+
+Después de aplicarla, la verificación de §e debe mostrar `analytics_private.cube_orden` con `rls = true` y todas las columnas de acceso en `false`.

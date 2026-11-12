@@ -29,7 +29,7 @@ const db = new PGlite({extensions: {pgcrypto}});
 await db.exec(STUBS);
 await db.exec("create extension if not exists pgcrypto schema extensions;");
 for (const f of fs.readdirSync(MIG).filter((x) => /^\d{4}_.*\.sql$/.test(x)).sort()) {
-  if (/^01(49|50|51|55)_/.test(f)) continue; // snapshots de seguridad y la propia 0155 (se aplica más abajo, por trozos): se omiten en la cadena
+  if (/^01(49|50|51|55|56)_/.test(f)) continue; // snapshots de seguridad y la 0155 y 0156 (se aplican más abajo): se omiten en la cadena
   try { await db.exec(fs.readFileSync(path.join(MIG, f), "utf8")); } catch (e) { console.log("FALLÓ migración", f, e.message.slice(0, 200)); process.exit(2); }
 }
 // La cadena reproducida NO acepta match_type = 'tiebreak' (0016 borra un constraint con otro nombre; en la base viva está corregido): se corrige solo en esta prueba.
@@ -63,6 +63,14 @@ const sql = fs.readFileSync(process.env.SQL_FILE ?? (MIG + "/0155_analytics.sql"
   }
 }
 console.log("0155 aplicado (en memoria)");
+
+// ---- 0156: letras de cubo estables (se aplica DESPUÉS de la 0155, como en producción; mismo recorte de REVOKE multi-rol por PGlite)
+const sql0156 = fs.readFileSync(MIG + "/0156_cubos_letras_estables.sql", "utf8").replace(/\r\n/g, "\n");
+try {
+  await db.exec(sql0156.replace(/^((?:revoke|alter default privileges)[^;\n]*?) from ([^;\n]+);$/gm, (_m, pre, roles) =>
+    roles.split(",").map((r) => `${pre} from ${r.trim()};`).join("\n")));
+} catch (e) { console.log("FALLÓ 0156 =>", e.message); process.exit(2); }
+console.log("0156 aplicado (en memoria)");
 
 // ---- datos de prueba. NO hay triggers de alta: los alias privados los asigna refresh_analytics() (sync_aliases) y los puestos 1..n también.
 const refresh = async () => (await one(`select analytics_private.refresh_analytics() as r`)).r;
@@ -440,6 +448,135 @@ ok(Number((await one(`select violaciones from analytics_private.control_privacid
 await db.query(`delete from analytics_private.player_optout`);
 await refresh();
 ok((await q(`select count(*)::int n from analytics.cubos`))[0].n === 3, "A4: al quitar la exclusión y refrescar, el cubo vuelve");
+
+// ============================================================================================================================
+// ---- 0156: LETRAS DE CUBO ESTABLES (orden permanente analytics_private.cube_orden)
+// ============================================================================================================================
+{
+  const mapaCubos = async () => Object.fromEntries((await q(`select c.name, cp.pos from analytics_private.cube_pos cp
+    join analytics_private.cube_alias ca on ca.alias_n = cp.alias_n join public.cubes c on c.id = ca.cube_id`)).map((r) => [r.name, r.pos]));
+  const igual = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+  const densos = async () => { const r = await one(`select count(*)::int n, coalesce(max(id), 0)::int mx from analytics.cubos`); const v = await one(`select violaciones from analytics_private.control_privacidad where chequeo = 'ids_cubo_con_huecos'`); return r.n === r.mx && Number(v.violaciones) === 0; };
+  const nuevoCuboConEvento = async (nombre, by = uuid(1)) => { const c = await mkCube(w1, nombre, by); await evento({cube: c, start: "2026-06-01 20:00:00-03", end: "2026-06-01 21:30:00-03"}); return c; };
+  const m0 = await mapaCubos();
+  ok(Object.keys(m0).length === 3 && JSON.stringify(Object.values(m0).sort()) === "[1,2,3]", "0156: estado base, 3 cubos publicados con puestos 1..3", m0);
+
+  // (1) estabilidad entre refrescos
+  await refresh(); const m1 = await mapaCubos();
+  await refresh(); const m2 = await mapaCubos();
+  ok(igual(m0, m1) && igual(m1, m2), "0156: dos refrescos seguidos dejan el MISMO mapa de cubos (estabilidad)", {m0, m1, m2});
+  const letras0 = JSON.stringify(await q(`select id, nombre from analytics.cubos order by id`));
+  await refresh();
+  ok(letras0 === JSON.stringify(await q(`select id, nombre from analytics.cubos order by id`)), "0156: las letras públicas (analytics.cubos) no cambian entre refrescos");
+  // los JUGADORES no se tocan: siguen rearmándose (los puestos pueden cambiar); aquí solo comprobamos que el refresco sigue dando ids 1..n sin huecos
+  ok((await one(`select count(*)::int n, max(id) mx from analytics.jugadores`)).n === (await one(`select max(id)::int mx from analytics.jugadores`)).mx, "0156: los jugadores siguen con ids 1..n sin huecos");
+
+  // (2) escenarios destructivos dentro de una transacción que se revierte
+  await db.exec("begin");
+  try {
+    // cubo nuevo: recibe la letra siguiente sin mover a los demás
+    const cN1 = await nuevoCuboConEvento("t-nuevo-1"); void cN1;
+    await refresh(); const m3 = await mapaCubos();
+    ok(Object.keys(m0).every((k) => m3[k] === m0[k]) && m3["t-nuevo-1"] === 4, "0156: un cubo nuevo recibe la letra siguiente (D) y NO mueve a los demás", m3);
+    ok((await q(`select nombre from analytics.cubos where id = 4`))[0]?.nombre === "Cubo D", "0156: el cubo nuevo se publica como 'Cubo D'");
+    // dos cubos nuevos en el mismo refresco: quedan después de los ya registrados, mezclados entre sí
+    await nuevoCuboConEvento("t-nuevo-2"); await nuevoCuboConEvento("t-nuevo-3");
+    await refresh(); const m4 = await mapaCubos();
+    ok(Object.keys(m3).every((k) => m4[k] === m3[k]) && JSON.stringify([m4["t-nuevo-2"], m4["t-nuevo-3"]].sort()) === "[5,6]", "0156: dos cubos nuevos en el mismo refresco ocupan 5 y 6 sin mover a los anteriores", m4);
+    ok(await densos(), "0156: ids de cubo sin huecos con 6 cubos");
+    // un cubo deja de publicarse (se borra su único evento): corre SOLO a los posteriores, sin huecos
+    await db.query(`update public.draft_events set deleted_at = now() where cube_id = (select id from public.cubes where name = 't-nuevo-1')`);
+    await refresh(); const m5 = await mapaCubos();
+    const hueco = m4["t-nuevo-1"];
+    ok(!("t-nuevo-1" in m5) && Object.entries(m4).filter(([k]) => k !== "t-nuevo-1").every(([k, p]) => m5[k] === (p > hueco ? p - 1 : p)), "0156: al dejar de publicarse un cubo se corren SOLO los posteriores (los anteriores no cambian)", {m4, m5});
+    ok(await densos(), "0156: sin huecos tras la baja de un cubo");
+    // el mismo cubo vuelve (evento restaurado): recupera su lugar y el de los demás
+    await db.query(`update public.draft_events set deleted_at = null where cube_id = (select id from public.cubes where name = 't-nuevo-1')`);
+    await refresh();
+    ok(igual(await mapaCubos(), m4), "0156: al volver a publicarse el cubo recupera su orden anterior (mapa idéntico al previo a la baja)");
+    // baja de un cubo ORIGINAL del medio (puesto 2): los posteriores (incluidos los nuevos) corren uno; el 1 no cambia
+    const nom2 = Object.entries(m0).find(([, p]) => p === 2)[0];
+    const idsEv = (await q(`select id from public.draft_events where deleted_at is null and cube_id = (select id from public.cubes where name = $1)`, [nom2])).map((r) => r.id);
+    for (const id of idsEv) await db.query(`update public.draft_events set deleted_at = now() where id = $1`, [id]);
+    await refresh(); const m6 = await mapaCubos();
+    ok(!(nom2 in m6) && Object.entries(m4).filter(([k]) => k !== nom2).every(([k, p]) => m6[k] === (p > 2 ? p - 1 : p)), "0156: la baja de un cubo original (puesto 2) corre solo a los posteriores", {m4, m6});
+    ok(await densos(), "0156: sin huecos tras la baja de un cubo original");
+    for (const id of idsEv) await db.query(`update public.draft_events set deleted_at = null where id = $1`, [id]);
+    await refresh();
+    ok(igual(await mapaCubos(), m4), "0156: al restaurarlo el mapa vuelve exactamente al anterior");
+  } finally { await db.exec("rollback"); }
+  await refresh();
+  ok(igual(await mapaCubos(), m0), "0156: (transacción revertida) el mapa base se restablece");
+
+  // (3) excluir y re-incluir al CREADOR de un cubo (Dario, usuario 4, creó cubeD): sin huecos y recupera su lugar
+  const mE0 = await mapaCubos(); const posD = mE0["Cubo de Dario"];
+  const ordenD0 = (await one(`select o.orden from analytics_private.cube_orden o where o.cube_id = $1`, [cubeD]))?.orden;
+  await db.query(`insert into analytics_private.player_optout (user_id) values ($1)`, [uuid(4)]);
+  await refresh(); const mE1 = await mapaCubos();
+  ok(!("Cubo de Dario" in mE1) && Object.entries(mE0).filter(([k]) => k !== "Cubo de Dario").every(([k, p]) => mE1[k] === (p > posD ? p - 1 : p)), "0156: excluir al creador corre solo a los cubos posteriores", {mE0, mE1});
+  ok(await densos(), "0156: excluir al creador no deja huecos en los ids de cubo");
+  ok((await one(`select o.orden from analytics_private.cube_orden o where o.cube_id = $1`, [cubeD]))?.orden === ordenD0 && ordenD0 !== undefined, "0156: la fila de orden del cubo del excluido queda sin usar (no se borra ni cambia)");
+  await db.query(`delete from analytics_private.player_optout`);
+  await refresh();
+  ok(igual(await mapaCubos(), mE0), "0156: al re-incluir al creador el cubo recupera su lugar y el mapa es idéntico al de antes");
+  ok(await densos(), "0156: sin huecos tras re-incluir al creador");
+
+  // (4) un cubo que se publica POR PRIMERA VEZ con el creador incluido (antes estaba excluido): se registra recién ahora, al final
+  await db.exec("begin");
+  try {
+    await db.query(`insert into analytics_private.player_optout (user_id) values ($1)`, [uuid(5)]);
+    const cX = await nuevoCuboConEvento("t-creador-excluido", uuid(5));
+    await refresh();
+    ok(!("t-creador-excluido" in await mapaCubos()) && (await q(`select 1 from analytics_private.cube_orden where cube_id = $1`, [cX])).length === 0, "0156: un cubo cuyo creador está excluido NO consume orden mientras no se publica");
+    await db.query(`delete from analytics_private.player_optout`);
+    await refresh(); const mX = await mapaCubos();
+    ok(Object.keys(mE0).every((k) => mX[k] === mE0[k]) && mX["t-creador-excluido"] === 4, "0156: al re-incluirlo se registra recién entonces, después de los demás (letra D) sin mover a nadie", mX);
+  } finally { await db.exec("rollback"); }
+  await refresh();
+
+  // (5) siembra inicial: conserva el mapa actual y es tolerante a cube_pos vacío
+  const seed = sql0156.match(/-- >>> SIEMBRA\n([\s\S]*?)-- <<< SIEMBRA/)?.[1];
+  ok(!!seed && /insert into analytics_private\.cube_orden/.test(seed), "0156: el bloque de siembra está marcado en la migración", seed);
+  const mS0 = await mapaCubos();
+  await db.exec("begin");
+  try {
+    await db.exec(`delete from analytics_private.cube_orden`);   // estado de producción ANTES de la 0156: cube_pos vigente y orden vacío
+    await db.exec(seed);
+    const sem = Object.fromEntries((await q(`select c.name, o.orden from analytics_private.cube_orden o join public.cubes c on c.id = o.cube_id`)).map((r) => [r.name, r.orden]));
+    ok(igual(sem, mS0), "0156: la siembra toma el puesto actual de cube_pos como orden (el mapa de hoy queda igual)", {sem, mS0});
+    await db.exec(seed);
+    ok((await one(`select count(*)::int n from analytics_private.cube_orden`)).n === 3, "0156: la siembra es idempotente (con la tabla ya llena no inserta nada)");
+    await refresh();
+    ok(igual(await mapaCubos(), mS0), "0156: tras la siembra, el primer refresco deja las letras exactamente como estaban");
+    // tolerancia a cube_pos vacío (entornos nuevos): no falla ni inserta nada, y el primer refresco registra los cubos
+    await db.exec(`delete from analytics_private.cube_pos; delete from analytics_private.cube_orden;`);
+    let fallo = null; try { await db.exec(seed); } catch (e) { fallo = e.message; }
+    ok(fallo === null && (await one(`select count(*)::int n from analytics_private.cube_orden`)).n === 0, "0156: la siembra es tolerante a cube_pos vacío (no falla, no inserta)", fallo);
+    await refresh();
+    ok((await one(`select count(*)::int n from analytics_private.cube_orden`)).n === 3 && await densos(), "0156: con la tabla vacía el primer refresco registra los 3 cubos y publica A..C sin huecos");
+  } finally { await db.exec("rollback"); }
+  await refresh();
+  ok(igual(await mapaCubos(), mS0), "0156: (transacción revertida) el mapa base se restablece");
+
+  // (6) seguridad de la tabla nueva y de la función
+  const t = await one(`select c.relrowsecurity, c.relowner::regrole::text dueno from pg_class c where c.oid = 'analytics_private.cube_orden'::regclass`);
+  ok(t.relrowsecurity === true, "0156: cube_orden tiene RLS activada", t);
+  const gr = await q(`select grantee from information_schema.role_table_grants where table_schema = 'analytics_private' and table_name = 'cube_orden' and grantee in ('anon','authenticated','service_role','PUBLIC','analytics_reader')`);
+  ok(gr.length === 0, "0156: anon, authenticated, service_role, PUBLIC y analytics_reader no tienen ningún privilegio sobre cube_orden", gr);
+  ok((await one(`select has_table_privilege('anon','analytics_private.cube_orden','select,insert,update,delete,truncate') or has_table_privilege('authenticated','analytics_private.cube_orden','select,insert,update,delete,truncate') or has_table_privilege('analytics_reader','analytics_private.cube_orden','select,insert,update,delete,truncate') or has_table_privilege('service_role','analytics_private.cube_orden','select,insert,update,delete,truncate') as t`)).t === false, "0156: has_table_privilege es falso para todos los roles sobre cube_orden");
+  for (const rol of ["analytics_reader", "anon", "authenticated"]) {
+    for (const sqlx of ["select * from analytics_private.cube_orden", "insert into analytics_private.cube_orden (cube_id, orden) values (gen_random_uuid(), 99)", "delete from analytics_private.cube_orden", "select analytics_private.refresh_analytics()"]) {
+      await db.exec(`set role ${rol}`);
+      let r; try { await db.query(sqlx); r = "PERMITIDO"; } catch (e) { r = "denegado: " + e.message.slice(0, 60); }
+      await db.exec("reset role");
+      ok(r.startsWith("denegado"), `0156: ${rol} NO puede: ${sqlx.slice(0, 48)}`, r);
+    }
+  }
+  const fn = await one(`select p.prosecdef, p.proconfig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'analytics_private' and p.proname = 'refresh_analytics'`);
+  ok(fn.prosecdef === true && (fn.proconfig ?? []).some((c) => /^search_path=pg_catalog, analytics_private, pg_temp$/.test(c)), "0156: refresh_analytics sigue SECURITY DEFINER con search_path fijo y pg_temp al final", fn);
+  ok(/lock table analytics_private\.player_optout in share mode/i.test((await one(`select pg_get_functiondef('analytics_private.refresh_analytics()'::regprocedure) as d`)).d), "0156: refresh_analytics conserva el bloqueo SHARE sobre player_optout");
+  ok((await one(`select has_function_privilege('analytics_reader', 'analytics_private.refresh_analytics()', 'EXECUTE') or has_function_privilege('anon', 'analytics_private.refresh_analytics()', 'EXECUTE') or has_function_privilege('authenticated', 'analytics_private.refresh_analytics()', 'EXECUTE') as t`)).t === false, "0156: nadie salvo el dueño ejecuta refresh_analytics");
+}
 
 // ---- alias privados: estabilidad, no reutilización, cuentas borradas (L4)
 const antes = await q(`select user_id, alias_n from analytics_private.player_alias order by alias_n`);
