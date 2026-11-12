@@ -12,7 +12,7 @@ exclusión voluntaria, el workspace y todas las reglas de este contrato. El rol 
 
 | Tema | Regla |
 |---|---|
-| Ids de jugador y de cubo | Entero (`integer`) = **puesto consecutivo 1…n calculado EN CADA REFRESCO**, ordenado por un alias aleatorio privado y DESPUÉS de aplicar la exclusión voluntaria (sin huecos). `jugadores.id = 12` ⇒ `nombre = 'Jugador 12'`; los cubos son `Cubo A`, `Cubo B`, … en orden aleatorio por refresco, no por orden de alta. **El número de un jugador o de un cubo PUEDE CAMBIAR entre refrescos** (al sumar o quitar jugadores, o al aplicar una exclusión): el sitio no puede usar estos ids para seguir a alguien entre publicaciones ni guardarlos como vínculo; solo valen dentro de una misma publicación. Mapas privados: `analytics_private.player_pos` / `cube_pos` (se rearman en cada refresco) sobre `player_alias` / `cube_alias` (alias aleatorios persistentes que solo sirven para ordenar). |
+| Ids de jugador y de cubo | Entero (`integer`) = **puesto consecutivo 1…n**, calculado en cada refresco y DESPUÉS de aplicar la exclusión voluntaria (sin huecos): los jugadores, por un alias aleatorio privado (cambia en cada refresco); los cubos, por un orden permanente de primera publicación (estable). `jugadores.id = 12` ⇒ `nombre = 'Jugador 12'`; los cubos son `Cubo A`, `Cubo B`, …. **El número de un JUGADOR PUEDE CAMBIAR entre refrescos** (al sumar o quitar jugadores, o al aplicar una exclusión): el sitio no puede usar estos ids para seguir a alguien entre publicaciones ni guardarlos como vínculo; solo valen dentro de una misma publicación. **La letra de un CUBO es estable entre refrescos** (migración 0156): cada cubo conserva su lugar según el orden permanente en que se publicó por primera vez (`analytics_private.cube_orden`) y solo se corre si un cubo anterior deja de publicarse (borrado, sin uso o con el creador excluido); cubos nuevos reciben la letra siguiente. Mapas privados: `analytics_private.player_pos` (se rearma en cada refresco) y `cube_pos` (se rearma en cada refresco pero sobre el orden permanente `cube_orden`), sobre `player_alias` / `cube_alias` (alias aleatorios persistentes que solo sirven para ordenar y enlazar). |
 | Ids de evento, enfrentamiento y partida | `bigint` de 48 bits (cabe en un entero seguro de JavaScript): los primeros 6 bytes de `HMAC-SHA256('<dominio>:<uuid>', clave de ids)`. Estables **dentro de una versión de clave**, opacos y no reversibles sin la clave. Dominios: `e` evento, `p` pairing, `b` cruce de bracket, `m` partida. La clave está **versionada** (`ids_v1`, `ids_v2`, …): rotarla cambia TODOS esos ids (ver §6). |
 | Fechas | `date`. Sin horas. Hora de Buenos Aires (`America/Argentina/Buenos_Aires`). |
 | Fecha de una partida | **No existe**: toda partida toma la fecha de su evento (la del draft) a través de `enfrentamiento_id → evento_id → eventos.fecha`. No se exporta `fecha_juego`. |
@@ -55,7 +55,7 @@ Clave: `id`.
 
 | Columna | Tipo | Nulo | Valores | Fuente exacta |
 |---|---|---|---|---|
-| `id` | integer | no | 1…m consecutivo, único | puesto en el refresco (`cube_pos.pos`), por orden del alias aleatorio privado (no por orden de alta). Cambia entre refrescos. |
+| `id` | integer | no | 1…m consecutivo, único | puesto en el refresco (`cube_pos.pos`) = `row_number()` sobre el orden PERMANENTE `analytics_private.cube_orden` (orden de primera publicación; los cubos que entran en un mismo refresco se mezclan al azar entre sí y quedan después de los ya registrados; no es el orden de alta). **Estable entre refrescos**; solo se corre si un cubo anterior deja de publicarse. |
 | `nombre` | text | no | `Cubo A`, `Cubo B`, … `Cubo AA` | `'Cubo ' \|\| letras(pos)` (A = 1). El nombre real del cubo, su URL y sus notas no salen. Un cubo creado por un jugador excluido no se publica. |
 
 ### 2.3 `eventos` — una fila por evento incluido
@@ -137,7 +137,7 @@ El esquema del sitio se respeta; estos son los cambios y por qué. Los marcados 
 | C6 | `eventos.estado` (ya estaba) toma `drafting/playing/completed/concluded`; `es_oficial` es siempre `true` | Solo entran oficiales. |
 | C7 | Ids de evento, enfrentamiento y partida son `bigint` opacos (antes enteros secuenciales) | Dependen de la clave de ids (versionada); no son consecutivos ni cronológicos. El sitio solo los usa como clave. |
 | C8 | `partidas.estado` es siempre `completed` | Las abortadas/en curso no entran. |
-| C10 | `jugadores.id` y `cubos.id` son puestos consecutivos por refresco (antes: alias aleatorios estables) | Sin huecos no se deduce a quién se excluyó, y el número no revela el orden de alta. **No son estables entre publicaciones.** |
+| C10 | `jugadores.id` y `cubos.id` son puestos consecutivos 1…n (antes: alias aleatorios estables) | Sin huecos no se deduce a quién se excluyó, y el número no revela el orden de alta. **`jugadores.id` NO es estable entre publicaciones. `cubos.id` (la letra del cubo) SÍ lo es desde la 0156** (orden permanente de primera publicación; se corre solo si un cubo anterior deja de publicarse). |
 | C9 | **Se eliminan `enfrentamientos.es_walkover`, `partidas.es_walkover` y `participaciones.se_fue`** | Los walkovers (cruces y partidas) se filtran en el refresco y no se publican; "se fue" no se exporta (revela un hecho personal por evento). Los conteos quedan solo agregados en `analytics_control.anomalias`. `participaciones.autoevaluacion` se mantiene. |
 
 ### Impacto en el sitio (para la migración del loader, no se toca en esta entrega)
@@ -146,7 +146,7 @@ El esquema del sitio se respeta; estos son los cambios y por qué. Los marcados 
 - `inscriptos` sale de contar participaciones `rol = 'player'` por evento.
 - La exclusión voluntaria reduce `inscriptos` y los enfrentamientos de los rivales de quien se excluyó.
 - Sin `se_fue` el sitio ya no puede distinguir a quien abandonó: `inscriptos` sigue siendo el conteo de participaciones `rol = 'player'`.
-- `jugadores.id` y `cubos.id` no son estables entre publicaciones (C10): el sitio no debe guardarlos ni enlazar por ellos.
+- `jugadores.id` no es estable entre publicaciones (C10): el sitio no debe guardarlo ni enlazar por él. `cubos.id` (la letra) es estable salvo que un cubo anterior deje de publicarse; igual conviene no usarlo como vínculo permanente.
 - El sitio debe mostrar el **registro de limpieza** (`analytics_control.registro_limpieza`, §7) y aclarar que los datos están **seudonimizados, no anonimizados**.
 
 ## 4. Qué NO sale nunca
@@ -169,8 +169,8 @@ fecha y la versión de clave en `analytics_control.refresco`. Solo la ejecuta el
 esa fila. `prueba_pglite.mjs` reproduce ambos ataques: contra una vista con filtro de exclusión SÍ filtran; contra las tablas, no.
 
 **Alias y puestos.** Hay dos niveles. (1) Alias **privados y persistentes** (`player_alias`, `cube_alias`): un número al azar, uniforme dentro del rango fijo `[1, alias_max]` (99999 por defecto), independiente del orden de alta y de la
-cantidad de usuarios; nunca se reutiliza. Cuentas borradas: `user_id` pasa a `NULL` y el `alias_n` se conserva. Solo sirven para ordenar. (2) **Puestos públicos** consecutivos 1…n, rearmados en cada refresco con `row_number()` sobre el alias privado y después de la
-exclusión: lo publicado nunca tiene huecos. **Los puestos pueden cambiar entre refrescos.** Los controles que miran lo publicado (`v_privacidad_calc`, `v_conciliacion_calc` y la anomalía `participaciones_player_sin_partidas`) pasan por los mismos mapas; la prueba
+cantidad de usuarios; nunca se reutiliza. Cuentas borradas: `user_id` pasa a `NULL` y el `alias_n` se conserva. Solo sirven para ordenar. (2) **Puestos públicos** consecutivos 1…n, rearmados en cada refresco y después de la
+exclusión: lo publicado nunca tiene huecos. **Jugadores:** `row_number()` sobre el alias privado; **los puestos pueden cambiar entre refrescos.** **Cubos (0156):** `row_number()` sobre el orden permanente `analytics_private.cube_orden`, que se registra la primera vez que un cubo se publica (los que entran juntos se mezclan al azar entre sí y quedan después de los ya registrados); **las letras son estables** y solo se corren si un cubo anterior deja de publicarse. Un cubo cuyo creador se excluye deja de publicarse; si vuelve a quedar incluido, recupera su orden. El orden revela la fecha de primera publicación del cubo (ya deducible de `eventos.fecha`), nunca el orden de creación. Los controles que miran lo publicado (`v_privacidad_calc`, `v_conciliacion_calc` y la anomalía `participaciones_player_sin_partidas`) pasan por los mismos mapas; la prueba
 tiene controles positivos que fallan si no lo hacen.
 
 **Clave de ids: versionado y rotación.** La clave vive en `analytics_private.secret` con un nombre de versión (`ids_v1`) y `config('clave_activa')` indica cuál se usa. Procedimiento de rotación:
