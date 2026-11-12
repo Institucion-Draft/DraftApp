@@ -6,7 +6,9 @@
 --   (staging, local) desde cero. No es idempotente en todo (p. ej. el primer refresco del bloque 11 reasigna puestos).
 --   Producción tiene agendado en pg_cron (job id 1, creado a mano):
 --     select cron.schedule('analytics_refresh', '30 8 * * *', $$select analytics_private.refresh_analytics()$$);   -- 08:30 UTC
---   El segundo trabajo (cierre de sesiones largas de analytics_reader, 'analytics_reader_limpieza') TODAVÍA NO está agendado.
+--   El segundo trabajo (cierre de sesiones largas de analytics_reader) YA está agendado en producción (job id 2, creado a mano):
+--     select cron.schedule('analytics_cerrar_sesiones', '*/5 * * * *', $$select pg_terminate_backend(pid) from pg_stat_activity where usename = 'analytics_reader' and backend_start < now() - interval '5 minutes'$$);
+--   Operación (jobs, rol, conexión, verificaciones, refresco manual, exclusiones): docs-analytics/operacion.md.
 --   Documentación (contrato, calidad, prueba, parche): docs-analytics/.
 --
 -- QUÉ HACE
@@ -1096,9 +1098,10 @@ commit;
 -- ============================================================================================================================
 -- 13. AGENDAR EL REFRESCO Y LA LIMPIEZA DE SESIONES (PASO ADMINISTRATIVO; NO forma parte de la migración)
 -- ============================================================================================================================
---   NOTA (2026-11-12): en producción el job de REFRESCO ('analytics_refresh', 30 8 * * *, job id 1) YA se agendó a mano.
---   El job de CIERRE DE SESIONES ('analytics_reader_limpieza') sigue PENDIENTE de agendar. No ejecutar estos comandos al re-aplicar
---   en producción; quedan comentados a propósito.
+--   NOTA: en producción los dos jobs YA se agendaron a mano: 'analytics_refresh' (job id 1, 30 8 * * *) y 'analytics_cerrar_sesiones'
+--   (job id 2, */5 * * * *). Los comandos exactos están en la cabecera y en docs-analytics/operacion.md. No ejecutar nada de este bloque
+--   al re-aplicar en producción; quedan comentados a propósito. (La opción A de abajo es la propuesta original: allí el segundo job se
+--   llamaba 'analytics_reader_limpieza' y corría cada minuto; en producción es 'analytics_cerrar_sesiones' cada 5 minutos.)
 --   Las migraciones del repo no usan pg_cron (solo hay una mención en un comentario de 0001) y no pude comprobar si está habilitada en la
 --   base viva: es una extensión que se habilita desde el panel de Supabase (Database → Extensions). Opciones:
 --   A) pg_cron (recomendada, si está disponible), unos minutos ANTES de la extracción del pipeline. pg_cron usa hora UTC.
