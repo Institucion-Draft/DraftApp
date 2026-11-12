@@ -7,6 +7,7 @@ import type { MtgColor } from '../lib/database.types';
 import { MTG_COLOR_HEX } from './ColorFlag';
 import { useTheme } from '../theme';
 import { DITTO_TRANSFORM_DURATION_MS } from '../lib/dittoMirror';
+import { rewardOverridesCustom } from '../lib/specialRewardAvatar';
 
 export type PlayerAvatarSize = 'tiny' | 'small' | 'medium' | 'large' | 'xlarge';
 
@@ -381,12 +382,14 @@ export default function PlayerAvatar({
                   ? `
                 rotated_avatar_id,
                 is_shiny,
+                special_reward,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny),
                 participant_colors (color, member)
               `
                   : `
                 rotated_avatar_id,
                 is_shiny,
+                special_reward,
                 default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)
               `
               )
@@ -420,11 +423,14 @@ export default function PlayerAvatar({
 
       let shinyFlag = false;
       let rotatedStoragePath: string | null = null;
+      // Recompensa del desbloqueo especial (special_reward): el Pokémon de esta inscripción pisa al avatar custom en este evento.
+      let rewardOverride = false;
       let colors: MtgColor[] = [];
 
       if (!pRes.error && pRes.data) {
         const p = pRes.data as {
           is_shiny?: boolean;
+          special_reward?: string | null;
           member_b_is_shiny?: boolean | null;
           default_avatars?: {
             storage_path: string;
@@ -451,6 +457,11 @@ export default function PlayerAvatar({
         const shinyPath = rotDa?.storage_path_shiny ?? null;
         const normalPath = rotDa?.storage_path ?? null;
         rotatedStoragePath = shinyFlag && shinyPath ? shinyPath : normalPath;
+        rewardOverride = rewardOverridesCustom({
+          specialReward: p.special_reward,
+          hasSprite: !!rotatedStoragePath,
+          isMemberB,
+        });
         if (memberColors !== undefined) {
           colors = [...memberColors];
         } else if (withColorBorder && p.participant_colors != null) {
@@ -466,7 +477,7 @@ export default function PlayerAvatar({
       }
 
       let uri: string | null = null;
-      if (custom) {
+      if (custom && !rewardOverride) {
         uri = avatarPublicUrl(custom);
       } else if (!outsideEvent) {
         if (participantId && rotatedStoragePath) {
@@ -758,6 +769,7 @@ export type PreloadAvatarSeat = { participantId: string; userId: string; member:
 type PreloadDefaultAvatar = { storage_path: string; storage_path_shiny?: string | null };
 type PreloadAvatarRow = {
   is_shiny?: boolean;
+  special_reward?: string | null;
   member_b_is_shiny?: boolean | null;
   default_avatars?: PreloadDefaultAvatar | PreloadDefaultAvatar[] | null;
 };
@@ -785,7 +797,7 @@ async function preloadAvatar(seat: PreloadAvatarSeat): Promise<void> {
       : supabase
           .from('event_participants')
           .select(
-            'rotated_avatar_id, is_shiny, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)'
+            'rotated_avatar_id, is_shiny, special_reward, default_avatars!event_participants_rotated_avatar_id_fkey (storage_path, storage_path_shiny)'
           )
           .eq('id', seat.participantId)
           .maybeSingle();
@@ -799,7 +811,8 @@ async function preloadAvatar(seat: PreloadAvatarSeat): Promise<void> {
     const rotatedPath = shiny && da?.storage_path_shiny ? da.storage_path_shiny : (da?.storage_path ?? null);
     const userDefaultPath = relationOne(u?.default_avatars)?.storage_path ?? null;
     let uri: string | null = null;
-    if (u?.custom_avatar_path) uri = avatarPublicUrl(u.custom_avatar_path);
+    const rewardOverride = rewardOverridesCustom({ specialReward: p?.special_reward, hasSprite: !!rotatedPath, isMemberB: isB });
+    if (u?.custom_avatar_path && !rewardOverride) uri = avatarPublicUrl(u.custom_avatar_path);
     else if (rotatedPath) uri = defaultAvatarPublicUrl(rotatedPath);
     else if (userDefaultPath) uri = defaultAvatarPublicUrl(userDefaultPath);
     entry = { imageUri: uri, isShiny: shiny };

@@ -109,8 +109,23 @@ export type EventParticipant = {
   self_evaluation: number | null;
   rotated_avatar_id: string | null;
   is_shiny?: boolean;
+  /**
+   * Recompensa del desbloqueo especial de la partida 420 (0157): 'shiny' (ganador), 'ditto' (perdedor) o null. Si no es null,
+   * el Pokémon de la inscripción se muestra por encima del avatar custom. La escribe sólo la base.
+   */
+  special_reward?: 'shiny' | 'ditto' | null;
   joined_at: string;
 };
+
+/** Fila de get_my_special_unlock_notice() (0157): a lo sumo una, el aviso sin ver más antiguo del usuario. */
+export type SpecialUnlockNoticeRow = {
+  role: 'winner' | 'loser';
+  season_id: string;
+  workspace_id: string;
+  match_id: string | null;
+};
+/** ack_special_unlock_notice() (0157): true si marcó un aviso como visto, false si no había ninguno. */
+export type AckSpecialUnlockNoticeResult = boolean;
 
 export type ParticipantColor = {
   id: string;
