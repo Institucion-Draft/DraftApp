@@ -69,7 +69,7 @@ begin
       and g.status = 'active'
     order by g.created_at, g.id
   loop
-    perform pg_advisory_xact_lock(hashtext('knockout:' \|\| v_group_id::text));
+    perform pg_advisory_xact_lock(hashtext('knockout:' || v_group_id::text));
 
     for v_bm in
       select bm.id, bm.participant_a_id, bm.participant_b_id
@@ -1500,7 +1500,7 @@ begin
     from public.pairings
     where event_id = p_event_id and swiss_round is not null
   loop
-    v_already_played := v_already_played \|\| v_rec.participant_a_id \|\| v_rec.participant_b_id;
+    v_already_played := v_already_played || v_rec.participant_a_id || v_rec.participant_b_id;
   end loop;
 
   v_result := public.swiss_find_valid_pairing(v_remaining_participants, v_already_played);
@@ -1601,7 +1601,7 @@ begin
     from public.pairings
     where event_id = p_event_id and swiss_round is not null
   loop
-    v_already_played := v_already_played \|\| v_rec.participant_a_id \|\| v_rec.participant_b_id;
+    v_already_played := v_already_played || v_rec.participant_a_id || v_rec.participant_b_id;
   end loop;
 
   v_result := public.swiss_find_valid_pairing(v_remaining_participants, v_already_played);
@@ -1806,9 +1806,9 @@ begin
     end if;
 
     -- Nombre del gigante: primera letra mayúscula + resto minúsculas (máx 3 chars).
-    v_giant_name := upper(left(v_a_name, 1)) \|\| lower(substring(v_a_name, 2, 2))
-                 \|\| '-'
-                 \|\| upper(left(v_b_name, 1)) \|\| lower(substring(v_b_name, 2, 2));
+    v_giant_name := upper(left(v_a_name, 1)) || lower(substring(v_a_name, 2, 2))
+                 || '-'
+                 || upper(left(v_b_name, 1)) || lower(substring(v_b_name, 2, 2));
 
     -- Absorber B en la fila de A.
     update public.event_participants
