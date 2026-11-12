@@ -24,7 +24,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import UnseenDot from '../components/UnseenDot';
 import { hasUnseenAchievements, syncWorkspaceAchievements } from '../lib/achievements';
 import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type SeasonRow } from '../lib/seasons';
-import { maybeShowGen3Notice } from '../lib/gen3Notice';
+import { maybeShowWorkspaceNotices } from '../lib/specialUnlockNotice';
 import { formatEventMode } from '../lib/eventMode';
 import { nameWithCake } from '../lib/birthday';
 import { useTheme, useThemedStyles } from '../theme';
@@ -226,10 +226,11 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
     }, [loadSeasons, loadTodayEvents])
   );
 
-  // Aviso de una sola vez al desbloquear la Gen 3 (llegue el jugador desde donde llegue a esta pantalla).
+  // Avisos de una sola vez (llegue el jugador desde donde llegue a esta pantalla), en secuencia: primero el de la Gen 3
+  // desbloqueada y después el del desbloqueo especial de la partida 420.
   useFocusEffect(
     useCallback(() => {
-      void maybeShowGen3Notice(user?.id);
+      void maybeShowWorkspaceNotices(user?.id);
     }, [user?.id])
   );
 

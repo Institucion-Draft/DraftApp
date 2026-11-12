@@ -33,6 +33,7 @@ import {
   type DittoMirrorSlot,
   type DittoMirrorTarget,
 } from '../lib/dittoMirror';
+import { effectiveHasCustomAvatar } from '../lib/specialRewardAvatar';
 import type { MtgColor } from '../lib/database.types';
 import {
   buildSequentialEmojis,
@@ -72,6 +73,8 @@ type ParticipantRow = {
   member_b_user_id?: string | null;
   giant_name?: string | null;
   is_shiny?: boolean;
+  /** Recompensa del desbloqueo especial (0157): con valor, el Pokémon pisa al avatar custom en este evento. */
+  special_reward?: string | null;
   rotated_avatar_id: string | null;
   rotated_avatar:
     | { storage_path: string; storage_path_shiny?: string | null; name?: string | null }
@@ -1399,6 +1402,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
           member_b_user_id,
           giant_name,
           is_shiny,
+          special_reward,
           rotated_avatar_id,
           rotated_avatar:default_avatars!rotated_avatar_id(storage_path, storage_path_shiny, name),
           member_b_rotated_avatar:default_avatars!event_participants_member_b_rotated_avatar_id_fkey(name),
@@ -1528,7 +1532,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
             participantId: row.id,
             member: 'a',
             avatarName: relationOne(row.rotated_avatar)?.name ?? null,
-            hasCustomAvatar: !!relationOne(row.users)?.custom_avatar_path,
+            hasCustomAvatar: effectiveHasCustomAvatar(!!relationOne(row.users)?.custom_avatar_path, row.special_reward),
           },
         ];
         if (row.member_b_user_id) {
