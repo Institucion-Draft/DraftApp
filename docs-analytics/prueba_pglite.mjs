@@ -43,7 +43,7 @@ const one = async (s, p) => (await q(s, p))[0];
 const uuid = (n) => `${n.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
 
 // ---- aplicar la PROPUESTA
-const sql = fs.readFileSync(process.env.SQL_FILE ?? (MIG + "/0155_analytics.sql"), "utf8");   // SQL_FILE: solo para las pruebas de mutación (ver entrega)
+const sql = fs.readFileSync(process.env.SQL_FILE ?? (MIG + "/0155_analytics.sql"), "utf8").replace(/\r\n/g, "\n");   // SQL_FILE: solo para las pruebas de mutación (ver entrega)
 // el bloque de rollback está comentado; se ejecuta tal cual
 {
   const body = sql.replace(/^begin;$/m, "").replace(/^commit;$/m, "--FIN--").split("--FIN--")[0];
@@ -305,7 +305,7 @@ ok(Number(cruceFalta.partidas.jugadores_con_diferencia) > 0 && Number(cruceFalta
 
 // ---- PARCHE 0155b: reproduce el falso negativo con la definición ANTERIOR, aplica el parche, y comprueba dueño/privilegios/opciones
 {
-  const sqlPatch = fs.readFileSync(DOCS + "0155b_parche_conciliacion.sql", "utf8");
+  const sqlPatch = fs.readFileSync(DOCS + "0155b_parche_conciliacion.sql", "utf8").replace(/\r\n/g, "\n");
   const reVista = /create or replace view analytics_private\.v_conciliacion_calc[\s\S]*?group by p\.metrica;/;
   const vistaNueva = sql.match(reVista)[0];
   ok(sqlPatch.match(reVista)[0] === vistaNueva, "PARCHE: la vista del parche es IDÉNTICA a la de 0155");
@@ -619,7 +619,7 @@ await refresh();
 
 // ---- ejecutar TODAS las consultas de calidad.md (como reader; las ADMIN como administrador)
 {
-  const md = fs.readFileSync(DOCS + "calidad.md", "utf8").split("\n");
+  const md = fs.readFileSync(DOCS + "calidad.md", "utf8").replace(/\r\n/g, "\n").split("\n");
   const consultas = []; let admin = false; let enBloque = false; let bloque = [];
   for (const raw of md) {
     if (raw.includes("Pruebas **ADMIN**")) admin = true;
