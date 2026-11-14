@@ -14,6 +14,7 @@
 // Prueba EN MEMORIA (PGlite) de supabase/migrations/0155_analytics.sql sobre la cadena REAL de migraciones.
 // No toca ninguna base real: crea una base efímera con stubs de Supabase (mismo patrón que supabase/tests/harness.mjs).
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const aPosix = (u) => fileURLToPath(u).split(path.sep).join("/");
@@ -29,7 +30,7 @@ const db = new PGlite({extensions: {pgcrypto}});
 await db.exec(STUBS);
 await db.exec("create extension if not exists pgcrypto schema extensions;");
 for (const f of fs.readdirSync(MIG).filter((x) => /^\d{4}_.*\.sql$/.test(x)).sort()) {
-  if (/^01(49|50|51|55|56)_/.test(f)) continue; // snapshots de seguridad y la 0155 y 0156 (se aplican más abajo): se omiten en la cadena
+  if (/^01(49|50|51|55|56|58)_/.test(f)) continue; // snapshots de seguridad y la 0155, 0156 y 0158 (se aplican más abajo): se omiten en la cadena
   try { await db.exec(fs.readFileSync(path.join(MIG, f), "utf8")); } catch (e) { console.log("FALLÓ migración", f, e.message.slice(0, 200)); process.exit(2); }
 }
 // La cadena reproducida NO acepta match_type = 'tiebreak' (0016 borra un constraint con otro nombre; en la base viva está corregido): se corrige solo en esta prueba.
@@ -71,6 +72,20 @@ try {
     roles.split(",").map((r) => `${pre} from ${r.trim()};`).join("\n")));
 } catch (e) { console.log("FALLÓ 0156 =>", e.message); process.exit(2); }
 console.log("0156 aplicado (en memoria)");
+
+// ---- 0158: diferencial de vida final por partida (DESPUÉS de la 0156, como en producción; mismo recorte de REVOKE multi-rol por PGlite)
+const sql0158 = fs.readFileSync(MIG + "/0158_partidas_dif_vida_final.sql", "utf8").replace(/\r\n/g, "\n");
+{
+  // el md5 de la cabecera es el del cuerpo VIVO de refresh_analytics (el de la 0156) justo antes de aplicar la 0158
+  const vivo = (await one(`select prosrc from pg_proc where pronamespace = 'analytics_private'::regnamespace and proname = 'refresh_analytics'`)).prosrc.replace(/\r\n/g, "\n");
+  const md5 = (x) => crypto.createHash("md5").update(x).digest("hex");
+  ok(sql0158.includes(md5(vivo)) && sql0158.includes(`(${vivo.length} caracteres con LF`), "0158: la cabecera trae el md5 y el largo del cuerpo vivo de refresh_analytics que reemplaza (0156)", {md5: md5(vivo), largo: vivo.length});
+}
+try {
+  await db.exec(sql0158.replace(/^((?:revoke|alter default privileges)[^;\n]*?) from ([^;\n]+);$/gm, (_m, pre, roles) =>
+    roles.split(",").map((r) => `${pre} from ${r.trim()};`).join("\n")));
+} catch (e) { console.log("FALLÓ 0158 =>", e.message); process.exit(2); }
+console.log("0158 aplicado (en memoria)");
 
 // ---- datos de prueba. NO hay triggers de alta: los alias privados los asigna refresh_analytics() (sync_aliases) y los puestos 1..n también.
 const refresh = async () => (await one(`select analytics_private.refresh_analytics() as r`)).r;
@@ -792,6 +807,99 @@ await refresh();
     }
   }
   await db.exec("reset role");
+}
+
+// =====================================================================================================================
+// ---- 0158: analytics.partidas.dif_vida_final (vida final del ganador menos la del perdedor)
+// =====================================================================================================================
+{
+  console.log("\n--- 0158: dif_vida_final");
+  const E9 = await evento({start: "2026-05-02 20:00:00-03", end: "2026-05-02 21:30:00-03"});
+  const q9 = {}; for (let u = 1; u <= 6; u++) q9[u] = await part(E9, u, "player", ["W"]);
+  const mk = async (pr, n, winner, o = {}) => (await one(
+    `insert into public.matches (pairing_id, match_number, match_type, winner_participant_id, status, started_at, ended_at, is_walkover, ended_by_surrender, starting_life_a, starting_life_b, data_source)
+     values ($1,$2,$3,$4,'completed','2026-05-03 00:00:00+00','2026-05-03 00:20:00+00',$5,$6,30,40,'app') returning id`,
+    [pr, n, o.type ?? "draft", winner, o.wo ?? false, o.surrender ?? false])).id;
+  const le = (m, pid, min, life) => db.query(
+    `insert into public.life_events (match_id, participant_id, delta, resulting_life, occurred_at) values ($1,$2,-1,$3, (timestamptz '2026-05-03 00:00:00+00' + ($4 || ' minutes')::interval))`, [m, pid, life, String(min)]);
+
+  // M1: ganador (1) y perdedor (2) con eventos, insertados FUERA de orden cronológico: cuenta el de occurred_at más tardío, no el último insertado
+  const P1 = await pair(E9, q9[1], q9[2]); const M1 = await mk(P1, 1, q9[1]);
+  await le(M1, q9[1], 10, 9); await le(M1, q9[1], 0, 20); await le(M1, q9[1], 5, 14);        // final = 9 (minuto 10)
+  await le(M1, q9[2], 8, 3); await le(M1, q9[2], 3, 12);                                      // final = 3 (minuto 8)
+  // Ganador SIN eventos y perdedor SIN eventos, cada uno en el lado A y en el lado B del pairing (A = participante de menor id): usan su vida inicial (A = 30, B = 40)
+  const lados = (ua, ub) => (q9[ua] < q9[ub] ? {lo: ua, hi: ub} : {lo: ub, hi: ua});
+  const sinEv = async (ua, ub, quien, rol) => {
+    const pr = await pair(E9, q9[ua], q9[ub]); const l = lados(ua, ub);
+    const vacio = l[quien], otro = quien === "lo" ? l.hi : l.lo;
+    const m = await mk(pr, 1, q9[rol === "winner" ? vacio : otro]);
+    await le(m, q9[otro], 4, rol === "winner" ? 5 : 15);   // el otro lado termina en 5 (si es el perdedor) o en 15 (si es el ganador)
+    const inicial = quien === "lo" ? 30 : 40;
+    return {m, esperado: rol === "winner" ? inicial - 5 : 15 - inicial};
+  };
+  const S1 = await sinEv(1, 3, "lo", "winner");   // ganador sin eventos en el lado A: 30 - 5 = 25
+  const S2 = await sinEv(1, 5, "hi", "winner");   // ganador sin eventos en el lado B: 40 - 5 = 35
+  const S3 = await sinEv(1, 4, "lo", "loser");    // perdedor sin eventos en el lado A: 15 - 30 = -15
+  const S4 = await sinEv(1, 6, "hi", "loser");    // perdedor sin eventos en el lado B: 15 - 40 = -25
+  // M4: sin NINGÚN evento -> NULL (no se usa la vida inicial)
+  const P4 = await pair(E9, q9[2], q9[3]); const M4 = await mk(P4, 1, q9[2]);
+  // M5: diferencial NEGATIVO (ganó el 2 con 3 de vida contra un 4 que quedó en 10)
+  const P5 = await pair(E9, q9[2], q9[4]); const M5 = await mk(P5, 1, q9[2]);
+  await le(M5, q9[2], 5, 3); await le(M5, q9[4], 5, 10);
+  // M6: abandono (rendición) con las vidas iguales -> 0 (no se recorta ni se descarta)
+  const P6 = await pair(E9, q9[2], q9[5]); const M6 = await mk(P6, 1, q9[5], {surrender: true});
+  await le(M6, q9[5], 4, 8); await le(M6, q9[2], 4, 8);
+  // M7: venganza con eventos -> fuera
+  const P7 = await pair(E9, q9[3], q9[4], {stage: "revenge"}); const M7 = await mk(P7, 1, q9[3], {type: "revenge"});
+  await le(M7, q9[3], 4, 12); await le(M7, q9[4], 4, 2);
+  // M8: serie con una partida real (con eventos) y otra walkover en el mismo pairing -> ninguna se publica (el cruce no se publica)
+  const P8 = await pair(E9, q9[3], q9[5]); const M8a = await mk(P8, 1, q9[3]); const M8b = await mk(P8, 2, q9[3], {wo: true});
+  await le(M8a, q9[3], 4, 12); await le(M8a, q9[5], 4, 2); await le(M8b, q9[3], 4, 20);
+  // M9: un evento más VIEJO insertado al final (id nuevo) se ignora: manda occurred_at, no el orden de inserción
+  const P9b = await pair(E9, q9[5], q9[6]); const M9 = await mk(P9b, 1, q9[5]);
+  await le(M9, q9[5], 7, 11); await le(M9, q9[5], -10, 99);                                      // final = 11 (el 99 es de 10 minutos antes)
+  await le(M9, q9[6], 7, 7);                                                                    // final = 7
+
+  await refresh();
+  const dv = async (m) => (await one(`select p.dif_vida_final d from analytics.partidas p join analytics_private.v_partidas_base g on g.partida_key = p.id where g.match_id = $1`, [m]));
+
+  ok((await dv(M1))?.d === 6, "0158: ganador y perdedor con eventos: 9 - 3 = 6 (último por occurred_at, aunque se haya insertado antes)", await dv(M1));
+  for (const [n, S] of [["ganador sin eventos en el lado A", S1], ["ganador sin eventos en el lado B", S2], ["perdedor sin eventos en el lado A", S3], ["perdedor sin eventos en el lado B", S4]]) {
+    ok((await dv(S.m))?.d === S.esperado, "0158: " + n + ": usa su vida inicial (A = 30, B = 40) -> " + S.esperado, {esperado: S.esperado, real: await dv(S.m)});
+  }
+  ok((await dv(M4)) !== undefined && (await dv(M4)).d === null, "0158: partida sin NINGÚN evento: NULL (publicada, pero sin diferencial)", await dv(M4));
+  ok((await dv(M5))?.d === -7, "0158: diferencial negativo (3 - 10 = -7): no se limita ni se recorta", await dv(M5));
+  ok((await dv(M6))?.d === 0, "0158: abandono (rendición) con vidas iguales: 0 (no se descarta)", await dv(M6));
+  ok((await dv(M7)) === undefined, "0158: partida de venganza con eventos: no se publica", await dv(M7));
+  ok((await dv(M8a)) === undefined && (await dv(M8b)) === undefined, "0158: serie con walkover (partida real con eventos y la walkover): no se publican", [await dv(M8a), await dv(M8b)]);
+  ok((await dv(M9))?.d === 4, "0158: un evento más viejo insertado al final se ignora: manda occurred_at (11 - 7 = 4)", await dv(M9));
+
+  // El resto de las partidas (las de antes, sin life_events) quedan en NULL; las de este bloque con dato son exactamente 6
+  const cob = await one(`select count(*)::int n, count(dif_vida_final)::int con from analytics.partidas`);
+  ok(cob.con === 8 && cob.n === 10 + 9, "0158: cobertura: 8 con diferencial (M1, S1-S4, M5, M6, M9) de " + cob.n + " publicadas (M4 sin eventos y las 10 anteriores quedan NULL)", cob);
+
+  // Universo y estructura: la columna es integer nullable y no cambió ningún filtro (las partidas publicadas siguen siendo las mismas + las 6 nuevas)
+  const col = await one(`select data_type, is_nullable from information_schema.columns where table_schema = 'analytics' and table_name = 'partidas' and column_name = 'dif_vida_final'`);
+  ok(col.data_type === "integer" && col.is_nullable === "YES", "0158: dif_vida_final es integer NULL", col);
+
+  // Permisos: el lector la lee, anon/authenticated no, nada más cambió (RLS activa; función privada cerrada)
+  ok((await one(`select has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'select') a, has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'insert') b, has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'update') c`)).a === true, "0158: analytics_reader puede leer la columna");
+  const pc = await one(`select has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'insert') b, has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'update') c, has_column_privilege('anon', 'analytics.partidas', 'dif_vida_final', 'select') d, has_column_privilege('authenticated', 'analytics.partidas', 'dif_vida_final', 'select') e`);
+  ok(!pc.b && !pc.c && !pc.d && !pc.e, "0158: el lector no escribe la columna y anon/authenticated no la leen", pc);
+  await db.exec("set role analytics_reader");
+  let leyo = null; try { leyo = (await one(`select count(dif_vida_final)::int n from analytics.partidas`)).n; } catch (e) { leyo = e.message; }
+  let fn = "ejecutó"; try { await db.query(`select analytics_private.dif_vida_final($1)`, [M1]); } catch (e) { fn = "denegado"; }
+  await db.exec("reset role");
+  ok(leyo === 8, "0158: como analytics_reader, select de la columna devuelve los 8 valores", leyo);
+  ok(fn === "denegado", "0158: analytics_reader no puede ejecutar analytics_private.dif_vida_final()");
+  ok((await one(`select c.relrowsecurity r from pg_class c where c.oid = 'analytics.partidas'::regclass`)).r === true && (await one(`select count(*)::int n from pg_policies where schemaname = 'analytics' and tablename = 'partidas'`)).n === 1, "0158: RLS sigue activa en analytics.partidas con su única política de lectura");
+  const dfn = await one(`select prosecdef, proconfig from pg_proc where pronamespace = 'analytics_private'::regnamespace and proname = 'dif_vida_final'`);
+  ok(dfn.prosecdef === true && (dfn.proconfig ?? []).some((c) => c.startsWith("search_path=")), "0158: dif_vida_final es SECURITY DEFINER con search_path fijo", dfn);
+  const rdef = (await one(`select pg_get_functiondef('analytics_private.refresh_analytics()'::regprocedure) d`)).d;
+  ok(/security definer/i.test(rdef) && /search_path to 'pg_catalog', 'analytics_private', 'pg_temp'/i.test(rdef) && /lock table analytics_private\.player_optout in share mode/i.test(rdef) && /analytics_private\.dif_vida_final\(g\.match_id\)/.test(rdef), "0158: refresh_analytics conserva SECURITY DEFINER, search_path y SHARE, y usa dif_vida_final");
+  // idempotencia: la 0158 se puede volver a correr
+  try { await db.exec(sql0158.replace(/^((?:revoke|alter default privileges)[^;\n]*?) from ([^;\n]+);$/gm, (_m, pre, roles) => roles.split(",").map((r) => `${pre} from ${r.trim()};`).join("\n"))); ok(true, "0158 aplica dos veces sin errores (idempotente)"); }
+  catch (e) { ok(false, "0158 no es idempotente", e.message); }
 }
 
 console.log(fails ? `\n${fails} FALLAS` : "\nTODO OK");

@@ -154,3 +154,28 @@ commit;
 ```
 
 Después de aplicarla, la verificación de §e debe mostrar `analytics_private.cube_orden` con `rls = true` y todas las columnas de acceso en `false`.
+
+## i) Diferencial de vida final por partida (migración 0158)
+
+`analytics.partidas.dif_vida_final` (integer, nullable) = vida final del ganador menos la del perdedor (último `life_events` de cada lado; vida inicial si un lado no tiene eventos; `NULL` si la partida no tiene ningún evento; sin límites, puede ser negativa o 0). Mismo universo de partidas que antes. Pasos completos y rollback NO CORRER en la cabecera de [`0158_partidas_dif_vida_final.sql`](../supabase/migrations/0158_partidas_dif_vida_final.sql).
+
+Aplicación en producción (a mano, SQL Editor): fuera de la ventana del cron (08:30 UTC), anotar `select count(*) from analytics.partidas` y el md5 vivo de `refresh_analytics` (debe coincidir con el de la cabecera), correr el archivo, refrescar a mano (`select analytics_private.refresh_analytics();`) y verificar:
+
+```sql
+-- A) cobertura (esperado hoy: 423 partidas, 416 con dato, ~98 %)
+select count(*) as partidas, count(dif_vida_final) as con_dato,
+       round(100.0 * count(dif_vida_final) / nullif(count(*), 0), 1) as pct, min(dif_vida_final) as minimo, max(dif_vida_final) as maximo
+from analytics.partidas;
+
+-- B) SOLO administrador: ninguna partida publicada con life_events quedó sin diferencial (esperado 0)
+select count(*) from analytics_private.v_partidas_base g
+join analytics.partidas p on p.id = g.partida_key
+where p.dif_vida_final is null and exists (select 1 from public.life_events le where le.match_id = g.match_id);
+
+-- C) permisos de la columna (esperado: true, false, false)
+select has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_final', 'select') as lector_lee,
+       has_column_privilege('anon', 'analytics.partidas', 'dif_vida_final', 'select') as anon_lee,
+       has_column_privilege('authenticated', 'analytics.partidas', 'dif_vida_final', 'select') as authenticated_lee;
+```
+
+La verificación de §e sigue valiendo sin cambios (no se tocó ningún permiso ni política). Si el repo DraftApp-analytics valida el esquema con una lista exacta de columnas, hay que actualizarlo **antes** de la primera extracción posterior (ver contrato.md, "Impacto en el sitio").
