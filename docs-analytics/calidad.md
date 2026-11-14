@@ -50,7 +50,7 @@ with esperado(tabla, columna) as (values
   ('enfrentamientos','con_mazo_prestado'),
   ('partidas','id'),('partidas','enfrentamiento_id'),('partidas','numero'),('partidas','tipo'),('partidas','estado'),
   ('partidas','jugador_a'),('partidas','jugador_b'),('partidas','ganador_id'),('partidas','empieza_id'),
-  ('partidas','duracion_min'),('partidas','mazo_prestado_a'),('partidas','mazo_prestado_b')),
+  ('partidas','duracion_min'),('partidas','mazo_prestado_a'),('partidas','mazo_prestado_b'),('partidas','dif_vida_final')),
 real as (select table_name as tabla, column_name as columna from information_schema.columns where table_schema = 'analytics')
 select count(*) as n from (
   (select * from real except select * from esperado)
@@ -107,6 +107,7 @@ Umbrales iniciales; calibrar con la primera corrida real (completar la columna "
 | P-VOL-04 | Cobertura de colores en eventos de la app | `select round(100.0 * count(*) filter (where colores is null) / nullif(count(*), 0), 1) from analytics.participaciones where rol = 'player'` | ≤ 10 % sin colores (los importados suben este número; revisar) | AVISO |
 | P-VOL-05 | Cobertura de duración de partida | `select round(100.0 * count(*) filter (where duracion_min is null) / nullif(count(*), 0), 1) from analytics.partidas` | ≤ 25 % | AVISO |
 | P-VOL-06 | Cobertura de "quién empieza" (informativa: el dato no existe en los primeros eventos) | `select round(100.0 * count(*) filter (where empieza_id is not null) / nullif(count(*), 0), 1) from analytics.partidas` | se registra; AVISO si cae > 10 puntos respecto de la corrida anterior | AVISO |
+| P-VOL-08 | Cobertura del diferencial de vida final (**no bloqueante**; migración 0158): porcentaje de partidas con `dif_vida_final` no nulo. Hoy 416 de 423 (98 %); las que quedan en `NULL` son partidas sin ningún `life_events` | `select round(100.0 * count(dif_vida_final) / nullif(count(*), 0), 1) from analytics.partidas` | se registra; AVISO si baja de 90 % o cae más de 5 puntos respecto de la corrida anterior (nunca bloquea la publicación) | AVISO |
 | P-VOL-07 | Cada evento tiene partidas (excepto los `drafting`); se calcula sobre lo publicado | `select count(*) from analytics.eventos e where e.estado <> 'drafting' and not exists (select 1 from analytics.enfrentamientos x join analytics.partidas p on p.enfrentamiento_id = x.id where x.evento_id = e.id)` | ≤ 1 (un evento recién empezado) | AVISO |
 
 ## E. Anomalías de origen (control en la base) y registro de limpieza
