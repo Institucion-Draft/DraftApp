@@ -182,6 +182,14 @@ export default function CubesListScreen({ navigation, route }: Props) {
           <Text style={styles.primaryBtnText}>+ Agregar cubo</Text>
         </TouchableOpacity>
       ) : null}
+      {isOrganizer ? (
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={() => navigation.navigate('CubeAvailability', { workspaceId })}
+        >
+          <Text style={styles.secondaryBtnText}>Habilitar/Deshabilitar cubos</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <FlatList
         data={items}
@@ -208,6 +216,16 @@ const createStyles = (c: ThemeColors) =>
       alignItems: 'center',
     },
     primaryBtnText: { color: c.onAccent, fontSize: 16, fontWeight: '600' },
+    secondaryBtn: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      borderWidth: 1,
+      borderColor: c.accent,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    secondaryBtnText: { color: c.accent, fontSize: 16, fontWeight: '600' },
     listWrap: { padding: 16, paddingBottom: 30 },
     emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     empty: { color: c.textSecondary, fontSize: 15 },

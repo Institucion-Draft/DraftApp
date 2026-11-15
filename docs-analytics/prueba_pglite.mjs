@@ -992,5 +992,28 @@ await refresh();
   ok(!pr.a && !pr.b && !pr.c, "0159: dif_vida_final sigue sin ser ejecutable por analytics_reader, anon ni authenticated", pr);
 }
 
+// =====================================================================================================================
+// ---- 0160: habilitar/deshabilitar cubos NO cambia las letras estables (0156) ni lo publicado
+// =====================================================================================================================
+{
+  console.log("\n--- 0160: cubos habilitados");
+  const foto = async () => ({
+    cubos: await q(`select id, nombre from analytics.cubos order by id`),
+    pos: await q(`select alias_n, pos from analytics_private.cube_pos order by pos`),
+    eventos: (await one(`select count(*)::int n from analytics.eventos`)).n,
+    partidas: (await one(`select count(*)::int n from analytics.partidas`)).n,
+  });
+  const antes = await foto();
+  ok(antes.cubos.length >= 2, "0160: hay cubos publicados para comparar", antes.cubos);
+  await db.exec("update public.cubes set is_enabled = false");   // se deshabilitan TODOS los cubos
+  await refresh();
+  const deshab = await foto();
+  ok(JSON.stringify(deshab) === JSON.stringify(antes), "0160: con todos los cubos deshabilitados, las letras (analytics.cubos y cube_pos), los eventos y las partidas publicados no cambian", {antes, deshab});
+  await db.exec("update public.cubes set is_enabled = true");
+  await refresh();
+  const rehab = await foto();
+  ok(JSON.stringify(rehab) === JSON.stringify(antes), "0160: al volver a habilitarlos todo sigue igual", {antes, rehab});
+}
+
 console.log(fails ? `\n${fails} FALLAS` : "\nTODO OK");
 process.exit(fails ? 1 : 0);

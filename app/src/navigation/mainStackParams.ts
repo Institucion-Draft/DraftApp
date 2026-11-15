@@ -31,6 +31,7 @@ export type MainStackParamList = {
   GenerateInvite: { workspaceId: string };
   JoinByCode: undefined;
   CubesList: { workspaceId: string };
+  CubeAvailability: { workspaceId: string };
   CreateCube: { workspaceId: string };
   CubeDetail: { cubeId: string };
   EditCube: { cubeId: string };

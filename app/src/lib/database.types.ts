@@ -67,6 +67,8 @@ export type Cube = {
   card_count: number | null;
   notes: string | null;
   avatar_path: string | null;
+  /** Habilitado en la ruleta de cubos (0160). Deshabilitar no borra ni afecta lo ya jugado. */
+  is_enabled?: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
