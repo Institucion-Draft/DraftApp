@@ -155,14 +155,14 @@ commit;
 
 Después de aplicarla, la verificación de §e debe mostrar `analytics_private.cube_orden` con `rls = true` y todas las columnas de acceso en `false`.
 
-## i) Diferencial de vida final por partida (migración 0158)
+## i) Diferencial de vida final por partida (migraciones 0158 y 0159)
 
-`analytics.partidas.dif_vida_final` (integer, nullable) = vida final del ganador menos la del perdedor (último `life_events` de cada lado; vida inicial si un lado no tiene eventos; `NULL` si la partida no tiene ningún evento; sin límites, puede ser negativa o 0). Mismo universo de partidas que antes. Pasos completos y rollback NO CORRER en la cabecera de [`0158_partidas_dif_vida_final.sql`](../supabase/migrations/0158_partidas_dif_vida_final.sql).
+`analytics.partidas.dif_vida_final` (integer, nullable) = vida final del ganador menos la del perdedor (último `life_events` de cada lado; vida inicial si un lado no tiene eventos; sin límites, puede ser negativa o 0). Desde la 0159: `NULL` si la partida no tiene ningún evento **o si algún evento es de un participante que no es ni A ni B del cruce** (dato de origen roto), y **en una rendición (`ended_by_surrender`) la vida de quien abandona cuenta como 0**, así que el diferencial es la vida final del ganador. Mismo universo de partidas que antes. Pasos completos y rollback NO CORRER en la cabecera de [`0158_partidas_dif_vida_final.sql`](../supabase/migrations/0158_partidas_dif_vida_final.sql).
 
 Aplicación en producción (a mano, SQL Editor): fuera de la ventana del cron (08:30 UTC), anotar `select count(*) from analytics.partidas` y el md5 vivo de `refresh_analytics` (debe coincidir con el de la cabecera), correr el archivo, refrescar a mano (`select analytics_private.refresh_analytics();`) y verificar:
 
 ```sql
--- A) cobertura (esperado hoy: 423 partidas, 416 con dato, ~98 %)
+-- A) cobertura (antes de la 0159: 402 partidas con dato; después: 395 de 408)
 select count(*) as partidas, count(dif_vida_final) as con_dato,
        round(100.0 * count(dif_vida_final) / nullif(count(*), 0), 1) as pct, min(dif_vida_final) as minimo, max(dif_vida_final) as maximo
 from analytics.partidas;
@@ -179,3 +179,15 @@ select has_column_privilege('analytics_reader', 'analytics.partidas', 'dif_vida_
 ```
 
 La verificación de §e sigue valiendo sin cambios (no se tocó ningún permiso ni política). Si el repo DraftApp-analytics valida el esquema con una lista exacta de columnas, hay que actualizarlo **antes** de la primera extracción posterior (ver contrato.md, "Impacto en el sitio").
+
+### 0159: participantes inconsistentes y abandonos
+
+Migración [`0159_dif_vida_final_inconsistentes_y_abandonos.sql`](../supabase/migrations/0159_dif_vida_final_inconsistentes_y_abandonos.sql): redefine solo `analytics_private.dif_vida_final(match_id)` (`refresh_analytics()` la llama; no se toca). Pasos, md5 del cuerpo vivo, consultas y rollback NO CORRER en su cabecera. Aplicar a mano fuera de las 08:30 UTC, refrescar (`select analytics_private.refresh_analytics();`) y verificar: partidas con dato **402 → 395** (de 408: 96,8 %); las 7 partidas tiebreak inconsistentes de Copa Cordero Atado en `NULL`; ninguna partida por rendición con diferencial negativo (las que daban -5 y -1 pasan a positivas); cada negativo que quede se revisa a mano (caso raro).
+
+```sql
+-- SOLO administrador: control de calidad no bloqueante (calidad.md P-PRIV-20), partidas publicadas con life_events de participantes ajenos al cruce (hoy 7)
+select count(*) from analytics_private.v_partidas_base g
+join analytics.partidas p on p.id = g.partida_key
+join public.matches m on m.id = g.match_id join public.pairings pr on pr.id = m.pairing_id
+where exists (select 1 from public.life_events le where le.match_id = m.id and le.participant_id not in (pr.participant_a_id, pr.participant_b_id));
+```
