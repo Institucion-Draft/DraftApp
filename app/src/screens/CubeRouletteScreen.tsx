@@ -26,11 +26,12 @@ import {
   type CubeWeightParams,
 } from '../lib/cubeRouletteWeights';
 import { cubeGridColumns, cubeJumpPath } from '../lib/cubeRouletteGrid';
+import { filterEnabledCubes, NO_ENABLED_CUBES_NOTICE } from '../lib/cubeEnabled';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
 
-type CubeRow = { id: string; name: string; created_at: string | null };
+type CubeRow = { id: string; name: string; created_at: string | null; is_enabled?: boolean | null };
 type PlayerRow = { user_id: string; users: { display_name: string; username: string } | null | { display_name: string; username: string }[] };
 
 type LastSpin = { roulette_type: RouletteType; result_type: string; selected_player_user_id: string | null };
@@ -97,7 +98,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
             .eq('user_id', currentUserId)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
-      supabase.from('cubes').select('id, name, created_at').eq('workspace_id', wsId).is('deleted_at', null).order('name', { ascending: true }),
+      supabase.from('cubes').select('id, name, created_at, is_enabled').eq('workspace_id', wsId).is('deleted_at', null).order('name', { ascending: true }),
       supabase
         .from('event_participants')
         .select('user_id, users!event_participants_user_id_fkey (display_name, username)')
@@ -146,7 +147,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       Alert.alert('Error', 'No se pudo cargar la ruleta.');
       return;
     }
-    setCubes((cubesRes.data ?? []) as CubeRow[]);
+    // Solo entran los cubos habilitados (0160): ni las opciones, ni el N de las probabilidades, ni la elección manual incluyen a los otros.
+    const enabledCubes = filterEnabledCubes((cubesRes.data ?? []) as CubeRow[]);
+    setCubes(enabledCubes);
+    // Si la elección manual pendiente apuntaba a un cubo que acaba de deshabilitarse, se descarta.
+    setSelectedCubeId((prev) => (prev && !enabledCubes.some((c) => c.id === prev) ? null : prev));
     setPlayers((playersRes.data ?? []) as PlayerRow[]);
     // Sin fila, o error al leer el historial/la config: se usan los defaults y/o un historial vacío (todo uniforme).
     setWeightParams(sanitizeCubeWeightParams(configRes.error ? null : configRes.data));
@@ -290,6 +295,10 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
 
   const spin = async () => {
     if (spinning || options.length === 0) return;
+    if (rouletteType === 'cubes' && cubes.length === 0) {
+      Alert.alert('Sin cubos habilitados', NO_ENABLED_CUBES_NOTICE);
+      return;
+    }
     setSpinning(true);
     setManualCubePickerForUserId(null);
     setSelectedCubeId(null);
@@ -328,6 +337,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         });
         if (!okSpin) {
           setSpinning(false);
+          void load(); // por si el cubo se deshabilitó mientras tanto (el servidor lo rechaza): se refresca la lista
           return;
         }
         const okUpdate = await updateEventCube(result.key);
@@ -364,13 +374,21 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const confirmManualCube = async () => {
     if (!selectedCubeId || !manualCubePickerForUserId) return;
     const chosen = cubes.find((c) => c.id === selectedCubeId);
+    if (!chosen) {
+      Alert.alert('Cubo no disponible', 'Ese cubo ya no está habilitado. Elegí otro.');
+      setSelectedCubeId(null);
+      return;
+    }
     const okSpin = await saveSpin({
       roulette_type: 'players',
       result_type: 'cube',
       selected_cube_id: selectedCubeId,
       selected_player_user_id: manualCubePickerForUserId,
     });
-    if (!okSpin) return;
+    if (!okSpin) {
+      void load();
+      return;
+    }
     const okUpdate = await updateEventCube(selectedCubeId);
     if (!okUpdate) return;
     setManualCubePickerForUserId(null);
@@ -479,10 +497,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
             ))
           )}
 
+          {rouletteType === 'cubes' && cubes.length === 0 ? <Text style={styles.noCubes}>{NO_ENABLED_CUBES_NOTICE}</Text> : null}
           <TouchableOpacity
-            style={[styles.spinBtn, spinning && styles.spinDisabled]}
+            style={[styles.spinBtn, (spinning || (rouletteType === 'cubes' && cubes.length === 0)) && styles.spinDisabled]}
             onPress={() => void spin()}
-            disabled={spinning}
+            disabled={spinning || (rouletteType === 'cubes' && cubes.length === 0)}
           >
             <Text style={styles.spinTxt}>{spinning ? 'Girando...' : 'Tirar ruleta'}</Text>
           </TouchableOpacity>
@@ -492,6 +511,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       {manualCubePickerForUserId && !resultCubeName ? (
         <View style={styles.manualBlock}>
           <Text style={styles.manualTitle}>Seleccionar cubo manualmente</Text>
+          {cubes.length === 0 ? <Text style={styles.noCubes}>{NO_ENABLED_CUBES_NOTICE}</Text> : null}
           {cubes.map((c) => (
             <TouchableOpacity
               key={c.id}
@@ -514,6 +534,16 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       {!resultCubeName ? (
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.navigate('EventDetail', { eventId, workspaceId: workspaceId ?? undefined })}>
           <Text style={styles.backTxt}>Volver</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {!resultCubeName ? (
+        <TouchableOpacity
+          style={styles.availabilityLink}
+          disabled={spinning || !workspaceId}
+          onPress={() => workspaceId && navigation.navigate('CubeAvailability', { workspaceId })}
+        >
+          <Text style={styles.availabilityLinkTxt}>Habilitar/Deshabilitar cubos</Text>
         </TouchableOpacity>
       ) : null}
     </ScrollView>
@@ -558,4 +588,8 @@ const createStyles = (c: ThemeColors) =>
     confirmTxt: { color: c.onAccent, fontWeight: '700' },
     backBtn: { marginTop: 18, alignItems: 'center' },
     backTxt: { color: c.textSecondary, fontWeight: '600' },
+    noCubes: { color: c.textSecondary, fontSize: 14, marginTop: 10, textAlign: 'center' },
+    // Hipervínculo discreto abajo a la derecha: texto azul de tamaño normal, sin aspecto de botón.
+    availabilityLink: { alignSelf: 'flex-end', marginTop: 18, paddingVertical: 4 },
+    availabilityLinkTxt: { color: '#3B82F6', fontSize: 14 },
   });

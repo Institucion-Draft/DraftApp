@@ -38,6 +38,7 @@ import PlayerProfileInEventScreen from '../screens/PlayerProfileInEventScreen';
 import PairingsListScreen from '../screens/PairingsListScreen';
 import PairingDetailScreen from '../screens/PairingDetailScreen';
 import CubeRouletteScreen from '../screens/CubeRouletteScreen';
+import CubeAvailabilityScreen from '../screens/CubeAvailabilityScreen';
 import LifeTrackerScreen from '../screens/LifeTrackerScreen';
 import LifeChartScreen from '../screens/LifeChartScreen';
 import MatchResultScreen from '../screens/MatchResultScreen';
@@ -207,6 +208,7 @@ export default function MainStackNavigator() {
           }}
         />
         <Stack.Screen name="CubesList" component={CubesListScreen} options={{ title: 'Cubos', headerBackTitle: 'Atrás' }} />
+        <Stack.Screen name="CubeAvailability" component={CubeAvailabilityScreen} options={{ title: 'Habilitar cubos', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CreateCube" component={CreateCubeScreen} options={{ title: 'Nuevo cubo', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="CubeDetail" component={CubeDetailScreen} options={{ title: 'Cubo', headerBackTitle: 'Atrás' }} />
         <Stack.Screen name="EditCube" component={EditCubeScreen} options={{ title: 'Editar cubo', headerBackTitle: 'Atrás' }} />
