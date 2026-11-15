@@ -30,7 +30,7 @@ const db = new PGlite({extensions: {pgcrypto}});
 await db.exec(STUBS);
 await db.exec("create extension if not exists pgcrypto schema extensions;");
 for (const f of fs.readdirSync(MIG).filter((x) => /^\d{4}_.*\.sql$/.test(x)).sort()) {
-  if (/^01(49|50|51|55|56|58|59)_/.test(f)) continue; // snapshots de seguridad y la 0155, 0156, 0158 y 0159 (se aplican más abajo): se omiten en la cadena
+  if (/^01(49|50|51|55|56|58|59|61)_/.test(f)) continue; // snapshots de seguridad, 0155, 0156, 0158 y 0159 (se aplican más abajo) y la 0161 (cumpleaños: usa my_visible_user_ids(), que no está en las migraciones del repo; la prueba es supabase/tests/birthday-source.test.mjs): se omiten en la cadena
   try { await db.exec(fs.readFileSync(path.join(MIG, f), "utf8")); } catch (e) { console.log("FALLÓ migración", f, e.message.slice(0, 200)); process.exit(2); }
 }
 // La cadena reproducida NO acepta match_type = 'tiebreak' (0016 borra un constraint con otro nombre; en la base viva está corregido): se corrige solo en esta prueba.
