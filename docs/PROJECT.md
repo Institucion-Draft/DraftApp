@@ -112,7 +112,7 @@ Por estar trabajando solo, el ruleset de protección de main está disabled (Set
 
 **Auth y usuarios:**
 - `auth.users` (gestionado por Supabase Auth)
-- `public.users`: extiende auth con `display_name`, `username`, `gender`, `birth_date`, `default_avatar_id`, `custom_avatar_path`, `display_name_changed_at`. Ojo: existe también una columna `birthday` de 0001, muerta desde que 0015 introdujo `birth_date` como el campo real en uso (ver `BUGS_AND_REVIEW.md`).
+- `public.users`: extiende auth con `display_name`, `username`, `gender`, `birth_date`, `default_avatar_id`, `custom_avatar_path`, `display_name_changed_at`. `birth_date` (la escribe el usuario al registrarse; ningún cliente la puede leer) es la **única fuente** del cumpleaños desde la 0161 (fase A): solo importan día y mes. La columna `birthday` (0001/0145) queda como legado: los APK instalados todavía la leen para la 🎂 y se vaciará y borrará en fases posteriores. Los clientes nuevos no deben leerla: usar `birthday_user_ids_today()`, que devuelve solo ids de usuarios visibles con cumpleaños hoy (hora de Buenos Aires).
 - `public.default_avatars`: 251 Pokémon Gen 1-2 + 135 de Gen 3 + 27 formas extra de Unown (413 filas, 0142; `generation`, `unown_form`), cada uno con `storage_path` (y `storage_path_shiny` para la variante shiny) en bucket
 
 **Workspaces:**
