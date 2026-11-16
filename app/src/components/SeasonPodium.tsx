@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import PlayerAvatar, { type PlayerAvatarSize } from './PlayerAvatar';
 import { nameWithCake } from '../lib/birthday';
+import { useBirthdayUserIds } from '../lib/birthdayToday';
 import type { SeasonPodiumPlayer, SeasonPodiumStep } from '../lib/seasonPodium';
 import { useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -37,6 +38,7 @@ type Props = {
 
 export default function SeasonPodium({ steps, onPressPlayer }: Props) {
   const styles = useThemedStyles(createStyles);
+  const birthdayIds = useBirthdayUserIds();
   if (steps.length === 0) return null;
 
   const renderColumn = (rank: 1 | 2 | 3) => {
@@ -67,7 +69,7 @@ export default function SeasonPodium({ steps, onPressPlayer }: Props) {
           <View style={styles.names}>
             {players.map((p) => (
               <Text key={p.userId} style={styles.nameTxt} numberOfLines={1}>
-                {nameWithCake(p.name, p.birthday)}
+                {nameWithCake(p.name, p.userId, birthdayIds)}
               </Text>
             ))}
           </View>

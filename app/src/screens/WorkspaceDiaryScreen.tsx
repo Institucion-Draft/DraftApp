@@ -21,6 +21,7 @@ import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
 import PlayerAvatar from '../components/PlayerAvatar';
 import { nameWithCake } from '../lib/birthday';
+import { useBirthdayUserIds } from '../lib/birthdayToday';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -35,8 +36,8 @@ type DiaryRow = {
   content: string;
   created_at: string;
   users:
-    | { display_name: string; username: string; birthday: string | null }
-    | { display_name: string; username: string; birthday: string | null }[]
+    | { display_name: string; username: string }
+    | { display_name: string; username: string }[]
     | null;
 };
 
@@ -60,6 +61,7 @@ function formatDiaryWhen(iso: string): string {
 }
 
 export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
+  const birthdayIds = useBirthdayUserIds();
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
@@ -89,7 +91,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
         kind,
         content,
         created_at,
-        users!workspace_diary_entries_user_id_fkey (display_name, username, birthday)
+        users!workspace_diary_entries_user_id_fkey (display_name, username)
       `
       )
       .eq('workspace_id', workspaceId)
@@ -185,7 +187,7 @@ export default function WorkspaceDiaryScreen({ navigation, route }: Props) {
           <View style={styles.cardHeaderText}>
             <View style={styles.cardTitleRow}>
               <Text style={styles.cardAuthor} numberOfLines={1}>
-                {nameWithCake(author, u?.birthday)}
+                {nameWithCake(author, row.user_id, birthdayIds)}
               </Text>
               <Text style={styles.cardTypeIcon}>{typeIcon}</Text>
             </View>

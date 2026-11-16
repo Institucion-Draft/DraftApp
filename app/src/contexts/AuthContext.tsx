@@ -14,8 +14,8 @@ type AuthContextType = {
   signUp: (
     email: string,
     password: string,
-    gender: Gender,
-    birthDate: string
+    gender: Gender | null,
+    birthDate: string | null
   ) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
 };
@@ -75,14 +75,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error?.message ?? null };
   };
 
-  const signUp = async (email: string, password: string, gender: Gender, birthDate: string) => {
+  // Género y cumpleaños son opcionales: si no se eligieron se OMITEN de la metadata (handle_new_user usa 'prefer_not_to_say' y birth_date null).
+  const signUp = async (email: string, password: string, gender: Gender | null, birthDate: string | null) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          gender,
-          birth_date: birthDate,
+          ...(gender ? { gender } : {}),
+          ...(birthDate ? { birth_date: birthDate } : {}),
         },
       },
     });

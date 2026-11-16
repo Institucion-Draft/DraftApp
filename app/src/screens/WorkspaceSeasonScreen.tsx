@@ -108,7 +108,7 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
       medalsByUser.set(pos.user_id, m);
     }
 
-    const { names: namesByUser, birthdays: birthdaysByUser } = await fetchUserNameInfo(stats.map((s) => s.user_id));
+    const { names: namesByUser } = await fetchUserNameInfo(stats.map((s) => s.user_id));
 
     navigation.setOptions({ title: seasonRow.name });
     setSeason(seasonRow);
@@ -116,7 +116,7 @@ export default function WorkspaceSeasonScreen({ navigation, route }: Props) {
     setIsOrganizer(organizer);
     setAchievementsUnseen(unseen);
     setUnfinished(blockers ?? []);
-    setRows(buildRankingRows(stats, pointsByUser, medalsByUser, namesByUser, prodecByUserFromRows(pointsRows), birthdaysByUser));
+    setRows(buildRankingRows(stats, pointsByUser, medalsByUser, namesByUser, prodecByUserFromRows(pointsRows)));
     setLoading(false);
   }, [seasonId, workspaceId, user?.id, navigation]);
 

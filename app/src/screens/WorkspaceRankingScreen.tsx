@@ -74,10 +74,10 @@ export default function WorkspaceRankingScreen({ navigation, route }: Props) {
       });
     }
 
-    const { names: namesByUser, birthdays: birthdaysByUser } = await fetchUserNameInfo(stats.map((s) => s.user_id));
+    const { names: namesByUser } = await fetchUserNameInfo(stats.map((s) => s.user_id));
 
     setTiers(defaultTiers);
-    setRows(buildRankingRows(stats, pointsByUser, medalsByUser, namesByUser, prodecByUserFromRows(pointsRows), birthdaysByUser));
+    setRows(buildRankingRows(stats, pointsByUser, medalsByUser, namesByUser, prodecByUserFromRows(pointsRows)));
     setLoading(false);
   }, [workspaceId]);
 
