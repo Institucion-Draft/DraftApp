@@ -27,6 +27,7 @@ import { fetchWorkspaceSeasons, phaseSubtitle, syncWorkspaceSeasons, type Season
 import { maybeShowWorkspaceNotices } from '../lib/specialUnlockNotice';
 import { formatEventMode } from '../lib/eventMode';
 import { nameWithCake } from '../lib/birthday';
+import { useBirthdayUserIds } from '../lib/birthdayToday';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -43,7 +44,6 @@ type UserEmbed = {
   username: string;
   display_name: string;
   gender?: Gender | null;
-  birthday: string | null;
   custom_avatar_path: string | null;
   default_avatars: { storage_path: string } | { storage_path: string }[] | null;
 };
@@ -71,6 +71,7 @@ function relationOne<T>(x: T | T[] | null | undefined): T | null {
 }
 
 export default function WorkspaceDetailScreen({ navigation, route }: Props) {
+  const birthdayIds = useBirthdayUserIds();
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const { workspaceId } = route.params;
@@ -132,7 +133,6 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
           username,
           display_name,
           gender,
-          birthday,
           custom_avatar_path,
           default_avatars (storage_path)
         )
@@ -523,7 +523,7 @@ export default function WorkspaceDetailScreen({ navigation, route }: Props) {
               style={{ marginRight: 12 }}
             />
             <View style={styles.memberBody}>
-              <Text style={styles.memberName}>{nameWithCake(label, u?.birthday)}</Text>
+              <Text style={styles.memberName}>{nameWithCake(label, m.user_id, birthdayIds)}</Text>
               <Text style={styles.memberRole}>
                 {m.role === 'organizer' ? genderedWord(u?.gender, 'organizer', { capitalize: true }) : 'Miembro'}
               </Text>

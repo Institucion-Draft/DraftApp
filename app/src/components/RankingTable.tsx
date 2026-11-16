@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import PlayerAvatar from './PlayerAvatar';
 import ProDeCManaC from './ProDeCManaC';
 import { nameWithCake } from '../lib/birthday';
+import { useBirthdayUserIds } from '../lib/birthdayToday';
 import { formatPointsPerEvent, type RankingRow } from '../lib/ranking';
 import { useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -31,6 +32,7 @@ type Props = {
 
 export default function RankingTable({ rows, emptyText, legendText, onPressRow, header }: Props) {
   const styles = useThemedStyles(createStyles);
+  const birthdayIds = useBirthdayUserIds();
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll} horizontal={false}>
       {header}
@@ -76,7 +78,7 @@ export default function RankingTable({ rows, emptyText, legendText, onPressRow, 
                 <View style={[styles.nameCol, styles.nameCell]}>
                   <PlayerAvatar userId={r.userId} size="tiny" withColorBorder={false} outsideEvent style={styles.avatar} />
                   <Text style={styles.nameTxt} numberOfLines={1}>
-                    {nameWithCake(r.name, r.birthday)}
+                    {nameWithCake(r.name, r.userId, birthdayIds)}
                   </Text>
                 </View>
                 <Text style={[styles.cell, styles.statCol, styles.pointsTxt]}>{r.points}</Text>

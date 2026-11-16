@@ -1,6 +1,6 @@
 import type { RankingRow } from './ranking';
 
-export type SeasonPodiumPlayer = { userId: string; name: string; points: number; birthday?: string | null };
+export type SeasonPodiumPlayer = { userId: string; name: string; points: number };
 
 export type SeasonPodiumStep = {
   rank: 1 | 2 | 3;
@@ -17,7 +17,7 @@ export type SeasonPodiumStep = {
  * jugadores con puntos > 0. Devuelve únicamente los peldaños con jugadores.
  */
 export function computeSeasonPodium(
-  rows: (Pick<RankingRow, 'userId' | 'name' | 'points'> & { birthday?: string | null })[]
+  rows: Pick<RankingRow, 'userId' | 'name' | 'points'>[]
 ): SeasonPodiumStep[] {
   const scored = rows.filter((r) => r.points > 0);
   const topValues = Array.from(new Set(scored.map((r) => r.points)))
@@ -28,6 +28,6 @@ export function computeSeasonPodium(
     points,
     players: scored
       .filter((r) => r.points === points)
-      .map((r) => ({ userId: r.userId, name: r.name, points: r.points, birthday: r.birthday ?? null })),
+      .map((r) => ({ userId: r.userId, name: r.name, points: r.points })),
   }));
 }
