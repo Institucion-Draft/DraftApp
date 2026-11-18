@@ -49,7 +49,7 @@ import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { clearTimerSession } from '../lib/draftTimerStore';
 import { shouldShowTimerButton } from '../lib/draftTimerSession';
-import { showStandingsButton } from '../lib/eventPermissions';
+import { canDeleteCancelledEvent, deleteEventRpcName, needsMatchCountForDelete, showStandingsButton } from '../lib/eventPermissions';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -92,6 +92,7 @@ type EventRow = {
   cancelled_by: string | null;
   deleted_at: string | null;
   event_organizer_user_id: string;
+  is_official?: boolean | null;
   is_timed_draft?: boolean | null;
   timer_packs?: number[] | null;
   timer_alpha?: number | null;
@@ -218,6 +219,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOrganizer, setIsOrganizer] = useState(false);
+  /** Evento cancelado, oficial y visto por quien solo tiene la posta: ¿tiene alguna partida? null = todavía no se sabe (no se ofrece "Eliminar evento"). */
+  const [cancelledHasMatches, setCancelledHasMatches] = useState<boolean | null>(null);
   const [isWorkspaceMember, setIsWorkspaceMember] = useState(false);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const myGender = useMyGender();
@@ -261,7 +264,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     const { data, error } = await supabase
       .from('draft_events')
       .select(
-        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, topcut_format, random_seating_enabled, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id'
+        'id, workspace_id, name, avatar_path, status, event_type, competition_format, top_size, match_format, topcut_format, random_seating_enabled, current_swiss_round, swiss_rounds_total, swiss_rounds_manual, scheduled_for, cube_id, venue_id, notes, zones_drawn_at, zones_phase_completed_at, zones_count, draft_started_at, draft_ended_at, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, event_ended_at, final_pending, cancelled_at, cancelled_by, deleted_at, giant_randomization_done, is_timed_draft, timer_packs, timer_alpha, timer_beta, timer_gamma, timer_delta, timer_rho, timer_tmin, timer_tmax, timer_color, event_organizer_user_id, is_official'
       )
       .eq('id', eventId)
       .maybeSingle();
@@ -1128,7 +1131,9 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
   const softDeleteEvent = async () => {
     if (!event) return;
-    const { error } = await supabase.rpc('soft_delete_event', { p_event_id: event.id });
+    // El organizador del workspace sigue con soft_delete_event; quien solo tiene la posta usa el RPC nuevo (0164), que el servidor limita a eventos
+    // cancelados no oficiales o sin partidas. El servidor valida: si rechaza, se muestra su mensaje.
+    const { error } = await supabase.rpc(deleteEventRpcName(isOrganizer), { p_event_id: event.id });
     if (error) {
       Alert.alert('Error', error.message ?? 'No se pudo eliminar el evento.');
       return;
@@ -1258,6 +1263,33 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   // "Eliminar evento" queda aparte, gateado por isOrganizer puro (ver el bloque de "Eliminar
   // evento" más abajo): la posta nunca da esa facultad.
   const canManageEvent = isOrganizer || (myUserId != null && event?.event_organizer_user_id === myUserId);
+  // Para quien solo tiene la posta, un evento OFICIAL cancelado se puede eliminar únicamente si no tiene partidas (el servidor lo valida igual, 0164).
+  // Se mira solo en ese caso, con el evento ya cargado.
+  const eventIdForDelete = event?.id ?? null;
+  const eventStatusForDelete = event?.status ?? null;
+  const eventOfficialForDelete = event?.is_official ?? null;
+  useEffect(() => {
+    if (
+      !eventIdForDelete ||
+      !needsMatchCountForDelete({ status: eventStatusForDelete, isOrganizer, canManageEvent, isOfficial: eventOfficialForDelete })
+    ) {
+      setCancelledHasMatches(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void (async () => {
+      const [m, tg] = await Promise.all([
+        supabase.from('matches').select('id, pairings!inner(event_id)', { count: 'exact', head: true }).eq('pairings.event_id', eventIdForDelete),
+        supabase.from('tg_matches').select('id, tg_pairings!inner(event_id)', { count: 'exact', head: true }).eq('tg_pairings.event_id', eventIdForDelete),
+      ]);
+      if (cancelled) return;
+      // Si alguna consulta falla no se ofrece el botón (null): el servidor decide igual.
+      setCancelledHasMatches(m.error || tg.error ? null : (m.count ?? 0) + (tg.count ?? 0) > 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventIdForDelete, eventStatusForDelete, eventOfficialForDelete, isOrganizer, canManageEvent]);
   // Quien tiene la posta ahora mismo (Fase 8: "Delegar facultades") — a diferencia de
   // canManageEvent, NO incluye a un organizador real que nunca creó ni recibió la posta: eso
   // nunca fue suyo, no hay nada que ceder (mismo criterio que transfer_event_posta en la DB).
@@ -1740,7 +1772,13 @@ export default function EventDetailScreen({ route, navigation }: Props) {
         <Text style={styles.meta}>Notas: {event.notes?.trim() || 'Sin notas.'}</Text>
       </View>
 
-      {isOrganizer && event.status === 'cancelled' ? (
+      {canDeleteCancelledEvent({
+        status: event.status,
+        isOrganizer,
+        canManageEvent,
+        isOfficial: event.is_official,
+        hasMatches: cancelledHasMatches,
+      }) ? (
         <View style={styles.block}>
           <TouchableOpacity
             style={styles.dangerBtn}
