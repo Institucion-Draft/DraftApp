@@ -3,6 +3,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
   Alert,
   Animated,
+  AppState,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,11 +20,8 @@ import {
   computePickTimeline,
   type PickInfo,
 } from '../lib/draftTimer';
-import {
-  saveTimerSession,
-  getTimerSession,
-  clearTimerSession,
-} from '../lib/draftTimerStore';
+import { saveTimerSession, loadTimerSession, clearTimerSession } from '../lib/draftTimerStore';
+import { fallbackFromLogs, isPickLogged, restoreTimerSession, snapshotTimerSession } from '../lib/draftTimerSession';
 import { generateEventPairings } from '../lib/generateEventPairings';
 import { timerVorticesSpinning, timerVorticesVisible, type PackDirection } from '../lib/eventSeating';
 import { fetchSeating } from '../lib/eventSeatingApi';
@@ -203,6 +201,14 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const flashAnim = useRef(new Animated.Value(0)).current;
   const roundStartRef = useRef<number | null>(null);
   const unloggedPickRef = useRef<number | null>(null);
+  /** Instante ABSOLUTO (ms) en que termina la pick que corre. La cuenta regresiva se calcula desde acá, no restando de a 1: sobrevive a segundo plano y a reinicios. */
+  const endsAtRef = useRef<number | null>(null);
+  /** Fin absoluto de una sesión restaurada que estaba corriendo; lo usa el arranque automático. */
+  const restoredEndsAtRef = useRef<number | null>(null);
+  /** Una sesión restaurada estaba pausada: tras arrancar el conteo queda pausada. */
+  const restoredPausedRef = useRef(false);
+  /** global_pick (1-based) que ya tienen log en draft_timer_logs: evita duplicados al restaurar o reintentar. */
+  const loggedPicksRef = useRef<Set<number>>(new Set());
 
   // Keep a ref with latest state for blur-save (avoids stale closure in useFocusEffect)
   const stateRef = useRef({ phase, pickIdx, secondsLeft, paused });
@@ -250,34 +256,55 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
       setPacks(timerPacks);
       setTimeline(tl);
 
-      const session = getTimerSession(eventId);
-      if (session && session.pickIdx < tl.length) {
-        let restoredSeconds = session.secondsLeft;
-        if (session.phase === 'counting') {
-          const elapsedSec = Math.floor((Date.now() - session.savedAt) / 1000);
-          restoredSeconds = Math.max(0, session.secondsLeft - elapsedSec);
-        }
-        if (restoredSeconds <= 0 && session.phase === 'counting') {
-          const nextIdx = session.pickIdx + 1;
-          if (nextIdx >= tl.length) {
-            setPhase('done');
-          } else {
-            setPickIdx(nextIdx);
-            setSecondsLeft(tl[nextIdx]!.timeSeconds);
-            setPhase('waiting');
-          }
-        } else {
-          setPickIdx(session.pickIdx);
-          setSecondsLeft(Math.max(restoredSeconds, 1));
-          setPhase('waiting');
-          if (session.phase === 'counting') {
+      // Logs ya escritos (también alimentan el fallback sin sesión local). Si la lectura falla: sin logs, el cronómetro sigue como siempre.
+      const logsRes = await supabase.from('draft_timer_logs').select('global_pick').eq('event_id', eventId);
+      const loggedPicks = logsRes.error ? [] : ((logsRes.data ?? []) as { global_pick: number }[]).map((r) => r.global_pick);
+      loggedPicksRef.current = new Set(loggedPicks);
+
+      const restored = restoreTimerSession(await loadTimerSession(eventId), tl.length, Date.now());
+      const initWaiting = (idx: number, secs: number) => {
+        setPickIdx(idx);
+        setSecondsLeft(secs);
+        setPhase('waiting');
+      };
+      if (restored) {
+        roundStartRef.current = 'roundStartAt' in restored ? restored.roundStartAt : null;
+        unloggedPickRef.current = 'unloggedPick' in restored ? restored.unloggedPick : null;
+        switch (restored.kind) {
+          case 'waiting':
+            initWaiting(restored.pickIdx, restored.secondsLeft);
+            break;
+          case 'running':
+            restoredEndsAtRef.current = restored.endsAt;
             autoStartRef.current = true;
-          }
+            initWaiting(restored.pickIdx, restored.secondsLeft);
+            break;
+          case 'paused':
+            restoredPausedRef.current = true;
+            autoStartRef.current = true;
+            initWaiting(restored.pickIdx, restored.secondsLeft);
+            break;
+          case 'expired_next':
+            // Venció mientras la app no estaba: igual que al vencer en vivo, la pick queda pendiente de log hasta el "Iniciar" de la siguiente.
+            unloggedPickRef.current = restored.expiredPick;
+            initWaiting(restored.pickIdx, tl[restored.pickIdx]!.timeSeconds);
+            break;
+          case 'expired_done':
+            logPick(tl, restored.expiredPick, restored.elapsedSec);
+            roundStartRef.current = null;
+            unloggedPickRef.current = null;
+            setPickIdx(restored.expiredPick);
+            setPhase('done');
+            break;
         }
       } else {
-        setPickIdx(0);
-        setSecondsLeft(tl[0]?.timeSeconds ?? params.tMin);
-        setPhase('waiting');
+        const fb = fallbackFromLogs(loggedPicks, tl.length);
+        if (fb) {
+          // Sin sesión local: se retoma en la pick siguiente a la última logueada (a lo sumo una atrás; "Siguiente ronda" la corrige).
+          initWaiting(fb.pickIdx, tl[fb.pickIdx]!.timeSeconds);
+        } else {
+          initWaiting(0, tl[0]?.timeSeconds ?? params.tMin);
+        }
       }
     })();
   }, [eventId, navigation]);
@@ -332,6 +359,10 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   const logPick = useCallback((tl: PickInfo[], idx: number, actualSec: number) => {
     const pick = tl[idx];
     if (!pick) return;
+    // Una pick se loguea UNA sola vez (restaurar una sesión o reintentar no duplica): se marca antes de escribir y se desmarca si falla.
+    if (isPickLogged(loggedPicksRef.current, idx)) return;
+    const loggedKey = idx + 1;
+    loggedPicksRef.current.add(loggedKey);
     const effectiveSec = pick.cardsPresent === 1 ? 0 : actualSec;
     console.log('[TimerLog]', { idx, global: pick.globalIndex + 1, pack: pick.packIndex, inPack: pick.pickInPack, estimated: pick.timeSeconds, actual: effectiveSec, eventId });
     void supabase.from('draft_timer_logs').insert({
@@ -342,38 +373,47 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
       estimated_seconds: pick.timeSeconds,
       actual_seconds: effectiveSec,
     }).then(({ error }) => {
-      if (error) console.error('[TimerLog] insert error', error);
+      if (error) {
+        loggedPicksRef.current.delete(loggedKey);
+        console.error('[TimerLog] insert error', error);
+      }
     });
   }, [eventId]);
 
-  const startCountdown = useCallback((tl: PickInfo[], idx: number, packsArr: number[]) => {
+  /**
+   * Arranca la cuenta regresiva de la pick `idx`. El tiempo restante se calcula SIEMPRE desde un instante absoluto (`endsAtRef`), no
+   * restando de a uno: si el JS se suspende en segundo plano, el próximo tick se pone al día solo. `endsAtOverride` = fin absoluto de una
+   * sesión restaurada.
+   */
+  const startCountdown = useCallback((tl: PickInfo[], idx: number, packsArr: number[], seconds: number, endsAtOverride?: number) => {
     stopInterval();
     setPhase('counting');
     pausedRef.current = false;
+    endsAtRef.current = endsAtOverride ?? Date.now() + seconds * 1000;
     intervalRef.current = setInterval(() => {
       if (pausedRef.current) return;
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          stopInterval();
-          flashRed();
-          const isLast = idx + 1 >= tl.length;
-          if (isLast) {
-            const elapsed = roundStartRef.current !== null
-              ? Math.round((Date.now() - roundStartRef.current) / 1000)
-              : 0;
-            logPick(tl, idx, elapsed);
-            roundStartRef.current = null;
-            unloggedPickRef.current = null;
-          } else {
-            // Mark as unlogged; roundStartRef stays set for next-iniciar timing.
-            unloggedPickRef.current = idx;
-          }
-          setTimeout(() => advancePick(idx + 1, tl, packsArr), 600);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      const remaining = Math.ceil(((endsAtRef.current ?? 0) - Date.now()) / 1000);
+      if (remaining > 0) {
+        setSecondsLeft(remaining);
+        return;
+      }
+      stopInterval();
+      setSecondsLeft(0);
+      flashRed();
+      const isLast = idx + 1 >= tl.length;
+      if (isLast) {
+        const elapsed = roundStartRef.current !== null
+          ? Math.round(((endsAtRef.current ?? Date.now()) - roundStartRef.current) / 1000)
+          : 0;
+        logPick(tl, idx, elapsed);
+        roundStartRef.current = null;
+        unloggedPickRef.current = null;
+      } else {
+        // Mark as unlogged; roundStartRef stays set for next-iniciar timing.
+        unloggedPickRef.current = idx;
+      }
+      setTimeout(() => advancePick(idx + 1, tl, packsArr), 600);
+    }, 250);
   }, [stopInterval, flashRed, advancePick, logPick]);
 
   useEffect(() => () => stopInterval(), [stopInterval]);
@@ -382,26 +422,60 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (phase !== 'waiting' || !autoStartRef.current) return;
     autoStartRef.current = false;
-    startCountdown(timeline, pickIdx, packs);
-  }, [phase, timeline, pickIdx, packs, startCountdown]);
+    const endsAt = restoredEndsAtRef.current ?? undefined;
+    restoredEndsAtRef.current = null;
+    startCountdown(timeline, pickIdx, packs, secondsLeft, endsAt);
+    if (restoredPausedRef.current) {
+      // La sesión estaba pausada: queda pausada con los mismos segundos (la pausa no consume tiempo).
+      restoredPausedRef.current = false;
+      pausedRef.current = true;
+      setPaused(true);
+    }
+  }, [phase, timeline, pickIdx, packs, secondsLeft, startCountdown]);
 
-  // Save state on blur so it can be restored if the user navigates back
+  // Guarda la sesión (memoria + AsyncStorage). 'loading' no toca nada (no pisa ni borra la sesión de antes); 'done' la borra: el cronómetro terminó.
+  const persistSession = useCallback(() => {
+    const { phase: p, pickIdx: pi, secondsLeft: sl, paused: pa } = stateRef.current;
+    if (p === 'loading') return;
+    // Sesión recién restaurada que todavía no arrancó su conteo: no se pisa la guardada con el estado intermedio 'waiting'.
+    if (autoStartRef.current) return;
+    if (p === 'done') {
+      clearTimerSession(eventId);
+      return;
+    }
+    saveTimerSession(
+      eventId,
+      snapshotTimerSession({
+        pickIdx: pi,
+        phase: p === 'counting' ? 'counting' : 'waiting',
+        paused: pa,
+        secondsLeft: sl,
+        endsAt: endsAtRef.current,
+        roundStartAt: roundStartRef.current,
+        unloggedPick: unloggedPickRef.current,
+        now: Date.now(),
+      })
+    );
+  }, [eventId]);
+
+  // Al arrancar, cambiar de pick, pausar o reanudar. Como la cuenta se calcula desde un fin absoluto, no hace falta guardar en cada segundo.
+  useEffect(() => {
+    persistSession();
+  }, [phase, pickIdx, paused, persistSession]);
+
+  // Al pasar a segundo plano.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'background' || st === 'inactive') persistSession();
+    });
+    return () => sub.remove();
+  }, [persistSession]);
+
+  // Al salir (blur o unmount): quedan guardados para retomar donde estaba.
   useFocusEffect(
     useCallback(() => {
-      return () => {
-        const { phase: p, pickIdx: pi, secondsLeft: sl, paused: pa } = stateRef.current;
-        if (p !== 'done' && p !== 'loading') {
-          saveTimerSession(eventId, {
-            pickIdx: pi,
-            secondsLeft: sl,
-            phase: p === 'counting' && !pa ? 'counting' : 'waiting',
-            savedAt: Date.now(),
-          });
-        } else {
-          clearTimerSession(eventId);
-        }
-      };
-    }, [eventId])
+      return () => persistSession();
+    }, [persistSession])
   );
 
   // Elapsed time counter (runs independently of the pick countdown)
@@ -417,6 +491,7 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (phase !== 'done') return;
+    clearTimerSession(eventId);
     void (async () => {
       const toPlaying = await supabase
         .from('draft_events')
@@ -450,11 +525,17 @@ export default function DraftTimerScreen({ route, navigation }: Props) {
         unloggedPickRef.current = null;
       }
       roundStartRef.current = Date.now();
-      startCountdown(timeline, pickIdx, packs);
+      startCountdown(timeline, pickIdx, packs, secondsLeft);
     } else if (phase === 'counting' && !paused) {
+      // Pausa: se congelan los segundos que faltan (desde el fin absoluto) y la pausa no consume tiempo.
+      const remaining = Math.max(1, Math.ceil(((endsAtRef.current ?? Date.now()) - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      stateRef.current = { ...stateRef.current, secondsLeft: remaining };
       pausedRef.current = true;
       setPaused(true);
     } else if (phase === 'counting' && paused) {
+      // Reanuda: nuevo fin absoluto desde ahora con los segundos congelados.
+      endsAtRef.current = Date.now() + secondsLeft * 1000;
       pausedRef.current = false;
       setPaused(false);
     }
