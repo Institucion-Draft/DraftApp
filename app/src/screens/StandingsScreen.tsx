@@ -43,8 +43,10 @@ import {
 import ColorFlag from '../components/ColorFlag';
 import { genderedWord, resolveGenderedText, type Gender } from '../lib/genderText';
 import { normalizeCompetitionFormat, type CompetitionFormat } from '../lib/eventMode';
+import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstPlaceTiebreak';
 import {
   computePodium,
+  PODIUM_DEFINING_TIEBREAK_TEXT,
   buildGameWinrateMap,
   computeFinalStandingsWithTiebreakSplit,
   rankRoundRobinBo1Standings,
@@ -747,6 +749,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
   const [eventTypeStored, setEventTypeStored] = useState<string | null>(null);
   const firstRef = useRef(true);
   const standingsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  /** Todos contra todos con empate por el 1º ya detectado (final_pending) y sin grupo de desempate: lo que hace falta para crearlo (ver el efecto de abajo). */
+  const [firstPlaceTiebreakJob, setFirstPlaceTiebreakJob] = useState<{
+    isBo2: boolean;
+    participants: { id: string; left_event_at: string | null }[];
+  } | null>(null);
+  const creatingFirstPlaceRef = useRef(false);
+  const firstPlaceFailedAtRef = useRef(0);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -834,7 +843,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
       supabase
         .from('draft_events')
         .select(
-          'status, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type, topcut_format, zones_count, zone_qualifiers, zone_wildcards, zones_phase_completed_at'
+          'status, final_pending, champion_user_id, champion_decided_by, polemica_winners, recognition_winners, turn_tracking_enabled, competition_format, top_size, match_format, event_type, topcut_format, zones_count, zone_qualifiers, zone_wildcards, zones_phase_completed_at'
         )
         .eq('id', eventId)
         .maybeSingle(),
@@ -1162,6 +1171,7 @@ export default function StandingsScreen({ route, navigation }: Props) {
     const recognitionWinners = ((eventRes.data as { recognition_winners?: string[] | null } | null)
       ?.recognition_winners ?? []) as string[];
     setEventStatusStored(eventStatus ?? null);
+    const finalPending = (eventRes.data as { final_pending?: boolean | null } | null)?.final_pending === true;
     let swissChampName: string | null = null;
     let swissChampHonorific: string | null = null;
     if (fmt === 'swiss' && eventStatus === 'completed' && championUserId) {
@@ -1291,8 +1301,26 @@ export default function StandingsScreen({ route, navigation }: Props) {
         rawFmt,
         rawTopSize,
         rawMatchFormat,
-        eventStatus
+        eventStatus,
+        // Solo si la consulta del grupo salió bien: un error de lectura no debe vaciar un podio legítimo.
+        !tiebreakGroupRes.error && finalPending
       )
+    );
+
+    // Misma condición que EventDetailScreen: el grupo de desempate por el 1er puesto lo arma el cliente; acá no se depende de que alguien pase por el detalle.
+    setFirstPlaceTiebreakJob(
+      eventStatus === 'playing' &&
+        finalPending &&
+        rawFmt === 'round_robin' &&
+        rawTopSize == null &&
+        !(championUserId != null && String(championUserId).trim() !== '') &&
+        !tiebreakGroupRes.error &&
+        !tiebreakGroupRes.data
+        ? {
+            isBo2: rawMatchFormat === 'bo2',
+            participants: (participants as { id: string; left_event_at?: string | null }[]).map((p) => ({ id: p.id, left_event_at: p.left_event_at ?? null })),
+          }
+        : null
     );
 
     // 2da oportunidad (0135): su propio podio, calculado solo con lo que se resolvió en su cuadro.
@@ -1739,6 +1767,43 @@ export default function StandingsScreen({ route, navigation }: Props) {
     };
   }, [eventId, load]);
 
+  // Crea el desempate por el 1er puesto (idempotente en el servidor; el RPC acepta a cualquier miembro). Una sola llamada en vuelo; si falla no se
+  // reintenta por 15 s y la pantalla sigue en "definiendo desempate" (no se rompe). Al terminar recarga: el grupo nuevo también llega por realtime.
+  useEffect(() => {
+    const job = firstPlaceTiebreakJob;
+    if (!job || creatingFirstPlaceRef.current) return;
+    if (Date.now() - firstPlaceFailedAtRef.current < 15000) return;
+    creatingFirstPlaceRef.current = true;
+    let alive = true;
+    void (async () => {
+      try {
+        const existing = await supabase
+          .from('event_tiebreak_groups')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('group_origin', 'round_robin_first_place')
+          .eq('status', 'active')
+          .maybeSingle();
+        if (existing.error) throw new Error(existing.error.message);
+        if (!existing.data) {
+          const out = await computeAndCreateFirstPlaceTiebreakGroup(eventId, job.isBo2, job.participants);
+          if (out.kind === 'error') throw new Error(out.message);
+          // Sin disputa real (nadie elegible): no insistir en cada recarga.
+          if (out.kind === 'no_dispute') firstPlaceFailedAtRef.current = Date.now();
+        }
+        if (alive) await load();
+      } catch (e) {
+        firstPlaceFailedAtRef.current = Date.now();
+        if (__DEV__) console.warn('[Standings] desempate 1er puesto', e);
+      } finally {
+        creatingFirstPlaceRef.current = false;
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [firstPlaceTiebreakJob, eventId, load]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
@@ -1958,6 +2023,13 @@ export default function StandingsScreen({ route, navigation }: Props) {
       (needTop2
         ? ps.steps.some((s) => s.players.length > 0)
         : (ps.steps.find((s) => s.rank === 1)?.players.length ?? 0) > 0);
+    if (ps?.definingTiebreak) {
+      return (
+        <View style={styles.podiumSection}>
+          <Text style={styles.podiumDefining}>{PODIUM_DEFINING_TIEBREAK_TEXT}</Text>
+        </View>
+      );
+    }
     if (!ps || !filled) return null;
     return (
       <View style={styles.podiumSection}>
@@ -2644,6 +2716,7 @@ const createStyles = (c: ThemeColors) =>
     legendSegment: { color: c.textSecondary, fontSize: 12, marginBottom: 4, marginRight: 4 },
     legendFootnote: { marginTop: 8, color: c.textSecondary, fontSize: 12 },
     knockoutNotice: { marginTop: 16, color: c.textSecondary, fontSize: 14, textAlign: 'center' },
+    podiumDefining: { fontSize: 14, fontWeight: '600', color: c.textSecondary, textAlign: 'center', paddingVertical: 8 },
     podiumTitle: { fontSize: 15, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 6 },
     secondChanceWait: { marginTop: 8, paddingHorizontal: 8 },
     secondChanceListTitle: { marginTop: 18, marginBottom: 8, fontSize: 14, fontWeight: '700', color: c.text },

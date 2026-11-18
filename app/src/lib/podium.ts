@@ -34,7 +34,15 @@ export type PodiumState = {
   steps: PodiumStep[];
   spectators: PodiumPlayer[];
   isFinal: boolean;
+  /**
+   * Todos contra todos con empate por el 1er puesto ya detectado (final_pending) pero con el grupo de desempate todavía sin crear: no hay podio
+   * provisorio, se muestra "definiendo desempate". Ver computePodium.
+   */
+  definingTiebreak?: boolean;
 };
+
+/** Texto neutro del estado "definiendo desempate" del podio. */
+export const PODIUM_DEFINING_TIEBREAK_TEXT = 'Definiendo el desempate por el primer puesto…';
 
 export type PairingRemain = {
   participantAId: string;
@@ -1247,7 +1255,8 @@ export function computePodium(
   competitionFormat?: string | null,
   topSize?: number | null,
   matchFormat?: string | null,
-  eventStatus?: string | null
+  eventStatus?: string | null,
+  finalPending?: boolean | null
 ): PodiumState {
   // round_robin + top_size=4 (antes 'round_robin_bo1_top4', ver 0076): el único podio válido
   // sale del bracket (podiumBracketFinalMode). Sin bracket creado todavía, podio vacío — nunca
@@ -1276,6 +1285,26 @@ export function computePodium(
       steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
       spectators: [],
       isFinal: false,
+    };
+  }
+
+  // Todos contra todos (sin top N): compute_event_champion marca final_pending al completarse la última partida con 2 o más líderes empatados,
+  // pero el grupo de desempate lo crea el CLIENTE un instante después. En esa ventana no hay podio posible (el 1º lo define el desempate): sin
+  // esto caía en podiumSettledMode y mostraba a los empatados compartiendo el primer puesto. Solo con status playing, final_pending, sin campeón
+  // y sin grupo; cualquier otro caso (grupo en curso o resuelto, evento completed, sin empate) sigue como siempre.
+  if (
+    eventStatus === 'playing' &&
+    finalPending === true &&
+    competitionFormat === 'round_robin' &&
+    topSize == null &&
+    activeTiebreakGroup == null &&
+    (championUserId == null || String(championUserId).trim() === '')
+  ) {
+    return {
+      steps: [emptyStep(1), emptyStep(2), emptyStep(3)],
+      spectators: [],
+      isFinal: false,
+      definingTiebreak: true,
     };
   }
 
