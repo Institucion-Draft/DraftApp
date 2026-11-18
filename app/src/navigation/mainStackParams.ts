@@ -31,7 +31,8 @@ export type MainStackParamList = {
   GenerateInvite: { workspaceId: string };
   JoinByCode: undefined;
   CubesList: { workspaceId: string };
-  CubeAvailability: { workspaceId: string };
+  /** Sin eventId: modo global (cubes.is_enabled, solo organizador del workspace). Con eventId: modo evento (event_cube_overrides, quien gestiona el evento). */
+  CubeAvailability: { workspaceId: string; eventId?: string };
   CreateCube: { workspaceId: string };
   CubeDetail: { cubeId: string };
   EditCube: { cubeId: string };

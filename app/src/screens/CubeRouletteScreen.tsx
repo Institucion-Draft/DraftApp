@@ -26,7 +26,8 @@ import {
   type CubeWeightParams,
 } from '../lib/cubeRouletteWeights';
 import { cubeGridColumns, cubeJumpPath } from '../lib/cubeRouletteGrid';
-import { filterEnabledCubes, NO_ENABLED_CUBES_NOTICE } from '../lib/cubeEnabled';
+import { effectiveEligibleCubes, NO_ELIGIBLE_CUBES_NOTICE, type EventCubeOverride } from '../lib/cubeEnabled';
+import { canManageEventGate } from '../lib/eventPermissions';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'CubeRoulette'>;
 type RouletteType = 'cubes' | 'players';
@@ -46,7 +47,9 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const styles = useThemedStyles(createStyles);
   const { eventId } = route.params;
   const [loading, setLoading] = useState(true);
-  const [isOrganizer, setIsOrganizer] = useState(false);
+  // Puede tirar la ruleta y cambiar los cubos del evento: organizador del workspace o poseedor de la posta (can_manage_event en la RLS).
+  const [canManage, setCanManage] = useState(false);
+  const noCubesNotice = NO_ELIGIBLE_CUBES_NOTICE;
   const [cubes, setCubes] = useState<CubeRow[]>([]);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [rouletteType, setRouletteType] = useState<RouletteType>('cubes');
@@ -77,7 +80,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
 
   const load = useCallback(async () => {
     const [eventRes, meRes] = await Promise.all([
-      supabase.from('draft_events').select('workspace_id, scheduled_for').eq('id', eventId).maybeSingle(),
+      supabase.from('draft_events').select('workspace_id, scheduled_for, event_organizer_user_id').eq('id', eventId).maybeSingle(),
       supabase.auth.getUser(),
     ]);
     if (eventRes.error || !eventRes.data) {
@@ -89,7 +92,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     const currentUserId = meRes.data.user?.id ?? null;
     const eventScheduledFor = (eventRes.data as { scheduled_for?: string | null }).scheduled_for ?? null;
 
-    const [roleRes, cubesRes, playersRes, configRes, historyRes, lastSpinRes] = await Promise.all([
+    const [roleRes, cubesRes, playersRes, configRes, historyRes, lastSpinRes, exclRes] = await Promise.all([
       currentUserId
         ? supabase
             .from('workspace_members')
@@ -135,6 +138,8 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         .order('spun_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // Estado propio de los cubos en ESTE evento (0163). Lectura en vivo: se recarga al enfocar, así que al volver de "Habilitar/Deshabilitar cubos" ya se ve.
+      supabase.from('event_cube_overrides').select('cube_id, is_enabled').eq('event_id', eventId),
     ]);
 
     if (roleRes.error) {
@@ -148,7 +153,8 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       return;
     }
     // Solo entran los cubos habilitados (0160): ni las opciones, ni el N de las probabilidades, ni la elección manual incluyen a los otros.
-    const enabledCubes = filterEnabledCubes((cubesRes.data ?? []) as CubeRow[]);
+    // Elegibles: habilitados en el global Y no excluidos en este evento (0162). Una exclusión no legible (error) no frena la ruleta: la guardia del servidor igual la hace valer.
+    const enabledCubes = effectiveEligibleCubes((cubesRes.data ?? []) as CubeRow[], exclRes.error ? [] : ((exclRes.data ?? []) as EventCubeOverride[]));
     setCubes(enabledCubes);
     // Si la elección manual pendiente apuntaba a un cubo que acaba de deshabilitarse, se descarta.
     setSelectedCubeId((prev) => (prev && !enabledCubes.some((c) => c.id === prev) ? null : prev));
@@ -167,7 +173,14 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         return Number.isFinite(t) ? t : null;
       })
     );
-    setIsOrganizer(!roleRes.error && roleRes.data?.role === 'organizer');
+    const workspaceRole = roleRes.error ? null : ((roleRes.data as { role?: string } | null)?.role ?? null);
+    setCanManage(
+      canManageEventGate({
+        workspaceRole,
+        eventOrganizerUserId: (eventRes.data as { event_organizer_user_id?: string | null }).event_organizer_user_id ?? null,
+        userId: currentUserId,
+      })
+    );
 
     // Restaura la ruleta pendiente sólo en la primera carga de este montaje: los refetch posteriores (foco, nuevos
     // inscriptos) sólo refrescan las listas y nunca tocan el estado de la ruleta.
@@ -296,7 +309,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
   const spin = async () => {
     if (spinning || options.length === 0) return;
     if (rouletteType === 'cubes' && cubes.length === 0) {
-      Alert.alert('Sin cubos habilitados', NO_ENABLED_CUBES_NOTICE);
+      Alert.alert('Sin cubos elegibles', noCubesNotice);
       return;
     }
     setSpinning(true);
@@ -413,11 +426,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
     );
   }
 
-  if (!isOrganizer) {
+  if (!canManage) {
     return (
       <View style={styles.centered}>
         <Text style={styles.denied}>
-          Solo el organizador puede tirar la ruleta. El resultado se compartirá cuando termine.
+          Solo quien organiza el evento puede tirar la ruleta. El resultado se compartirá cuando termine.
         </Text>
       </View>
     );
@@ -497,7 +510,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
             ))
           )}
 
-          {rouletteType === 'cubes' && cubes.length === 0 ? <Text style={styles.noCubes}>{NO_ENABLED_CUBES_NOTICE}</Text> : null}
+          {rouletteType === 'cubes' && cubes.length === 0 ? <Text style={styles.noCubes}>{noCubesNotice}</Text> : null}
           <TouchableOpacity
             style={[styles.spinBtn, (spinning || (rouletteType === 'cubes' && cubes.length === 0)) && styles.spinDisabled]}
             onPress={() => void spin()}
@@ -511,7 +524,7 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
       {manualCubePickerForUserId && !resultCubeName ? (
         <View style={styles.manualBlock}>
           <Text style={styles.manualTitle}>Seleccionar cubo manualmente</Text>
-          {cubes.length === 0 ? <Text style={styles.noCubes}>{NO_ENABLED_CUBES_NOTICE}</Text> : null}
+          {cubes.length === 0 ? <Text style={styles.noCubes}>{noCubesNotice}</Text> : null}
           {cubes.map((c) => (
             <TouchableOpacity
               key={c.id}
@@ -537,11 +550,11 @@ export default function CubeRouletteScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       ) : null}
 
-      {!resultCubeName ? (
+      {!resultCubeName && canManage ? (
         <TouchableOpacity
           style={styles.availabilityLink}
           disabled={spinning || !workspaceId}
-          onPress={() => workspaceId && navigation.navigate('CubeAvailability', { workspaceId })}
+          onPress={() => workspaceId && navigation.navigate('CubeAvailability', { workspaceId, eventId })}
         >
           <Text style={styles.availabilityLinkTxt}>Habilitar/Deshabilitar cubos</Text>
         </TouchableOpacity>

@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import { normalizeCompetitionFormat } from '../lib/eventMode';
+import { canManageEventGate } from '../lib/eventPermissions';
 import { KNOCKOUT_BRACKET_ORIGIN, KNOCKOUT_SECOND_CHANCE_ORIGIN, bracketPhaseTickerName, isKnockoutCupOrigin, type BracketPhase } from '../lib/knockoutRounds';
 import type { MainStackParamList } from '../navigation/mainStackParams';
 import { hierarchicalHeaderBack } from '../navigation/hierarchicalBack';
@@ -994,7 +995,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
   const [blocked, setBlocked] = useState(false);
   /** Otro match in_progress del mismo jugador en otro pairing. */
   const [concurrentBlockMessage, setConcurrentBlockMessage] = useState<string | null>(null);
-  const [isOrganizer, setIsOrganizer] = useState(false);
+  const [canTakeControl, setCanTakeControl] = useState(false);
   const [turnTrackingEnabled, setTurnTrackingEnabled] = useState(false);
   const [whoStartedParticipantId, setWhoStartedParticipantId] = useState<string | null>(null);
   const [savingStarter, setSavingStarter] = useState(false);
@@ -1390,7 +1391,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     const [eventRes, participantsRes, colorsRes, lifeRes, winsRes, latestTgRes] = await Promise.all([
       supabase
         .from('draft_events')
-        .select('workspace_id, turn_tracking_enabled, event_type')
+        .select('workspace_id, turn_tracking_enabled, event_type, event_organizer_user_id')
         .eq('id', pairingRow.event_id)
         .maybeSingle(),
       supabase
@@ -1484,7 +1485,14 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
       }
     }
     const organizer = !roleRes.error && roleRes.data?.role === 'organizer';
-    setIsOrganizer(organizer);
+    // "Tomar control": organizador del workspace o poseedor de la posta (matches_update_authorized usa can_manage_event).
+    setCanTakeControl(
+      canManageEventGate({
+        workspaceRole: organizer ? 'organizer' : null,
+        eventOrganizerUserId: (eventRes.data as { event_organizer_user_id?: string | null } | null)?.event_organizer_user_id ?? null,
+        userId: uid,
+      })
+    );
 
     const blockMsg = formatConcurrentMatchBlockMessage({
       nameA: preNameA,
@@ -2479,7 +2487,7 @@ export default function LifeTrackerScreen({ route, navigation }: Props) {
     return (
       <View style={styles.centered}>
         <Text style={styles.blockedText}>Esta partida está siendo controlada desde otro celular.</Text>
-        {isOrganizer ? (
+        {canTakeControl ? (
           <TouchableOpacity
             style={styles.primaryBtn}
             onPress={() =>

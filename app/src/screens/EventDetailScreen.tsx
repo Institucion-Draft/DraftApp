@@ -48,6 +48,7 @@ import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
 import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
+import { showStandingsButton } from '../lib/eventPermissions';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -1422,9 +1423,17 @@ export default function EventDetailScreen({ route, navigation }: Props) {
   const zonesDrawn = isZonesEvent && !!event.zones_drawn_at;
   const showEnfrentamientosBtn = (!isZonesEvent || zonesDrawn) && playingOrDone && (myParticipantId != null || isWorkspaceMember);
   const showZonesCupsBtn = isZonesEvent && !!event.zones_phase_completed_at;
-  const showStandingsBtn =
-    (!isZonesEvent || zonesDrawn) &&
-    (isOrganizer || hasDeclaredColors || (playingOrDone && isWorkspaceMember && !myParticipantId));
+  const showStandingsBtn = showStandingsButton({
+    isKnockout: normalizeCompetitionFormat(event.competition_format) === 'knockout',
+    isZonesEvent,
+    zonesDrawn,
+    status: event.status,
+    isOrganizer,
+    canManageEvent,
+    isWorkspaceMember,
+    hasParticipantRow: myParticipantId != null,
+    hasDeclaredColors,
+  });
   const championParticipant = event.champion_user_id
     ? (participants.find((p) => p.user_id === event.champion_user_id) ??
        participants.find((p) => p.member_b_user_id === event.champion_user_id) ??

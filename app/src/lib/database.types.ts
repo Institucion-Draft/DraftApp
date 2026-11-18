@@ -73,6 +73,15 @@ export type Cube = {
   deleted_at: string | null;
 };
 
+/** Estado propio de un cubo en UN evento (0163): is_enabled true lo prende y false lo apaga, sea cual sea el global. Sin fila hereda cubes.is_enabled. */
+export type EventCubeOverride = {
+  event_id: string;
+  cube_id: string;
+  is_enabled: boolean;
+  created_by: string;
+  created_at: string;
+};
+
 export type Venue = {
   id: string;
   workspace_id: string;
