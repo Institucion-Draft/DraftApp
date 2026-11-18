@@ -23,6 +23,7 @@ import PlayerAvatar from '../components/PlayerAvatar';
 import AchievementMedal from '../components/AchievementMedal';
 import { fetchEventAchievementItems, markEventDiarySeen, type EventAchievementItem } from '../lib/achievements';
 import type { EventStatus } from '../lib/database.types';
+import { canManageEventGate } from '../lib/eventPermissions';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
 
@@ -98,7 +99,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
   const [scheduledFor, setScheduledFor] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(null);
-  const [isOrganizer, setIsOrganizer] = useState(false);
+  const [canManageEvent, setCanManageEvent] = useState(false);
   const [entries, setEntries] = useState<DiaryRow[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [achievementItems, setAchievementItems] = useState<EventAchievementItem[]>([]);
@@ -120,7 +121,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
 
     const evRes = await supabase
       .from('draft_events')
-      .select('name, workspace_id, status, scheduled_for')
+      .select('name, workspace_id, status, scheduled_for, event_organizer_user_id')
       .eq('id', eventId)
       .maybeSingle();
 
@@ -135,6 +136,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
       workspace_id: string;
       status: EventStatus;
       scheduled_for: string;
+      event_organizer_user_id: string | null;
     };
     setEventName(ev.name);
     setEventStatus(ev.status);
@@ -179,7 +181,14 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
     ]);
 
     const role = roleRes.data as { role: string } | null;
-    setIsOrganizer(role?.role === 'organizer');
+    // Borrar entradas ajenas: organizador del workspace o poseedor de la posta (diary_delete usa can_manage_event).
+    setCanManageEvent(
+      canManageEventGate({
+        workspaceRole: role?.role ?? null,
+        eventOrganizerUserId: ev.event_organizer_user_id ?? null,
+        userId: uid,
+      })
+    );
 
     const part = partRes.data as { id: string } | null;
     setMyParticipantId(part?.id ?? null);
@@ -357,7 +366,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
   };
 
   const confirmDelete = (row: DiaryRow) => {
-    const canDelete = row.user_id === myUserId || isOrganizer;
+    const canDelete = row.user_id === myUserId || canManageEvent;
     if (!canDelete) return;
     Alert.alert('Borrar entrada', '¿Seguro que querés borrar esta entrada?', [
       { text: 'Cancelar', style: 'cancel' },
@@ -381,7 +390,7 @@ export default function EventDiaryScreen({ navigation, route }: Props) {
     const author = u?.display_name?.trim() || u?.username || 'Jugador';
     const isMine = row.user_id === myUserId;
     const showEdit = isMine;
-    const showDelete = isMine || isOrganizer;
+    const showDelete = isMine || canManageEvent;
 
     const typeIcon =
       row.entry_type === 'bug' ? '🐛' : row.entry_type === 'suggestion' ? '💡' : null;
