@@ -47,7 +47,8 @@ import { computeAndCreateFirstPlaceTiebreakGroup } from '../lib/roundRobinFirstP
 import { computeAndCreateTop4Bracket } from '../lib/roundRobinTop4Bracket';
 import { computeAndCreateSwissTop4Bracket } from '../lib/swissTop4Bracket';
 import { computePickTimeline, DEFAULT_TIMER_PARAMS } from '../lib/draftTimer';
-import { hasTimerSession, clearTimerSession } from '../lib/draftTimerStore';
+import { clearTimerSession } from '../lib/draftTimerStore';
+import { shouldShowTimerButton } from '../lib/draftTimerSession';
 import { showStandingsButton } from '../lib/eventPermissions';
 import { useTheme, useThemedStyles } from '../theme';
 import type { ThemeColors } from '../theme';
@@ -1782,6 +1783,18 @@ export default function EventDetailScreen({ route, navigation }: Props) {
 
       {canManageEvent && event.status !== 'cancelled' ? (
         <View style={styles.block}>
+              {shouldShowTimerButton({
+                canManageEvent,
+                isTimedDraft: event.is_timed_draft,
+                draftStartedAt: event.draft_started_at,
+                draftEndedAt: event.draft_ended_at,
+                status: event.status,
+              }) ? (
+                // Siempre que el draft cronometrado esté en curso, sin depender de que haya una sesión guardada en este celular.
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('DraftTimer', { eventId: event.id })}>
+                  <Text style={styles.primaryBtnTxt}>⏱ Rondas cronometradas</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate('EditEvent', { eventId: event.id })}>
                 <Text style={styles.primaryBtnTxt}>Editar evento</Text>
               </TouchableOpacity>
@@ -1893,14 +1906,6 @@ export default function EventDetailScreen({ route, navigation }: Props) {
                 <Text style={styles.disabledHint}>
                   {startDraftDisabledHint}
                 </Text>
-              ) : null}
-              {event.is_timed_draft && event.draft_started_at && !event.draft_ended_at && hasTimerSession(event.id) ? (
-                <TouchableOpacity
-                  style={styles.secondaryBtn}
-                  onPress={() => navigation.navigate('DraftTimer', { eventId: event.id })}
-                >
-                  <Text style={styles.secondaryBtnTxt}>Continuar cronómetro</Text>
-                </TouchableOpacity>
               ) : null}
               {event.draft_started_at && !event.draft_ended_at ? (
                 <TouchableOpacity

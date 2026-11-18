@@ -1,4 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { TimerParams } from './draftTimer';
+import { parseTimerSession, serializeTimerSession, type TimerSession } from './draftTimerSession';
 
 let _pending: TimerParams | null = null;
 
@@ -12,30 +14,40 @@ export function getAndClearPendingTimerParams(): TimerParams | null {
   return p;
 }
 
-// --------------- timer session state (persists while app is in memory) ---------------
+// --------------- sesión del cronómetro: memoria + AsyncStorage ---------------
+// La memoria sirve mientras vive el JS; AsyncStorage sobrevive a matar la app. La lógica de qué se guarda y cómo se restaura es pura y está
+// en draftTimerSession.ts. Toda escritura a AsyncStorage es "fire and forget" y nunca lanza: si falla, queda la memoria.
 
-export type TimerSessionState = {
-  pickIdx: number;
-  secondsLeft: number;
-  /** 'counting' = was actively running; 'waiting' = was paused or idle */
-  phase: 'waiting' | 'counting';
-  savedAt: number; // Date.now() ms
-};
+export type { TimerSession } from './draftTimerSession';
 
-const _timerSessions: Record<string, TimerSessionState> = {};
+const _timerSessions: Record<string, TimerSession> = {};
+const storageKey = (eventId: string) => `draft_timer_session_v1:${eventId}`;
 
-export function saveTimerSession(eventId: string, state: TimerSessionState): void {
-  _timerSessions[eventId] = state;
+export function saveTimerSession(eventId: string, session: TimerSession): void {
+  _timerSessions[eventId] = session;
+  void AsyncStorage.setItem(storageKey(eventId), serializeTimerSession(session)).catch(() => undefined);
 }
 
-export function getTimerSession(eventId: string): TimerSessionState | null {
+/** Solo memoria (síncrono). */
+export function getTimerSession(eventId: string): TimerSession | null {
   return _timerSessions[eventId] ?? null;
 }
 
-export function clearTimerSession(eventId: string): void {
-  delete _timerSessions[eventId];
+/** Memoria primero; si no hay, AsyncStorage (tras matar la app o reinstalar el JS). Una sesión ilegible cuenta como inexistente. */
+export async function loadTimerSession(eventId: string): Promise<TimerSession | null> {
+  const mem = _timerSessions[eventId];
+  if (mem) return mem;
+  try {
+    const stored = parseTimerSession(await AsyncStorage.getItem(storageKey(eventId)));
+    if (stored) _timerSessions[eventId] = stored;
+    return stored;
+  } catch {
+    return null;
+  }
 }
 
-export function hasTimerSession(eventId: string): boolean {
-  return eventId in _timerSessions;
+/** Borra la sesión de memoria y de AsyncStorage. */
+export function clearTimerSession(eventId: string): void {
+  delete _timerSessions[eventId];
+  void AsyncStorage.removeItem(storageKey(eventId)).catch(() => undefined);
 }
